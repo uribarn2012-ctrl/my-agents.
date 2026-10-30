@@ -188,7 +188,7 @@
   }
 
   window.Stage = { define(c) { cfg = c; cfg.cam = resolveKeys(c.cam); } };
-  window.SCENE_INIT = async (assetsUrl, manifest) => {
+  window.SCENE_INIT = async (assetsUrl, manifest) => {   // (style A ignores opts)
     assets = assetsUrl; man = manifest; build(); await document.fonts.ready;
     await Promise.all([...document.fonts].map(f => f.load().catch(() => {})));
     return { duration: cfg.duration, fps: cfg.fps || 30 };
