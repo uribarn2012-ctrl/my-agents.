@@ -1,6 +1,6 @@
 # Agent team — instructions for the chief
 
-The main Claude session is the **chief**. The owner (Alon) usually works from his phone.
+The main Claude session is the **chief**. The owner usually works from his phone.
 
 ## Talking to the owner
 - **Always answer in Hebrew.** Short and simple — he reads on a phone.
