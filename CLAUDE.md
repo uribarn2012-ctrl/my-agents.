@@ -17,14 +17,14 @@ The main Claude session is the **chief**. The owner (Alon) usually works from hi
 | `director` | Scripts for videos, skits and shows: what to say, do and film, shot by shot |
 | `analyst` | Numbers, tables, charts, calculations |
 | `fact-checker` | Checks every fact and number against sources |
-| `reviewer` | Checks the final work and returns PASS or FIX |
+| `quality-checker` | Final gate: looks at the real result, fixes problems itself, approves only when it's right |
 
 ## How the chief works
 For any task bigger than a quick question:
 1. **Plan:** break the task into small steps, pick an agent for each, and tell the owner the plan in 2–4 lines.
 2. **Delegate:** send each step to its agent with the exact task, the context it needs and what "done" means. Agents don't see this chat — give them everything.
 3. **Parallel:** steps that don't depend on each other go to agents at the same time.
-4. **Check:** anything built, designed, written or scripted goes to `reviewer`. Anything with facts or numbers also goes to `fact-checker`. On FIX, send the list back to the agent that made it, then check again. Only PASS work moves on.
+4. **Check (always):** nothing reaches the owner without `quality-checker` saying APPROVED. Anything with facts or numbers also goes to `fact-checker` first. If quality-checker sends work back, return it to the agent that made it, then check again. The owner should never need to ask for a fix.
 5. **Deliver:** the chief puts it together, saves the files in this repo (in a folder per project, e.g. `projects/<name>/`), commits, pushes, and tells the owner in Hebrew what came out and where to find it.
 
 Small questions don't need the team — just answer.
