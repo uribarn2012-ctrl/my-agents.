@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="he"><head><meta charset="utf-8"><title>LEVEL UP 01 workouts</title>
+<link rel="stylesheet" href="../../fonts/fonts.css">
+<link rel="stylesheet" href="../../lib/stage.css">
+<script src="../../lib/stage.js"></script>
+</head><body>
+<script>
+// Video 1 — "המאמן שבנה לך אימון" (30 s). Times follow the shot table in scripts.md.
+// Screens come from capture.js (stills = name, moving shots = clip + the time it starts).
+const lime = s => `<span class="lime">${s}</span>`;
+const words = (...ws) => ws.map(w => `<span class="w">${w}</span>`).join(' ');
+Stage.define({
+  duration: 30, fps: 30,
+  statusTimeRight: true,                     // iOS in Hebrew mirrors the status bar
+  flashes: [[1.934, 2.0], [14.434, 14.5]],   // "lime flash": two frames on the beat
+  sting: [2.0, 3.0],
+  endcard: { t0: 27.3, link: 'לינק בביו', sub: '<bdi>iPhone</bdi> · <bdi>Apple Watch</bdi> · 9 שפות' },
+  note: { t0: 24.4, t1: 27.0, text: 'נתונים לדוגמה' },
+
+  screens: [
+    { t0: 0, t1: 2, front: { still: 'b_full' } },
+    { t0: 3, t1: 4.3, front: { still: 'train', sb: 'dark' } },
+    { t0: 4.3, t1: 5.5, front: { still: 'train_pressed', sb: 'dark' } },
+    { t0: 5.5, t1: 6.6, front: { still: 'b_none' }, back: { still: 'eq_gym' } },
+    { t0: 6.6, t1: 7.6, front: { still: 'b_quads' }, back: { still: 'eq_gym' } },
+    { t0: 7.6, t1: 10.0, front: { still: 'b_glutes' }, back: { still: 'eq_gym' } },
+    { t0: 10.0, t1: 10.9, back: { still: 'eq_home' } },
+    { t0: 10.9, t1: 12.0, back: { still: 'eq_db' } },
+    { t0: 12.0, t1: 14.5, front: { clip: 'loading', start: 12.0 } },
+    { t0: 14.5, t1: 18.0, front: { clip: 'list', start: 14.5, sb: 'dark' } },
+    { t0: 18.0, t1: 21.5, front: { clip: 'ex_fig', start: 18.0, sb: 'dark' } },
+    { t0: 21.5, t1: 27.4, front: { clip: 'ex_mus', start: 21.5, sb: 'dark' }, back: { clip: 'guide', start: 24.2 } },
+  ],
+
+  taps: [
+    { t: 4.3, at: 'card' },
+    { t: 6.6, at: 'quads' }, { t: 7.6, at: 'glutes' },
+    { t: 10.0, at: 'home', side: 'back' }, { t: 10.9, at: 'dumbbells', side: 'back' },
+    { t: 24.75, at: 'kg', side: 'back' }, { t: 26.07, at: 'done', side: 'back' },
+  ],
+
+  // Camera keys. (u,v) = point on the 390x844 demo screen that sits at frame (fx,fy).
+  // ease: 'cut' jumps; [damping, response] is a spring; 'io' a slow sine ease.
+  cam: [
+    // 0:00 hook — the phone drops in from above, stops facing us and floats
+    { t: 0, u: 195, v: 422, fx: 540, fy: -1000, s: 1, rx: 24, ry: -6, rz: -5, hover: 0 },
+    { t: 0.9, fy: 1150, rx: 0, ry: 0, rz: 0, ease: [0.78, 0.55] },
+    { t: 1.4, hover: 1, ease: 'io' },
+    { t: 2.0, ease: 'io' },
+    { t: 2.0, show: 0, ease: 'cut' },                                   // logo sting
+    // 0:03 tilt 20° left, slow turn right
+    { t: 3.0, show: 1, u: 260, v: 422, fx: 560, fy: 1150, s: 1.0, rx: 3, ry: -20, rz: 0, hover: .6, ease: 'cut' },
+    { t: 5.5, s: 1.07, ry: -7, ease: 'io' },
+    // 0:05.5 front, slow push-in on the body map
+    { t: 5.5, u: 195, v: 420, fx: 540, fy: 1180, s: 0.98, rx: 0, ry: 0, hover: .3, ease: 'cut' },
+    { t: 8.5, s: 1.16, ease: 'io' },
+    // 0:08.5 device spin -> other side shows the equipment screen, ends tilted 20°
+    { t: 9.25, u: 195, v: 400, fy: 1160, s: 1.0, ry: 160, hover: .8, ease: [0.8, 0.45] },
+    { t: 12.0, ry: 164, ease: 'io' },
+    // 0:12 macro on "בונה לך אימון…", camera drifts left
+    { t: 12.0, u: 195, v: 521, fx: 500, fy: 1270, s: 1.62, rx: 0, ry: -3, rz: 0, hover: 0, ease: 'cut' },
+    { t: 14.5, fx: 590, ease: 'lin' },
+    // 0:14.5 pull out, phone lies back 30° and turns slowly
+    { t: 14.5, u: 195, v: 422, fx: 540, fy: 1130, s: 1.35, rx: 0, ry: 0, rz: 0, ease: 'cut' },
+    { t: 15.4, s: 0.98, rx: 30, rz: -7, ease: [1, 0.7] },
+    { t: 17.55, rz: 3, ease: 'io' },
+    // 0:17.55 zoom into the first exercise
+    { t: 18.0, u: 222, v: 470, fy: 1080, s: 3.6, rx: 0, rz: 0, ease: 'in' },
+    // 0:18 macro on the animated figure, almost frozen
+    { t: 18.0, u: 195, v: 235, fx: 540, fy: 1080, s: 1.62, rx: 0, ry: 0, rz: 0, ease: 'cut' },
+    { t: 21.5, s: 1.68, ease: 'lin' },
+    // 0:21.5 front, push-in to the muscle map
+    { t: 21.5, u: 195, v: 510, fx: 540, fy: 1270, s: 1.0, ease: 'cut' },
+    { t: 23.6, s: 1.18, ease: 'io' },
+    // 0:23.6 device spin -> guided workout, tilted 20° left, push-in to the kg field
+    { t: 24.35, u: 150, v: 660, fx: 540, fy: 1090, s: 1.15, ry: 200, hover: .3, ease: [0.8, 0.45] },
+    { t: 26.55, s: 1.42, ry: 197, ease: 'io' },
+    // 0:26.55 pull out into the dark
+    { t: 27.35, s: 0.5, fy: 1000, ry: 186, dim: 1, z: -400, ease: 'in' },
+    { t: 27.35, show: 0, ease: 'cut' },
+  ],
+
+  titles: [
+    { t0: 0.12, t1: 1.934, parts: [{ anim: 'land', html: `<span class="ln">אין לך ${lime('תוכנית?')}</span>` }] },
+    { t0: 3.08, t1: 5.5, anim: 'words', gap: .42, parts: [{ html: `<span class="ln">${words('אימון.', lime('בשבילך.'))}</span>` }] },
+    { t0: 5.6, t1: 8.6, parts: [{ anim: 'slide', html: `<span class="ln m"><i class="step">1</i>על מה עובדים<br>היום?</span>` }] },
+    { t0: 9.15, t1: 12.0, parts: [{ anim: 'slide', html: `<span class="ln m"><i class="step">2</i>איזה ציוד<br>יש לך?</span>` }] },
+    { t0: 12.1, t1: 14.434, parts: [{ anim: 'land', html: `<span class="ln"><i class="step">3</i>ה-AI ${lime('בונה.')}</span>` }] },
+    { t0: 14.62, t1: 17.6, parts: [{ anim: 'slide', html: `<span class="ln m"><i class="step">4</i>תרגילים לפי<br>הציוד שלך</span>` }] },
+    { t0: 18.08, t1: 21.5, parts: [
+      { anim: 'slide', html: `<span class="ln"><span class="count" data-to="107" data-dur="0.85">0</span> תרגילים</span>` },
+      { anim: 'slide', d: 1.15, html: `<span class="ln s grey">עם דמות שמדגימה</span>` }] },
+    { t0: 21.6, t1: 23.6, anim: 'words', gap: .26, parts: [{ html: `<span class="ln m">${words('רואים', 'איזה')}<br>${words('שריר', lime('עובד'))}</span>` }] },
+    { t0: 24.4, t1: 27.0, parts: [{ anim: 'land', html: `<span class="ln m"><i class="step">5</i>רושמים ${lime('ק״ג')}<br>לכל סט</span>` }] },
+  ],
+});
+</script>
+</body></html>
