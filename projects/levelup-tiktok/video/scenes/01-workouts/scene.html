@@ -15,7 +15,8 @@ Stage.define({
   flashes: [[1.934, 2.0], [14.434, 14.5]],   // "lime flash": two frames on the beat
   sting: [2.0, 3.0],
   endcard: { t0: 27.3, link: 'לינק בביו', sub: '<bdi>iPhone</bdi> · <bdi>Apple Watch</bdi> · 9 שפות' },
-  note: { t0: 24.4, t1: 27.0, text: 'נתונים לדוגמה' },
+  // the Workouts tab (0:03) shows sample PRs and kg too, so it gets the note as well (between title and phone)
+  note: [{ t0: 3.2, t1: 5.5, text: 'נתונים לדוגמה', top: 456 }, { t0: 24.4, t1: 27.0, text: 'נתונים לדוגמה', top: 1486 }],
 
   screens: [
     { t0: 0, t1: 2, front: { still: 'b_full' } },
@@ -73,15 +74,16 @@ Stage.define({
     { t: 21.5, u: 195, v: 510, fx: 540, fy: 1270, s: 1.0, ease: 'cut' },
     { t: 23.6, s: 1.18, ease: 'io' },
     // 0:23.6 device spin -> guided workout, tilted 20° left, push-in to the kg field
-    { t: 24.35, u: 150, v: 660, fx: 540, fy: 1090, s: 1.15, ry: 200, hover: .3, ease: [0.8, 0.45] },
-    { t: 26.55, s: 1.42, ry: 197, ease: 'io' },
+    // (kept low enough that the headline sits above the exercise card, not on it)
+    { t: 24.35, u: 150, v: 660, fx: 540, fy: 1150, s: 1.0, ry: 200, hover: .3, ease: [0.8, 0.45] },
+    { t: 26.55, s: 1.18, ry: 197, ease: 'io' },
     // 0:26.55 pull out into the dark
     { t: 27.35, s: 0.5, fy: 1000, ry: 186, dim: 1, z: -400, ease: 'in' },
     { t: 27.35, show: 0, ease: 'cut' },
   ],
 
   titles: [
-    { t0: 0.12, t1: 1.934, parts: [{ anim: 'land', html: `<span class="ln">אין לך ${lime('תוכנית?')}</span>` }] },
+    { t0: -0.07, t1: 1.934, parts: [{ anim: 'land', html: `<span class="ln">אין לך ${lime('תוכנית?')}</span>` }] },
     { t0: 3.08, t1: 5.5, anim: 'words', gap: .42, parts: [{ html: `<span class="ln">${words('אימון.', lime('בשבילך.'))}</span>` }] },
     { t0: 5.6, t1: 8.6, parts: [{ anim: 'slide', html: `<span class="ln m"><i class="step">1</i>על מה עובדים<br>היום?</span>` }] },
     { t0: 9.15, t1: 12.0, parts: [{ anim: 'slide', html: `<span class="ln m"><i class="step">2</i>איזה ציוד<br>יש לך?</span>` }] },

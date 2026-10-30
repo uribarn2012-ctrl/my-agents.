@@ -23,7 +23,11 @@ const ease = p => (p <= 0 ? 0 : p >= 1 ? 1 : p < .5 ? 4 * p * p * p : 1 - Math.p
 
   // Shot 0:03 — "ה-AI בונה בשבילך" card on the Workouts tab, then pressed.
   const card = page.locator('[data-act="builder"]:visible').first();
-  await card.evaluate(el => el.scrollIntoView({ block: 'center' })); await wait(400);
+  await card.evaluate(el => el.scrollIntoView({ block: 'center' })); await wait(200);
+  // nudge so the drawn status bar (9:41) sits in the gap between two cards, not on the "מתוכנן" header
+  await page.evaluate(() => { const h = [...document.querySelectorAll('h1,h2,h3,.sec,div')].find(e => e.children.length < 4 && /^\s*\/?\s*מתוכנן/.test(e.innerText || '') && e.getBoundingClientRect().height < 80);
+    if (!h) return; const y = h.getBoundingClientRect().top; let s = h.parentElement; while (s && s.scrollHeight <= s.clientHeight + 1) s = s.parentElement;
+    (s || document.scrollingElement).scrollTop -= Math.max(0, 44 - y); }); await wait(300);
   await S('train'); M.taps.card = await center('[data-act="builder"]:visible');
   await card.evaluate(el => { el.style.transform = 'scale(.96)'; el.style.boxShadow = '0 0 0 3px #4AE36B, 0 0 28px rgba(74,227,107,.55)'; el.style.background = 'rgba(74,227,107,.18)'; });
   await wait(150); await S('train_pressed');

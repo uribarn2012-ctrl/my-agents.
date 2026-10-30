@@ -73,7 +73,8 @@
       faces[side] = { img: f.querySelector('img.shot'), sb: f.querySelector('.sb'), taps: f.querySelector('.taps'), glare: f.querySelector('.glare'), src: '' };
     });
     if (cfg.endcard) { els.end.querySelector('.link').textContent = cfg.endcard.link; els.end.querySelector('.sub').innerHTML = cfg.endcard.sub; }
-    if (cfg.note) els.note.querySelector('span').textContent = cfg.note.text;
+    // note: one {t0,t1,text,top?} or a list of them (each range can sit at its own height)
+    if (cfg.note) { cfg.notes = [].concat(cfg.note); els.note.querySelector('span').textContent = cfg.notes[0].text; }
     if (cfg.statusTimeRight) document.querySelectorAll('.sb').forEach(s => s.style.flexDirection = 'row-reverse');
     // titles
     const root = document.querySelector('#titles');
@@ -180,8 +181,9 @@
       if (a < 0) { tp.el.style.opacity = .9 * (1 + a / .12); tp.el.style.transform = 'scale(.55)'; return; }
       tp.el.style.opacity = .9 * (1 - a / .5); tp.el.style.transform = `scale(${.55 + .95 * E.out(a / .5)})`; });
     renderTitles(t); renderSting(t); renderEnd(t);
-    const n = cfg.note, non = n && t >= n.t0 && t < n.t1; els.note.style.display = non ? 'block' : 'none';
-    if (non) els.note.style.opacity = clamp((t - n.t0) / .25) * clamp((n.t1 - t) / .1);
+    const n = (cfg.notes || []).find(x => t >= x.t0 && t < x.t1); els.note.style.display = n ? 'block' : 'none';
+    if (n) { els.note.querySelector('span').textContent = n.text; els.note.style.top = (n.top || 1468) + 'px';
+      els.note.style.opacity = clamp((t - n.t0) / .25) * clamp((n.t1 - t) / .1); }
     els.flash.style.opacity = (cfg.flashes || []).some(([a, b]) => t >= a && t < b) ? 1 : 0;
   }
 

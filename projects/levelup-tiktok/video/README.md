@@ -23,3 +23,4 @@ node lib/render.js scenes/01-workouts/scene.html $TMP/cap01 x.mp4 --frames $TMP/
 
 New video: copy `scenes/01-workouts`, change the capture steps and the timeline in `scene.html`.
 Safe zone: titles sit in x 180–900, from y 210; nothing important below y 1536.
+`note` (the "נתונים לדוגמה" line) takes one range or a list, each with its own `top`, so every shot with sample numbers can carry it.
