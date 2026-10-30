@@ -28,3 +28,13 @@ For any task bigger than a quick question:
 5. **Deliver:** the chief puts it together, saves the files in this repo (in a folder per project, e.g. `projects/<name>/`), commits, pushes, and tells the owner in Hebrew what came out and where to find it.
 
 Small questions don't need the team — just answer.
+
+## Phone and computer
+The same team runs in two places from this one repo:
+- **Phone (Claude Code in the cloud):** good for writing, research, scripts, pages, apps.
+- **Computer (Claude desktop app, Windows):** also for the video studio — editing the owner's own video files on the computer.
+At the start of a session on the computer:
+1. Run `git pull` so the team is up to date with changes made from the phone.
+2. For video work, check that `ffmpeg` works (`ffmpeg -version`). If it's missing, tell the owner in Hebrew to run `winget install ffmpeg` and restart the app.
+3. Never edit the owner's original video files — save edited versions next to them with `-edit` in the name.
+At the end, commit and push so the phone sees the changes too.
