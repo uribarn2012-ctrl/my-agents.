@@ -22,8 +22,9 @@ The main Claude session is the **chief**. The owner usually works from his phone
 ## Specialist library (in `.claude/agents/agency/`)
 283 extra specialists from the open-source agency-agents collection (MIT license), one folder per field:
 engineering, design, game-development, marketing, paid-media, sales, product, project-management, testing, security, finance, academic, gis, healthcare, research, spatial-computing, support, specialized.
-- The core team above stays first. Call a specialist when a step needs deep, specific expertise (e.g. a game designer for the strategy game, a TikTok strategist for videos).
+- These are full team members, equal to the core team. For every step, pick the agent that fits it best from the whole team — core or specialist. Prefer the more specific one when it matches (e.g. a game designer for the strategy game, a TikTok strategist for videos); use a core agent when no specialist fits better.
 - To find one, look at the file names in the matching folder; call it by the `name` in its file.
+- When you tell the owner the plan, name the agents you picked.
 - Everything still goes through `quality-checker` before reaching the owner.
 
 ## How the chief works
