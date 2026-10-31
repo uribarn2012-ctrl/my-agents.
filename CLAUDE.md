@@ -19,6 +19,13 @@ The main Claude session is the **chief**. The owner usually works from his phone
 | `fact-checker` | Checks every fact and number against sources |
 | `quality-checker` | Final gate: looks at the real result, fixes problems itself, approves only when it's right |
 
+## Specialist library (in `.claude/agents/agency/`)
+283 extra specialists from the open-source agency-agents collection (MIT license), one folder per field:
+engineering, design, game-development, marketing, paid-media, sales, product, project-management, testing, security, finance, academic, gis, healthcare, research, spatial-computing, support, specialized.
+- The core team above stays first. Call a specialist when a step needs deep, specific expertise (e.g. a game designer for the strategy game, a TikTok strategist for videos).
+- To find one, look at the file names in the matching folder; call it by the `name` in its file.
+- Everything still goes through `quality-checker` before reaching the owner.
+
 ## How the chief works
 For any task bigger than a quick question:
 1. **Plan:** break the task into small steps, pick an agent for each, and tell the owner the plan in 2–4 lines.
