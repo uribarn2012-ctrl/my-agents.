@@ -1,0 +1,1226 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Level Up</title>
+<meta name="description" content="Level Up — אפליקציה שהופכת הרגלים טובים למשחק: משימות יומיות, XP, רמות ורצפים. כל יום. רמה אחת למעלה.">
+<meta name="theme-color" content="#0b1f16">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@300;400;500;700;900&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script>
+  // Hide only the hero for a moment while the intro is prepared. Removed by init, or after 3s no matter what.
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!reduce) {
+      document.documentElement.classList.add('pending');
+      setTimeout(function () { document.documentElement.classList.remove('pending'); }, 3000);
+    }
+  })();
+</script>
+<style>
+  :root {
+    --forest: #0b1f16;
+    --forest-2: #0e281c;
+    --emerald-dark: #123a2a;
+    --emerald: #1f6b4a;
+    --emerald-2: #2a8a60;
+    --sage: #8fb59a;
+    --mint: #c8f0d4;
+    --cream: #f3efe4;
+    --cream-2: #e8e2d1;
+    --gold: #d9b86a;
+    --ink: #0b1f16;
+    --muted-on-dark: #a9c7b2;
+    --muted-on-light: #3c5a49;
+
+    --serif: "Frank Ruhl Libre", "Times New Roman", serif;
+    --sans: "Heebo", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+
+    --gutter: clamp(16px, 5vw, 64px);
+    --maxw: 1240px;
+    --radius: 28px;
+    --header-h: 64px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; overflow-x: clip; }
+  html.lenis, html.lenis body { height: auto; }
+  .lenis.lenis-smooth { scroll-behavior: auto !important; }
+  .lenis.lenis-stopped { overflow: hidden; }
+  body {
+    margin: 0;
+    background: var(--forest);
+    background-color: #0b1f16;
+    color: var(--cream);
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.7;
+    overflow-x: clip;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  img, svg { display: block; max-width: 100%; }
+  a { color: inherit; }
+  h1, h2, h3, h4 { font-family: var(--serif); font-weight: 400; margin: 0; line-height: 1.08; letter-spacing: -0.01em; }
+  p { margin: 0; }
+  .container { width: 100%; max-width: var(--maxw); margin-inline: auto; padding-inline: var(--gutter); }
+  .ltr { direction: ltr; unicode-bidi: isolate; display: inline-block; }
+  .sr-only { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .skip { position: fixed; top: -100px; right: 16px; z-index: 200; background: var(--mint); color: var(--ink); padding: 10px 16px; border-radius: 12px; font-weight: 600; }
+  .skip:focus { top: 12px; }
+  :focus-visible { outline: 2px solid var(--mint); outline-offset: 3px; border-radius: 6px; }
+
+  /* Eyebrow label */
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 12px;
+    font-family: var(--sans); font-size: 13px; font-weight: 500; letter-spacing: .05em;
+    color: var(--sage); text-transform: uppercase;
+  }
+  .eyebrow::before { content: ""; width: 28px; height: 1px; background: currentColor; opacity: .7; }
+  .on-light .eyebrow { color: var(--emerald); }
+
+  /* Split text masks (only applied by JS) */
+  .w { display: inline-block; overflow: hidden; vertical-align: top; padding-bottom: .14em; margin-bottom: -.14em; padding-inline: .02em; margin-inline: -.02em; }
+  .wi { display: inline-block; will-change: transform; }
+
+  /* Grain overlay */
+  .grain {
+    position: fixed; inset: -50%; z-index: 90; pointer-events: none; opacity: .09; mix-blend-mode: soft-light;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 1.2 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+
+  /* ---------- Header with live XP bar ---------- */
+  .site-header {
+    position: fixed; inset: 0 0 auto 0; z-index: 80; height: var(--header-h);
+    display: flex; align-items: center;
+    background: linear-gradient(180deg, rgba(11,31,22,.78), rgba(11,31,22,0));
+    -webkit-backdrop-filter: blur(0px); backdrop-filter: blur(0px);
+  }
+  .site-header .container { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .logo { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-family: var(--serif); font-size: 22px; font-weight: 500; direction: ltr; color: var(--cream); }
+  .logo-mark { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: linear-gradient(140deg, var(--mint), var(--sage)); color: var(--ink); }
+  .logo-mark svg { width: 16px; height: 16px; }
+  .xp-hud { display: flex; align-items: center; gap: 12px; flex: 1; max-width: 340px; margin-inline: auto; }
+  .xp-hud .lvl { font-size: 12px; font-weight: 600; letter-spacing: .06em; color: var(--mint); white-space: nowrap; min-width: 52px; }
+  .xp-hud .lvl.bump { animation: bump .6s ease; }
+  @keyframes bump { 0% { transform: scale(1); } 40% { transform: scale(1.25); color: var(--gold); } 100% { transform: scale(1); } }
+  .xp-track { position: relative; flex: 1; height: 6px; border-radius: 99px; background: rgba(200,240,212,.14); overflow: hidden; }
+  .xp-fill { position: absolute; inset: 0; transform-origin: right center; transform: scaleX(0); border-radius: inherit; background: linear-gradient(270deg, var(--sage), var(--mint)); box-shadow: 0 0 12px rgba(200,240,212,.6); }
+  .xp-hud .xp-num { font-size: 12px; color: var(--muted-on-dark); white-space: nowrap; font-variant-numeric: tabular-nums; direction: ltr; min-width: 64px; text-align: left; }
+  .header-cta {
+    text-decoration: none; font-size: 14px; font-weight: 600; padding: 9px 16px; border-radius: 99px;
+    background: var(--cream); color: var(--ink); white-space: nowrap; transition: background .3s, transform .3s;
+  }
+  .site-header { transition: background .4s; }
+  .site-header.light { background: linear-gradient(180deg, rgba(243,239,228,.92), rgba(243,239,228,0)); }
+  .site-header.light .logo { color: var(--ink); }
+  .site-header.light .logo-mark { background: linear-gradient(140deg, var(--emerald), var(--emerald-dark)); color: var(--cream); }
+  .site-header.light .xp-hud .lvl { color: var(--emerald); }
+  .site-header.light .xp-hud .xp-num { color: var(--muted-on-light); }
+  .site-header.light .xp-track { background: rgba(31,107,74,.16); }
+  .site-header.light .xp-fill { background: linear-gradient(270deg, var(--emerald-2), var(--emerald)); box-shadow: none; }
+  .site-header.light .header-cta { background: var(--ink); color: var(--cream); }
+  .header-cta:hover { background: var(--mint); transform: translateY(-1px); }
+  @media (max-width: 640px) {
+    .xp-hud .xp-num { display: none; }
+    .xp-hud { max-width: none; margin-inline: 14px; }
+    .header-cta { padding: 8px 13px; font-size: 13px; }
+    .logo { font-size: 19px; }
+    .logo-mark { width: 26px; height: 26px; }
+  }
+
+  /* ---------- Buttons ---------- */
+  .stores { display: flex; flex-wrap: wrap; gap: 12px; }
+  .btn-store {
+    display: inline-flex; align-items: center; gap: 12px; text-decoration: none;
+    padding: 12px 20px 12px 22px; border-radius: 16px; min-height: 56px;
+    background: var(--cream); color: var(--ink);
+    transition: transform .35s cubic-bezier(.2,.7,.2,1), background .3s, box-shadow .3s;
+    box-shadow: 0 10px 30px -12px rgba(200,240,212,.45);
+  }
+  .btn-store.alt { background: rgba(243,239,228,.06); color: var(--cream); box-shadow: inset 0 0 0 1px rgba(243,239,228,.35); }
+  .btn-store:hover { transform: translateY(-2px); background: var(--mint); color: var(--ink); }
+  .btn-store svg { width: 24px; height: 24px; flex: none; }
+  .btn-store span { display: flex; flex-direction: column; line-height: 1.15; }
+  .btn-store small { font-size: 11px; opacity: .75; }
+  .btn-store b { font-size: 16px; font-weight: 600; direction: ltr; text-align: right; }
+
+  /* ---------- Shared visuals ---------- */
+  .orb { position: absolute; border-radius: 50%; filter: blur(40px); pointer-events: none; }
+  .topo { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .topo path { fill: none; stroke: var(--mint); stroke-width: 1; vector-effect: non-scaling-stroke; }
+
+  /* ---------- Phone mockup (sized in em, driven by --pf) ---------- */
+  .phone {
+    --pf: 10px; font-size: var(--pf);
+    position: relative; width: 29em; height: 60em; border-radius: 4.6em; padding: 1em; flex: none;
+    background: linear-gradient(150deg, #24493a, #0a1a12 55%, #16362a);
+    box-shadow: inset 0 0 0 .14em rgba(200,240,212,.22), inset 0 0 0 .6em #07120c, 0 5em 9em -3em rgba(0,0,0,.7), 0 0 8em rgba(143,181,154,.18);
+  }
+  .phone::before { content: ""; position: absolute; top: 2em; left: 50%; transform: translateX(-50%); width: 8.5em; height: 2.3em; border-radius: 2em; background: #050d09; z-index: 5; }
+  .screen {
+    position: absolute; inset: 1em; border-radius: 3.6em; overflow: hidden;
+    background: radial-gradient(120% 60% at 80% 0%, rgba(31,107,74,.55), transparent 60%), linear-gradient(180deg, #10291e, #0b1f16 70%);
+    color: var(--cream); padding: 5em 1.9em 2em; display: flex; flex-direction: column; gap: 1.5em; line-height: 1.35;
+    font-family: var(--sans);
+  }
+  .ui-status { position: absolute; top: 1.9em; inset-inline: 2.8em; display: flex; justify-content: space-between; font-size: 1.15em; font-weight: 600; direction: ltr; opacity: .85; }
+  .ui-top { display: flex; align-items: center; justify-content: space-between; gap: 1em; }
+  .ui-top small { display: block; font-size: 1.15em; color: var(--sage); }
+  .ui-top strong { display: block; font-family: var(--serif); font-weight: 500; font-size: 2.3em; line-height: 1.1; }
+  .ui-badge { position: relative; width: 5.2em; height: 5.2em; flex: none; display: grid; place-items: center; }
+  .ui-badge svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+  .ui-badge b { font-family: var(--serif); font-size: 2.1em; font-weight: 500; color: var(--mint); }
+  .ui-card { border-radius: 2em; padding: 1.5em 1.6em; background: rgba(200,240,212,.07); box-shadow: inset 0 0 0 .1em rgba(200,240,212,.12); }
+  .ui-row { display: flex; align-items: center; justify-content: space-between; gap: .8em; font-size: 1.2em; }
+  .ui-row .muted { color: var(--sage); }
+  .ui-bar { height: .9em; border-radius: 1em; background: rgba(200,240,212,.12); margin-top: .9em; overflow: hidden; }
+  .ui-bar i { display: block; height: 100%; width: 64%; margin-inline-start: 0; border-radius: inherit; background: linear-gradient(270deg, var(--sage), var(--mint)); box-shadow: 0 0 1.2em rgba(200,240,212,.6); }
+  .ui-streak { display: flex; align-items: center; gap: 1em; }
+  .ui-streak svg { width: 3.2em; height: 3.2em; flex: none; }
+  .ui-streak b { font-size: 1.6em; font-weight: 600; display: block; line-height: 1.1; }
+  .ui-streak small { font-size: 1.1em; color: var(--sage); }
+  .ui-list { display: flex; flex-direction: column; gap: .9em; }
+  .ui-list h5 { margin: 0; font-size: 1.15em; font-weight: 500; color: var(--sage); letter-spacing: .05em; }
+  .ui-task { display: flex; align-items: center; gap: 1em; padding: 1.1em 1.2em; border-radius: 1.6em; background: rgba(243,239,228,.05); font-size: 1.25em; }
+  .ui-task .chk { width: 1.7em; height: 1.7em; border-radius: 50%; flex: none; box-shadow: inset 0 0 0 .12em rgba(200,240,212,.45); display: grid; place-items: center; }
+  .ui-task.done .chk { background: var(--mint); box-shadow: none; }
+  .ui-task.done .chk svg { width: 1em; height: 1em; }
+  .ui-task.done .t { text-decoration: line-through; text-decoration-color: rgba(200,240,212,.5); color: rgba(243,239,228,.6); }
+  .ui-task .t { flex: 1; }
+  .ui-task .xp { font-size: .85em; font-weight: 600; color: var(--mint); background: rgba(200,240,212,.1); padding: .25em .7em; border-radius: 1em; direction: ltr; white-space: nowrap; }
+  .ui-nav { margin-top: auto; display: flex; justify-content: space-around; padding: 1.2em .5em .4em; border-top: .1em solid rgba(200,240,212,.1); }
+  .ui-nav i { width: 2.2em; height: 2.2em; border-radius: .7em; background: rgba(200,240,212,.18); }
+  .ui-nav i:first-child { background: var(--mint); }
+  .ui-chips { display: flex; flex-wrap: wrap; gap: .8em; }
+  .ui-chip { font-size: 1.25em; padding: .6em 1.1em; border-radius: 2em; box-shadow: inset 0 0 0 .1em rgba(200,240,212,.3); }
+  .ui-chip.on { background: var(--mint); color: var(--ink); box-shadow: none; font-weight: 600; }
+  .ui-btn { margin-top: auto; text-align: center; padding: 1.2em; border-radius: 1.8em; background: var(--cream); color: var(--ink); font-weight: 600; font-size: 1.3em; }
+  .ui-levelup { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.4em; text-align: center; }
+  .ui-levelup .big-badge { width: 15em; height: 15em; border-radius: 50%; display: grid; place-items: center; position: relative;
+    background: radial-gradient(circle at 50% 35%, rgba(200,240,212,.35), rgba(31,107,74,.3) 60%, transparent 70%);
+    box-shadow: inset 0 0 0 .2em rgba(200,240,212,.5), 0 0 6em rgba(200,240,212,.35); }
+  .ui-levelup .big-badge span { font-family: var(--serif); font-size: 6em; line-height: 1; color: var(--mint); }
+  .ui-levelup .big-badge small { position: absolute; bottom: 2.6em; font-size: 1.1em; letter-spacing: .2em; color: var(--sage); }
+  .ui-levelup h6 { margin: 0; font-family: var(--serif); font-weight: 500; font-size: 2.6em; }
+  .ui-levelup p { font-size: 1.25em; color: var(--sage); }
+  .ui-levelup .gain { font-weight: 700; color: var(--ink); background: var(--mint); padding: .4em 1.2em; border-radius: 2em; font-size: 1.3em; direction: ltr; }
+
+  /* ---------- 1. HERO ---------- */
+  .hero { position: relative; min-height: 100vh; min-height: 100svh; overflow: hidden; isolation: isolate;
+    background: radial-gradient(90% 70% at 85% 10%, #1b5a3f 0%, transparent 60%), radial-gradient(70% 60% at 0% 100%, #15412f 0%, transparent 60%), linear-gradient(180deg, #0d251a, #0b1f16); }
+  .hero-bg { position: absolute; inset: 0; z-index: -1; }
+  .hero .topo { opacity: .14; }
+  .hero .o1 { width: 46vmax; height: 46vmax; top: -16vmax; left: -10vmax; background: radial-gradient(circle, rgba(42,138,96,.55), transparent 65%); }
+  .hero .o2 { width: 30vmax; height: 30vmax; bottom: -10vmax; right: -6vmax; background: radial-gradient(circle, rgba(200,240,212,.22), transparent 65%); }
+  .hero .o3 { width: 12vmax; height: 12vmax; top: 30%; right: 42%; background: radial-gradient(circle, rgba(217,184,106,.22), transparent 65%); }
+  .leaf { position: absolute; color: var(--sage); opacity: .22; pointer-events: none; }
+  .leaf svg { width: 100%; height: 100%; }
+  .hero .l1 { width: 160px; top: 18%; left: 6%; transform: rotate(-24deg); }
+  .hero .l2 { width: 90px; bottom: 14%; right: 46%; transform: rotate(38deg); opacity: .16; }
+  .hero-inner { position: relative; min-height: 100vh; min-height: 100svh; display: grid; grid-template-columns: 1.25fr .75fr; align-items: center; gap: 40px; padding-top: calc(var(--header-h) + 24px); padding-bottom: 40px; }
+  .hero-copy { position: relative; z-index: 2; }
+  .hero h1 { white-space: nowrap; font-size: clamp(64px, 10.4vw, 176px); font-weight: 400; line-height: .92; letter-spacing: -0.035em; margin: 18px 0 18px; direction: ltr; text-align: right; }
+  .hero h1 .up { font-style: italic; color: var(--mint); font-weight: 300; }
+  .hero .tagline { font-family: var(--serif); font-size: clamp(26px, 3.4vw, 46px); line-height: 1.15; color: var(--cream); margin-bottom: 18px; }
+  .hero .lead { font-size: clamp(16px, 1.35vw, 19px); color: var(--muted-on-dark); max-width: 30em; margin-bottom: 30px; }
+  .hero-visual { position: relative; display: flex; justify-content: center; align-items: center; z-index: 1; }
+  .hero-visual .halo { position: absolute; width: 130%; aspect-ratio: 1; border-radius: 50%; border: 1px solid rgba(200,240,212,.12); }
+  .hero-visual .halo.h2 { width: 95%; border-color: rgba(200,240,212,.18); }
+  .float-chip { position: absolute; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 16px; font-size: 14px; font-weight: 600;
+    background: rgba(243,239,228,.92); color: var(--ink); box-shadow: 0 20px 40px -18px rgba(0,0,0,.6); white-space: nowrap; }
+  .float-chip svg { width: 18px; height: 18px; }
+  .float-chip.c1 { top: 3%; right: -14%; }
+  .float-chip.c2 { bottom: 20%; left: -4%; background: var(--emerald); color: var(--cream); }
+  .scroll-hint { position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 10px; font-size: 12px; letter-spacing: .14em; color: var(--sage); z-index: 3; }
+  .scroll-hint i { width: 1px; height: 46px; background: linear-gradient(var(--sage), transparent); position: relative; overflow: hidden; }
+  .scroll-hint i::after { content: ""; position: absolute; inset: 0; background: var(--mint); animation: drip 2.2s cubic-bezier(.6,0,.3,1) infinite; transform-origin: top; }
+  @keyframes drip { 0% { transform: scaleY(0); transform-origin: top; } 50% { transform: scaleY(1); transform-origin: top; } 51% { transform-origin: bottom; } 100% { transform: scaleY(0); transform-origin: bottom; } }
+  html.pending .hero-inner { visibility: hidden; }
+  .hero-title .w { padding-inline: .08em; margin-inline: -.08em; padding-bottom: .2em; margin-bottom: -.2em; }
+
+  @media (max-width: 900px) {
+    .hero-inner { grid-template-columns: 1fr; text-align: center; gap: 8px; padding-top: calc(var(--header-h) + 30px); padding-bottom: 0; align-content: start; }
+    .hero h1 { text-align: center; margin: 14px 0 12px; font-size: clamp(64px, 20vw, 120px); }
+    .hero .lead { margin-inline: auto; margin-bottom: 24px; }
+    .hero .stores { justify-content: center; }
+    .hero-visual { margin-top: 28px; height: 330px; align-items: flex-start; }
+    .hero-visual .phone { --pf: 7.6px; }
+    .float-chip { font-size: 12px; padding: 8px 11px; }
+    .float-chip.c1 { top: 4%; right: 2%; }
+    .float-chip.c2 { bottom: auto; top: 46%; left: 2%; }
+    .scroll-hint { display: none; }
+    .hero .l1 { width: 100px; top: 12%; left: -20px; }
+  }
+  @media (max-width: 420px) {
+    .btn-store { padding: 10px 14px; gap: 9px; min-height: 52px; border-radius: 14px; }
+    .btn-store b { font-size: 15px; }
+    .stores { gap: 10px; }
+  }
+
+  /* ---------- 2. WHAT ---------- */
+  .what { position: relative; background: var(--forest); }
+  .what-stage { position: relative; height: 100vh; height: 100svh; min-height: 600px; overflow: hidden; }
+  .what-panel { position: absolute; inset: 0; overflow: hidden; display: flex; align-items: center;
+    background: radial-gradient(80% 70% at 15% 20%, rgba(200,240,212,.16), transparent 60%), radial-gradient(60% 60% at 90% 90%, rgba(11,31,22,.6), transparent 70%), linear-gradient(135deg, #1f6b4a, #123a2a 70%); }
+  .what-panel .topo { opacity: .16; }
+  .what-panel .orb { width: 40vmax; height: 40vmax; right: -12vmax; top: -12vmax; background: radial-gradient(circle, rgba(200,240,212,.25), transparent 65%); }
+  .what-teaser { display: none; }
+  .anim .what-teaser { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; text-align: center; z-index: 2; }
+  .what-teaser .xp-orb { width: 132px; height: 132px; border-radius: 50%; display: grid; place-items: center; font-family: var(--serif); font-size: 34px; color: var(--ink); direction: ltr;
+    background: radial-gradient(circle at 35% 30%, #effff3, var(--mint) 45%, var(--sage)); box-shadow: 0 0 60px rgba(200,240,212,.55), 0 0 0 14px rgba(200,240,212,.1), 0 0 0 30px rgba(200,240,212,.05); }
+  .what-teaser p { font-family: var(--serif); font-size: 22px; color: var(--cream); }
+  .what-content { position: relative; z-index: 1; display: grid; grid-template-columns: 1fr; gap: 26px; max-width: 980px; }
+  .what-content h2 { font-size: clamp(44px, 7vw, 104px); }
+  .what-content h2 em { white-space: nowrap; font-style: normal; color: var(--mint); font-weight: 300; }
+  .what-content .big-p { font-family: var(--serif); font-size: clamp(21px, 2.4vw, 34px); line-height: 1.45; color: var(--cream); font-weight: 300; max-width: 26em; }
+  .what-content .big-p b { font-weight: 500; color: var(--mint); }
+  @media (max-width: 640px) {
+    .what-stage { min-height: 640px; }
+    .what-content { gap: 18px; }
+    .what-content .big-p { font-size: 19px; line-height: 1.55; }
+  }
+
+  /* ---------- 3. HOW ---------- */
+  .how { position: relative; background: var(--forest); }
+  .how-stage { position: relative; min-height: 100vh; min-height: 100svh; overflow: hidden; display: flex; align-items: center; background: #0b1f16; }
+  .how-bg { position: absolute; inset: 0; background: radial-gradient(70% 70% at 20% 50%, rgba(31,107,74,.35), transparent 70%); }
+  .how-num { position: absolute; left: -2vw; bottom: -6vw; font-family: var(--serif); font-size: 40vw; line-height: .8; color: rgba(200,240,212,.04); direction: ltr; pointer-events: none; }
+  .how-grid { position: relative; display: grid; grid-template-columns: 1.1fr .9fr; gap: 60px; align-items: center; padding-block: calc(var(--header-h) + 30px) 60px; }
+  .how-head { margin-bottom: 28px; }
+  .how-head h2 { font-size: clamp(40px, 5.4vw, 80px); margin-top: 14px; }
+  .how-steps { position: relative; display: grid; gap: 34px; }
+  .how-step .n { font-family: var(--serif); font-size: 18px; color: var(--mint); direction: ltr; display: inline-block; margin-bottom: 6px; }
+  .how-step h3 { font-size: clamp(32px, 3.6vw, 52px); margin-bottom: 12px; }
+  .how-step p { color: var(--muted-on-dark); font-size: clamp(16px, 1.3vw, 19px); max-width: 28em; }
+  .how-dots { display: none; }
+  .anim .how-steps { display: block; min-height: 230px; }
+  .anim .how-step { position: absolute; inset: 0 0 auto 0; }
+  .anim .how-dots { display: flex; gap: 10px; margin-top: 30px; }
+  .how-dots span { position: relative; flex: 0 0 64px; height: 3px; border-radius: 3px; background: rgba(200,240,212,.16); overflow: hidden; }
+  .how-dots span i { position: absolute; inset: 0; background: var(--mint); transform: scaleX(0); transform-origin: right; }
+  .how-phone-wrap { position: relative; display: flex; justify-content: center; }
+  .how-phone-wrap .halo { position: absolute; top: 50%; left: 50%; width: 120%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; background: radial-gradient(circle, rgba(200,240,212,.14), transparent 62%); }
+  .how-phone-wrap .screen { transition: none; }
+  .how .scr-2, .how .scr-3 { opacity: 0; }
+  @media (max-width: 900px) {
+    .how-grid { grid-template-columns: 1fr; gap: 18px; padding-block: calc(var(--header-h) + 14px) 30px; }
+    .how-head { margin-bottom: 14px; }
+    .how-head h2 { font-size: 38px; margin-top: 8px; }
+    .how-step h3 { font-size: 30px; margin-bottom: 6px; }
+    .how-step p { font-size: 15.5px; line-height: 1.6; }
+    .anim .how-steps { min-height: 150px; }
+    .anim .how-dots { margin-top: 12px; }
+    .how-phone-wrap .phone { --pf: 6.1px; }
+    .how-head h2 br { display: none; }
+    .how-num { font-size: 70vw; bottom: -4vw; }
+  }
+  @media (max-width: 900px) and (max-height: 720px) { .how-phone-wrap .phone { --pf: 5.2px; } }
+
+  /* ---------- 4. FEATURES (horizontal) ---------- */
+  .features { position: relative; background: linear-gradient(180deg, #0b1f16, #102c20); }
+  .features-stage { position: relative; min-height: 100vh; min-height: 100svh; display: flex; flex-direction: column; justify-content: center; padding-block: calc(var(--header-h) + 20px) 40px; overflow: hidden; }
+  .features-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 36px; }
+  .features-head h2 { font-size: clamp(40px, 5.6vw, 84px); margin-top: 14px; max-width: 12em; }
+  .features-count { font-family: var(--serif); font-size: 18px; color: var(--sage); direction: ltr; white-space: nowrap; }
+  .features-count b { color: var(--mint); font-weight: 500; font-size: 28px; }
+  .features-viewport { overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .features-viewport::-webkit-scrollbar { display: none; }
+  .anim .features-viewport { overflow: visible; scroll-snap-type: none; }
+  .features-track { display: flex; gap: 22px; width: max-content; padding-inline: var(--gutter); }
+  .fcard { scroll-snap-align: center; position: relative; flex: none; width: min(420px, 80vw); min-height: min(560px, 62svh); border-radius: var(--radius); padding: 30px; display: flex; flex-direction: column; overflow: hidden;
+    background: linear-gradient(160deg, rgba(200,240,212,.1), rgba(200,240,212,.02) 60%), #0f2a1e; box-shadow: inset 0 0 0 1px rgba(200,240,212,.14); }
+  .fcard:nth-child(2) { background: linear-gradient(160deg, #1f6b4a, #123a2a); }
+  .fcard:nth-child(4) { background: linear-gradient(160deg, #e9f6ec, #c8f0d4); color: var(--ink); }
+  .fcard:nth-child(4) p { color: var(--muted-on-light); }
+  .fcard:nth-child(4) .fnum { color: var(--emerald); }
+  .fcard:nth-child(6) { background: linear-gradient(160deg, #f3efe4, #e3dcc8); color: var(--ink); }
+  .fcard:nth-child(6) p { color: var(--muted-on-light); }
+  .fcard:nth-child(6) .fnum { color: var(--emerald); }
+  .fnum { font-family: var(--serif); font-size: 16px; color: var(--sage); direction: ltr; text-align: right; }
+  .fvis { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 180px; padding-block: 18px; }
+  .fcard h3 { font-size: clamp(30px, 2.6vw, 40px); margin-bottom: 10px; }
+  .fcard p { color: var(--muted-on-dark); font-size: 16px; line-height: 1.6; }
+  .features-progress { margin-top: 30px; height: 2px; background: rgba(200,240,212,.14); border-radius: 2px; overflow: hidden; display: none; }
+  .anim .features-progress { display: block; }
+  .features-progress i { display: block; height: 100%; background: var(--mint); transform: scaleX(0); transform-origin: right; }
+  .swipe-hint { display: none; font-size: 13px; color: var(--sage); margin-top: 14px; }
+  html:not(.anim) .swipe-hint { display: block; }
+  /* mini visuals */
+  .mv-list { width: 100%; display: grid; gap: 10px; }
+  .mv-list div { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: rgba(243,239,228,.06); font-size: 15px; }
+  .mv-list div i { width: 20px; height: 20px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px rgba(200,240,212,.5); flex: none; display: grid; place-items: center; }
+  .mv-list div.d i { background: var(--mint); box-shadow: none; }
+  .mv-list div.d i svg { width: 12px; height: 12px; }
+  .mv-list div span { flex: 1; }
+  .mv-list div em { font-style: normal; font-size: 12px; font-weight: 600; color: var(--mint); direction: ltr; }
+  .mv-ring { position: relative; width: 190px; height: 190px; }
+  .mv-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .mv-ring div { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+  .mv-ring b { font-family: var(--serif); font-weight: 400; font-size: 56px; line-height: 1; color: var(--mint); }
+  .mv-ring small { font-size: 13px; color: var(--cream); opacity: .8; direction: ltr; }
+  .mv-flame { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+  .mv-flame .fl { display: flex; align-items: center; gap: 14px; }
+  .mv-flame svg { width: 76px; height: 76px; filter: drop-shadow(0 0 22px rgba(217,184,106,.45)); }
+  .mv-flame b { font-family: var(--serif); font-size: 72px; font-weight: 400; line-height: 1; }
+  .mv-week { display: flex; gap: 8px; }
+  .mv-week span { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; background: rgba(200,240,212,.1); color: var(--sage); }
+  .mv-week span.on { background: var(--gold); color: var(--ink); font-weight: 700; }
+  .mv-chart { width: 100%; }
+  .mv-chart svg { width: 100%; height: auto; overflow: visible; }
+  .mv-friends { width: 100%; display: grid; gap: 18px; }
+  .mv-av { display: flex; justify-content: center; }
+  .mv-av span { width: 58px; height: 58px; border-radius: 50%; display: grid; place-items: center; font-family: var(--serif); font-size: 22px; margin-inline: -8px; box-shadow: 0 0 0 4px #123a2a; color: var(--ink); }
+  .mv-ch { padding: 14px 16px; border-radius: 16px; background: rgba(11,31,22,.35); }
+  .mv-ch .r { display: flex; justify-content: space-between; font-size: 14px; }
+  .mv-ch .bar { height: 8px; border-radius: 8px; background: rgba(200,240,212,.15); margin-top: 10px; overflow: hidden; }
+  .mv-ch .bar i { display: block; height: 100%; width: 70%; background: linear-gradient(270deg, var(--sage), var(--mint)); border-radius: inherit; }
+  .mv-notif { width: 100%; display: grid; gap: 12px; }
+  .mv-notif .n { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: 18px; background: rgba(255,255,255,.75); box-shadow: 0 16px 30px -18px rgba(11,31,22,.5); font-size: 14.5px; line-height: 1.45; }
+  .mv-notif .n.faded { opacity: .55; transform: scale(.95); }
+  .mv-notif .ic { width: 36px; height: 36px; border-radius: 10px; flex: none; display: grid; place-items: center; background: var(--forest); color: var(--mint); }
+  .mv-notif .ic svg { width: 18px; height: 18px; }
+  .mv-notif b { display: block; font-size: 13px; color: var(--emerald); }
+  @media (max-width: 640px) {
+    .features-head { flex-direction: column; align-items: flex-start; margin-bottom: 22px; gap: 8px; }
+    .features-head h2 { font-size: 38px; margin-top: 8px; }
+    .fcard { padding: 24px; min-height: 0; height: min(520px, calc(100svh - 300px)); }
+    .fvis { min-height: 140px; padding-block: 10px; }
+    .fcard h3 { font-size: 28px; }
+    .fcard p { font-size: 15px; }
+    .mv-ring { width: 150px; height: 150px; }
+    .mv-ring b { font-size: 44px; }
+    .mv-flame b { font-size: 56px; }
+    .mv-flame svg { width: 58px; height: 58px; }
+    .mv-week span { width: 28px; height: 28px; }
+  }
+
+  /* ---------- 5. LEVELS ---------- */
+  .levels { position: relative; background: var(--cream); color: var(--ink); }
+  .levels-stage { position: relative; min-height: 100vh; min-height: 100svh; display: flex; align-items: center; overflow: hidden; }
+  .levels-stage .topo path { stroke: var(--emerald); }
+  .levels-stage .topo { opacity: .12; }
+  .levels-veil { position: absolute; inset: 0; background: #102c20; opacity: 0; pointer-events: none; z-index: 4; }
+  .levels-grid { position: relative; z-index: 1; display: grid; grid-template-columns: .9fr 1.1fr; gap: 64px; align-items: center; padding-block: calc(var(--header-h) + 24px) 50px; }
+  .levels h2 { font-size: clamp(40px, 5.4vw, 82px); margin: 14px 0 22px; }
+  .levels .sub { color: var(--muted-on-light); max-width: 26em; margin-bottom: 30px; }
+  .xp-big { display: flex; align-items: baseline; gap: 12px; direction: ltr; justify-content: flex-end; }
+  .xp-big b { font-family: var(--serif); font-weight: 400; font-size: clamp(64px, 8vw, 128px); line-height: .9; color: var(--emerald); font-variant-numeric: tabular-nums; }
+  .xp-big span { font-size: 18px; font-weight: 600; color: var(--emerald); letter-spacing: .1em; }
+  .xp-title { margin-top: 10px; font-family: var(--serif); font-size: 24px; color: var(--ink); }
+  .xp-title em { font-style: normal; font-weight: 500; color: var(--emerald); }
+  .lv-wrap { position: relative; }
+  .lv-list { position: relative; list-style: none; margin: 0; padding: 0 44px 0 0; display: grid; gap: 6px; }
+  .lv-rail { position: absolute; right: 13px; top: 22px; bottom: 22px; width: 3px; border-radius: 3px; background: rgba(31,107,74,.16); }
+  .lv-rail i { position: absolute; inset: 0; background: linear-gradient(180deg, var(--emerald), var(--emerald-2)); border-radius: inherit; transform-origin: top; }
+  .lv { position: relative; display: grid; grid-template-columns: auto 1fr; gap: 4px 18px; align-items: baseline; padding: 14px 0; border-bottom: 1px solid rgba(31,107,74,.14); transition: opacity .4s; }
+  .lv::before { content: ""; position: absolute; right: -38px; top: 24px; width: 17px; height: 17px; border-radius: 50%; background: var(--cream); box-shadow: inset 0 0 0 3px var(--emerald); transition: background .4s, transform .4s; }
+  .lv.on::before { background: var(--emerald); transform: scale(1.15); }
+  .lv .k { font-size: 13px; font-weight: 600; letter-spacing: .12em; color: var(--emerald); grid-row: span 2; padding-top: 10px; min-width: 64px; }
+  .lv h3 { font-size: clamp(30px, 3vw, 46px); }
+  .lv p { color: var(--muted-on-light); font-size: 15.5px; }
+  .anim .lv { opacity: .32; }
+  .anim .lv.on { opacity: 1; }
+  .lv .xpn { font-size: 13px; color: var(--emerald); direction: ltr; display: inline-block; margin-inline-start: 6px; font-family: var(--sans); font-weight: 500; letter-spacing: .02em; }
+  .levels .note { font-size: 13px; color: var(--muted-on-light); margin-top: 14px; }
+  @media (max-width: 900px) {
+    .levels-grid { grid-template-columns: 1fr; gap: 14px; padding-block: calc(var(--header-h) + 10px) 26px; }
+    .levels h2 { font-size: 36px; margin: 8px 0 10px; }
+    .levels .sub { display: none; }
+    .xp-big { justify-content: flex-end; }
+    .xp-big b { font-size: 54px; }
+    .xp-title { font-size: 19px; margin-top: 2px; }
+    .lv { padding: 8px 0; gap: 0 12px; }
+    .lv::before { top: 16px; width: 15px; height: 15px; right: -36px; }
+    .lv .k { padding-top: 6px; min-width: 52px; font-size: 12px; }
+    .lv h3 { font-size: 25px; }
+    .lv p { font-size: 13.5px; line-height: 1.45; }
+    .levels .note { margin-top: 6px; font-size: 12px; }
+  }
+  @media (max-width: 900px) and (max-height: 760px) {
+    .levels-grid { gap: 8px; padding-block: calc(var(--header-h) + 4px) 14px; }
+    .levels h2 { font-size: 30px; margin: 6px 0 6px; }
+    .xp-big b { font-size: 42px; }
+    .xp-title { font-size: 17px; margin-top: 0; }
+    .lv { padding: 5px 0; }
+    .lv::before { top: 12px; }
+    .lv .k { padding-top: 4px; }
+    .lv h3 { font-size: 21px; }
+    .lv p { font-size: 12.5px; line-height: 1.35; }
+  }
+
+  /* ---------- 6. STATEMENT ---------- */
+  .statement { position: relative; background: var(--forest); }
+  .statement-stage { position: relative; height: 100vh; height: 100svh; min-height: 560px; overflow: hidden; }
+  .st-before { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: var(--gutter); }
+  .st-before p { font-family: var(--serif); font-size: clamp(26px, 3vw, 40px); color: var(--sage); }
+  .st-before .ring { position: absolute; width: min(60vw, 520px); aspect-ratio: 1; border-radius: 50%; border: 1px solid rgba(200,240,212,.2); }
+  .st-reveal { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: var(--gutter);
+    background: radial-gradient(70% 60% at 50% 40%, #f6fbf3, #c8f0d4 70%, #a9d9b7); color: var(--ink); }
+  .st-reveal .topo path { stroke: var(--emerald); }
+  .st-reveal .topo { opacity: .14; }
+  .st-text { position: relative; max-width: min(1100px, 100%); }
+  .st-text .eyebrow { color: var(--emerald); margin-bottom: 24px; }
+  .st-text blockquote { margin: 0 auto; max-width: 9.5em; font-family: var(--serif); font-size: clamp(46px, 7.6vw, 124px); line-height: 1.02; letter-spacing: -0.02em; font-weight: 400; }
+  .st-text blockquote em { font-style: normal; color: var(--emerald); font-weight: 300; }
+  @media (min-width: 641px) { .st-text blockquote em { white-space: nowrap; } }
+  @media (max-width: 640px) { .st-text blockquote { font-size: 50px; } }
+
+  /* ---------- 7. FAQ ---------- */
+  .faq { position: relative; background: var(--cream); color: var(--ink); padding-block: clamp(90px, 12vw, 170px); overflow: hidden; }
+  .faq-grid { display: grid; grid-template-columns: .8fr 1.2fr; gap: 64px; align-items: start; }
+  .faq h2 { font-size: clamp(40px, 5vw, 76px); margin-top: 14px; }
+  .faq .sub { color: var(--muted-on-light); margin-top: 18px; max-width: 22em; }
+  .faq-list { border-top: 1px solid rgba(11,31,22,.16); }
+  .faq details { border-bottom: 1px solid rgba(11,31,22,.16); }
+  .faq summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 24px 0; font-family: var(--serif); font-size: clamp(22px, 2vw, 30px); line-height: 1.25; }
+  .faq summary::-webkit-details-marker { display: none; }
+  .faq summary .pm { position: relative; width: 38px; height: 38px; flex: none; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(11,31,22,.3); transition: background .3s, transform .4s cubic-bezier(.2,.7,.2,1); }
+  .faq summary .pm::before, .faq summary .pm::after { content: ""; position: absolute; top: 50%; left: 50%; width: 14px; height: 1.5px; background: currentColor; transform: translate(-50%, -50%); }
+  .faq summary .pm::after { transform: translate(-50%, -50%) rotate(90deg); transition: transform .4s; }
+  .faq details[open] summary .pm { background: var(--emerald); color: var(--cream); box-shadow: none; }
+  .faq details[open] summary .pm::after { transform: translate(-50%, -50%) rotate(0deg); }
+  .faq summary:hover .pm { background: var(--mint); }
+  .faq details[open] summary:hover .pm { background: var(--emerald); }
+  .faq .ans { padding: 0 0 26px; color: var(--muted-on-light); max-width: 36em; font-size: 17px; }
+  @media (max-width: 900px) { .faq-grid { grid-template-columns: 1fr; gap: 34px; } .faq summary { padding: 20px 0; } }
+
+  /* ---------- 8. CTA ---------- */
+  .cta { position: relative; min-height: 100vh; min-height: 100svh; display: grid; place-items: center; text-align: center; overflow: hidden; isolation: isolate;
+    background: radial-gradient(60% 60% at 50% 55%, #1f6b4a 0%, #123a2a 45%, #0b1f16 80%); }
+  .cta-rings { position: absolute; inset: 0; display: grid; place-items: center; z-index: -1; }
+  .cta-rings span { position: absolute; border-radius: 50%; border: 1px solid rgba(200,240,212,.16); }
+  .cta-rings span:nth-child(1) { width: min(36vw, 340px); aspect-ratio: 1; background: radial-gradient(circle, rgba(200,240,212,.22), transparent 70%); }
+  .cta-rings span:nth-child(2) { width: min(62vw, 620px); aspect-ratio: 1; }
+  .cta-rings span:nth-child(3) { width: min(92vw, 940px); aspect-ratio: 1; border-color: rgba(200,240,212,.09); }
+  .cta-rings span:nth-child(4) { width: 130vw; aspect-ratio: 1; border-color: rgba(200,240,212,.05); }
+  .cta .topo { opacity: .08; z-index: -1; }
+  .cta-inner { padding-block: 120px 90px; display: flex; flex-direction: column; align-items: center; }
+  .cta h2 { font-size: clamp(50px, 9vw, 150px); line-height: .98; margin: 18px 0 22px; max-width: 10em; }
+  .cta h2 em { white-space: nowrap; font-style: normal; color: var(--mint); font-weight: 300; }
+  .cta .lead { color: var(--muted-on-dark); font-size: clamp(16px, 1.4vw, 20px); max-width: 26em; margin-bottom: 34px; }
+  .cta .stores { justify-content: center; }
+  .cta .avail { margin-top: 18px; font-size: 13px; color: var(--sage); }
+
+  .site-footer { background: #08180f; color: var(--muted-on-dark); padding-block: 40px; font-size: 14px; }
+  .site-footer .container { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 18px; }
+  .site-footer nav { display: flex; gap: 22px; flex-wrap: wrap; }
+  .site-footer a { text-decoration: none; }
+  .site-footer a:hover { color: var(--mint); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">דילוג לתוכן</a>
+<div class="grain" aria-hidden="true"></div>
+
+<!-- Reusable SVG defs -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="gFlame" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#d9b86a"/>
+      <stop offset="1" stop-color="#f6e2a6"/>
+    </linearGradient>
+    <linearGradient id="gRing" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#c8f0d4"/>
+      <stop offset="1" stop-color="#8fb59a"/>
+    </linearGradient>
+    <symbol id="i-flame" viewBox="0 0 24 24"><path fill="url(#gFlame)" d="M12.6 1.8c.6 3.3-1.1 5.1-2.7 6.9-1.5 1.7-3.1 3.4-3.1 6.3A5.3 5.3 0 0 0 12 20.4c3.1 0 5.4-2.4 5.4-5.6 0-2.1-.9-3.7-1.9-5 .1 1.6-.5 2.8-1.6 3.3.4-3.6-.6-8.4-1.3-11.3z"/><path fill="#fff7dc" opacity=".55" d="M12.2 11.6c.2 1.5-.6 2.3-1.3 3.1-.6.6-1 1.3-1 2.2a2.2 2.2 0 0 0 4.4 0c0-1.9-1.1-3.6-2.1-5.3z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path fill="none" stroke="#0b1f16" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/></symbol>
+    <symbol id="i-dl" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v11m-4.5-4.5L12 15l4.5-4.5M5 19.5h14"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10.5 18.5h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0"/></symbol>
+    <symbol id="i-leaf" viewBox="0 0 100 160"><path fill="none" stroke="currentColor" stroke-width="1.6" d="M50 156C50 120 50 70 50 8M50 8C88 34 96 96 50 150C4 96 12 34 50 8z"/><path fill="none" stroke="currentColor" stroke-width="1.2" d="M50 40L72 26M50 62L80 46M50 86L84 70M50 110L78 98M50 40L28 26M50 62L20 46M50 86L16 70M50 110L22 98"/></symbol>
+  </defs>
+</svg>
+
+<header class="site-header">
+  <div class="container">
+    <a class="logo" href="#top" aria-label="Level Up — לראש העמוד">
+      <span class="logo-mark"><svg><use href="#i-up"/></svg></span>Level Up
+    </a>
+    <div class="xp-hud" aria-hidden="true">
+      <span class="lvl" id="hudLvl">רמה 1</span>
+      <span class="xp-track"><span class="xp-fill" id="hudFill"></span></span>
+      <span class="xp-num" id="hudXp">0 XP</span>
+    </div>
+    <a class="header-cta" href="#download">הורדה</a>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ========== 1. HERO ========== -->
+<section class="hero" id="top" aria-label="Level Up">
+  <div class="hero-bg" aria-hidden="true">
+    <div class="orb o1" data-speed="0.35"></div>
+    <div class="orb o2" data-speed="-0.25"></div>
+    <div class="orb o3" data-speed="0.6"></div>
+    <svg class="topo" data-topo="hero" preserveAspectRatio="xMidYMid slice" viewBox="0 0 1600 1000"></svg>
+    <div class="leaf l1" data-speed="0.5"><svg><use href="#i-leaf"/></svg></div>
+    <div class="leaf l2" data-speed="-0.4"><svg><use href="#i-leaf"/></svg></div>
+  </div>
+
+  <div class="container hero-inner">
+    <div class="hero-copy">
+      <span class="eyebrow hero-eyebrow">אפליקציה לשיפור עצמי</span>
+      <h1 class="hero-title" aria-label="Level Up"><span class="ch-wrap" aria-hidden="true">Level <span class="up">Up</span></span></h1>
+      <p class="tagline" data-split>כל יום. רמה אחת למעלה.</p>
+      <p class="lead hero-fade">משימות קטנות, נקודות ניסיון ורצפים שלא תרצו לשבור. Level Up הופכת הרגלים טובים למשחק שבא לכם לשחק בו כל יום.</p>
+      <div class="stores hero-fade">
+        <a class="btn-store" href="#download"><svg><use href="#i-dl"/></svg><span><small>להורדה ב־</small><b>App Store</b></span></a>
+        <a class="btn-store alt" href="#download"><svg><use href="#i-dl"/></svg><span><small>להורדה ב־</small><b>Google Play</b></span></a>
+      </div>
+    </div>
+
+    <div class="hero-visual" role="img" aria-label="מסך הבית של האפליקציה: רמה 7, פס התקדמות, רצף של 12 ימים ורשימת משימות יומיות">
+      <div class="halo" aria-hidden="true"></div>
+      <div class="halo h2" aria-hidden="true"></div>
+      <div class="float-chip c1" aria-hidden="true"><svg><use href="#i-flame"/></svg>12 ימים ברצף</div>
+      <div class="float-chip c2" aria-hidden="true"><span class="ltr">+30 XP</span> · קריאה</div>
+      <div class="phone hero-phone" aria-hidden="true">
+        <div class="screen">
+          <div class="ui-status"><span>9:41</span><span>●●● ▮</span></div>
+          <div class="ui-top">
+            <div><small>יום שלישי</small><strong>בוקר טוב</strong></div>
+            <div class="ui-badge">
+              <svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="23" fill="none" stroke="rgba(200,240,212,.15)" stroke-width="4"/><circle cx="26" cy="26" r="23" fill="none" stroke="url(#gRing)" stroke-width="4" stroke-linecap="round" stroke-dasharray="144.5" stroke-dashoffset="52"/></svg>
+              <b>7</b>
+            </div>
+          </div>
+          <div class="ui-card">
+            <div class="ui-row"><span>רמה 7 · מתמיד</span><span class="muted ltr">640 / 1,000 XP</span></div>
+            <div class="ui-bar"><i></i></div>
+          </div>
+          <div class="ui-card ui-streak">
+            <svg><use href="#i-flame"/></svg>
+            <div><b>12 ימים ברצף</b><small>עוד משימה אחת והיום נשמר</small></div>
+          </div>
+          <div class="ui-list">
+            <h5>המשימות של היום</h5>
+            <div class="ui-task done"><span class="chk"><svg><use href="#i-check"/></svg></span><span class="t">8 כוסות מים</span><span class="xp">+20 XP</span></div>
+            <div class="ui-task done"><span class="chk"><svg><use href="#i-check"/></svg></span><span class="t">20 דקות קריאה</span><span class="xp">+30 XP</span></div>
+            <div class="ui-task"><span class="chk"></span><span class="t">הליכה של חצי שעה</span><span class="xp">+40 XP</span></div>
+            <div class="ui-task"><span class="chk"></span><span class="t">5 דקות נשימה</span><span class="xp">+15 XP</span></div>
+          </div>
+          <div class="ui-nav"><i></i><i></i><i></i><i></i></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="scroll-hint" aria-hidden="true">גללו למטה<i></i></div>
+</section>
+
+<!-- ========== 2. WHAT ========== -->
+<section class="what" id="what" aria-labelledby="what-title">
+  <div class="what-stage">
+    <div class="what-panel">
+      <div class="orb" aria-hidden="true"></div>
+      <svg class="topo what-topo" data-topo="what" preserveAspectRatio="xMidYMid slice" viewBox="0 0 1600 1000" aria-hidden="true"></svg>
+      <div class="what-teaser" aria-hidden="true">
+        <div class="xp-orb">+20 XP</div>
+        <p>הכל מתחיל במשימה אחת</p>
+      </div>
+      <div class="container what-content">
+        <span class="eyebrow">01 · מה זה</span>
+        <h2 id="what-title" data-split>החיים שלכם. <em>בגרסת משחק.</em></h2>
+        <p class="big-p" data-split="lines"><b class="ltr" data-keep>Level Up</b> הופכת את מה שחשוב לכם (בריאות, למידה, שינה, כושר או שקט) למשימות יומיות קטנות. כל משימה שווה נקודות ניסיון. צוברים, עולים ברמות, שומרים על רצף ורואים איך אתם משתפרים. בלי נאומי מוטיבציה. רק עוד צעד קטן, כל יום.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ========== 3. HOW ========== -->
+<section class="how" id="how" aria-labelledby="how-title">
+  <div class="how-stage">
+    <div class="how-bg" aria-hidden="true"></div>
+    <div class="how-num" aria-hidden="true"><span class="how-num-v">01</span></div>
+    <div class="container how-grid">
+      <div>
+        <div class="how-head">
+          <span class="eyebrow">02 · איך זה עובד</span>
+          <h2 id="how-title" data-split>שלושה צעדים. <br>זה הכל.</h2>
+        </div>
+        <ol class="how-steps" style="list-style:none;margin:0;padding:0">
+          <li class="how-step">
+            <span class="n">01</span>
+            <h3>בוחרים מטרות</h3>
+            <p>מה חשוב לכם עכשיו? בריאות, כושר, למידה, שינה או כל דבר אחר. בוחרים כמה מטרות, והן הופכות למשימות יומיות בגודל שמתאים לכם.</p>
+          </li>
+          <li class="how-step">
+            <span class="n">02</span>
+            <h3>משלימים משימות</h3>
+            <p>כל בוקר מחכה רשימה קצרה. מסמנים וי, מקבלים XP ומרגישים התקדמות כבר מהבוקר.</p>
+          </li>
+          <li class="how-step">
+            <span class="n">03</span>
+            <h3>עולים רמה</h3>
+            <p>ה־XP מצטבר, הרמה עולה והרצף גדל. כל רמה חדשה היא הוכחה קטנה שאתם כבר לא מי שהייתם אתמול.</p>
+          </li>
+        </ol>
+        <div class="how-dots" aria-hidden="true"><span><i></i></span><span><i></i></span><span><i></i></span></div>
+      </div>
+
+      <div class="how-phone-wrap" role="img" aria-label="שלושה מסכים באפליקציה: בחירת מטרות, רשימת משימות יומית וחגיגת עלייה לרמה 8">
+        <div class="halo" aria-hidden="true"></div>
+        <div class="phone" aria-hidden="true">
+          <div class="screen scr-1">
+            <div class="ui-status"><span>9:41</span><span>●●● ▮</span></div>
+            <div class="ui-top"><div><small>שלב 1 מתוך 3</small><strong>מה חשוב לכם?</strong></div></div>
+            <p style="font-size:1.25em;color:var(--sage)">בחרו עד חמש מטרות. אפשר לשנות בכל רגע.</p>
+            <div class="ui-chips">
+              <span class="ui-chip on">בריאות</span><span class="ui-chip">כסף</span><span class="ui-chip on">כושר</span>
+              <span class="ui-chip on">למידה</span><span class="ui-chip">יצירה</span><span class="ui-chip on">שינה טובה</span>
+              <span class="ui-chip">קשרים</span><span class="ui-chip">שקט נפשי</span><span class="ui-chip">סדר בבית</span>
+            </div>
+            <div class="ui-card"><div class="ui-row"><span>4 מטרות נבחרו</span><span class="muted">מעולה</span></div></div>
+            <div class="ui-btn">ממשיכים</div>
+          </div>
+          <div class="screen scr-2">
+            <div class="ui-status"><span>9:41</span><span>●●● ▮</span></div>
+            <div class="ui-top"><div><small>היום</small><strong>4 משימות</strong></div><div class="ui-badge"><svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="23" fill="none" stroke="rgba(200,240,212,.15)" stroke-width="4"/><circle cx="26" cy="26" r="23" fill="none" stroke="url(#gRing)" stroke-width="4" stroke-linecap="round" stroke-dasharray="144.5" stroke-dashoffset="20"/></svg><b>7</b></div></div>
+            <div class="ui-card"><div class="ui-row"><span>עוד 40 XP לרמה 8</span><span class="muted ltr">960 / 1,000</span></div><div class="ui-bar"><i style="width:96%"></i></div></div>
+            <div class="ui-list">
+              <div class="ui-task done"><span class="chk"><svg><use href="#i-check"/></svg></span><span class="t">8 כוסות מים</span><span class="xp">+20 XP</span></div>
+              <div class="ui-task done"><span class="chk"><svg><use href="#i-check"/></svg></span><span class="t">20 דקות קריאה</span><span class="xp">+30 XP</span></div>
+              <div class="ui-task done"><span class="chk"><svg><use href="#i-check"/></svg></span><span class="t">10 שכיבות סמיכה</span><span class="xp">+25 XP</span></div>
+              <div class="ui-task"><span class="chk"></span><span class="t">לישון עד 23:00</span><span class="xp">+40 XP</span></div>
+            </div>
+            <div class="ui-nav"><i></i><i></i><i></i><i></i></div>
+          </div>
+          <div class="screen scr-3">
+            <div class="ui-status"><span>9:41</span><span>●●● ▮</span></div>
+            <div class="ui-levelup">
+              <div class="big-badge"><span>8</span><small>LEVEL</small></div>
+              <h6>עליתם רמה!</h6>
+              <p>רמה 8 · מתמיד</p>
+              <span class="gain">+40 XP</span>
+              <div class="ui-card ui-streak" style="width:100%;margin-top:1em"><svg><use href="#i-flame"/></svg><div><b>13 ימים ברצף</b><small>שיא אישי חדש</small></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ========== 4. FEATURES ========== -->
+<section class="features" id="features" aria-labelledby="features-title">
+  <div class="features-stage">
+    <div class="container features-head">
+      <div>
+        <span class="eyebrow">03 · מה יש בפנים</span>
+        <h2 id="features-title" data-split>כל מה שצריך כדי להמשיך.</h2>
+      </div>
+      <div class="features-count" aria-hidden="true"><b class="fc-cur">01</b> / 06</div>
+    </div>
+    <div class="features-viewport">
+      <div class="features-track">
+        <article class="fcard">
+          <div class="fnum">01</div>
+          <div class="fvis" aria-hidden="true">
+            <div class="mv-list">
+              <div class="d"><i><svg><use href="#i-check"/></svg></i><span>10 דקות מתיחות</span><em>+20 XP</em></div>
+              <div class="d"><i><svg><use href="#i-check"/></svg></i><span>פרק בפודקאסט</span><em>+25 XP</em></div>
+              <div><i></i><span>בלי מסך שעה לפני השינה</span><em>+40 XP</em></div>
+            </div>
+          </div>
+          <h3>משימות יומיות</h3>
+          <p>רשימה קצרה וברורה לכל יום. לא עוד רשימת מטלות אינסופית, רק מה שבאמת מקדם אתכם.</p>
+        </article>
+        <article class="fcard">
+          <div class="fnum">02</div>
+          <div class="fvis" aria-hidden="true">
+            <div class="mv-ring">
+              <svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" fill="none" stroke="rgba(200,240,212,.15)" stroke-width="8"/><circle cx="60" cy="60" r="52" fill="none" stroke="url(#gRing)" stroke-width="8" stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="118"/></svg>
+              <div><b>7</b><small>640 / 1,000 XP</small></div>
+            </div>
+          </div>
+          <h3>XP ורמות</h3>
+          <p>כל משימה שווה נקודות ניסיון. צוברים מספיק ועולים רמה. אותה התמכרות של משחק, רק לכיוון הנכון.</p>
+        </article>
+        <article class="fcard">
+          <div class="fnum">03</div>
+          <div class="fvis" aria-hidden="true">
+            <div class="mv-flame">
+              <div class="fl"><svg><use href="#i-flame"/></svg><b>12</b></div>
+              <div class="mv-week"><span class="on">א</span><span class="on">ב</span><span class="on">ג</span><span class="on">ד</span><span class="on">ה</span><span>ו</span><span>ש</span></div>
+            </div>
+          </div>
+          <h3>רצפים</h3>
+          <p>כל יום שמשלימים משימה מוסיף לרצף. הלהבה גדלה, וקשה מאוד לוותר עליה.</p>
+        </article>
+        <article class="fcard">
+          <div class="fnum">04</div>
+          <div class="fvis" aria-hidden="true">
+            <div class="mv-chart">
+              <svg viewBox="0 0 300 170">
+                <g fill="#1f6b4a">
+                  <rect x="262" y="90" width="26" height="60" rx="7" opacity=".45"/>
+                  <rect x="220" y="70" width="26" height="80" rx="7" opacity=".55"/>
+                  <rect x="178" y="98" width="26" height="52" rx="7" opacity=".45"/>
+                  <rect x="136" y="56" width="26" height="94" rx="7" opacity=".65"/>
+                  <rect x="94" y="40" width="26" height="110" rx="7" opacity=".8"/>
+                  <rect x="52" y="30" width="26" height="120" rx="7" opacity=".9"/>
+                  <rect x="10" y="14" width="26" height="136" rx="7"/>
+                </g>
+                <path d="M275 84 L233 64 L191 92 L149 50 L107 34 L65 24 L23 8" fill="none" stroke="#0b1f16" stroke-width="2" stroke-dasharray="4 5"/>
+                <g font-family="Heebo, sans-serif" font-size="13" fill="#3c5a49" text-anchor="middle">
+                  <text x="275" y="167">א</text><text x="233" y="167">ב</text><text x="191" y="167">ג</text><text x="149" y="167">ד</text><text x="107" y="167">ה</text><text x="65" y="167">ו</text><text x="23" y="167">ש</text>
+                </g>
+              </svg>
+            </div>
+          </div>
+          <h3>סטטיסטיקות התקדמות</h3>
+          <p>גרפים פשוטים שמראים מה השתפר השבוע, איפה נתקעתם ומה הכי עובד בשבילכם.</p>
+        </article>
+        <article class="fcard">
+          <div class="fnum">05</div>
+          <div class="fvis" aria-hidden="true">
+            <div class="mv-friends">
+              <div class="mv-av"><span style="background:#c8f0d4">נ</span><span style="background:#d9b86a">ע</span><span style="background:#8fb59a">י</span><span style="background:#f3efe4">ד</span></div>
+              <div class="mv-ch"><div class="r"><span>אתגר 30 ימי הליכה</span><span style="color:var(--mint)">יום 21</span></div><div class="bar"><i></i></div></div>
+            </div>
+          </div>
+          <h3>אתגרים עם חברים</h3>
+          <p>מזמינים חברים לאתגר משותף, רואים מי עדיין בפנים ומעודדים אחד את השני עד הסוף.</p>
+        </article>
+        <article class="fcard">
+          <div class="fnum">06</div>
+          <div class="fvis" aria-hidden="true">
+            <div class="mv-notif">
+              <div class="n faded"><span class="ic"><svg><use href="#i-bell"/></svg></span><div><b>Level Up · 08:00</b>בוקר טוב. 4 משימות מחכות לכם היום.</div></div>
+              <div class="n"><span class="ic"><svg><use href="#i-bell"/></svg></span><div><b>Level Up · 21:30</b>עוד משימה אחת והרצף של 12 ימים נשמר.</div></div>
+            </div>
+          </div>
+          <h3>תזכורות חכמות</h3>
+          <p>תזכורת בזמן הנכון, לא כל חמש דקות. אתם קובעים מתי נוח לכם, והאפליקציה מזכירה בעדינות.</p>
+        </article>
+      </div>
+    </div>
+    <div class="container">
+      <div class="features-progress" aria-hidden="true"><i></i></div>
+      <p class="swipe-hint">החליקו הצידה כדי לראות עוד</p>
+    </div>
+  </div>
+</section>
+
+<!-- ========== 5. LEVELS ========== -->
+<section class="levels on-light" id="levels" aria-labelledby="levels-title">
+  <div class="levels-stage">
+    <svg class="topo" data-topo="levels" preserveAspectRatio="xMidYMid slice" viewBox="0 0 1600 1000" aria-hidden="true"></svg>
+    <div class="container levels-grid">
+      <div>
+        <span class="eyebrow">04 · המסע</span>
+        <h2 id="levels-title" data-split>מתחיל היום. <br>אגדה בהמשך.</h2>
+        <p class="sub">כל משימה מוסיפה XP, וכל רמה פותחת תואר חדש. ככה נראה המסע:</p>
+        <div class="xp-big" aria-hidden="true"><b class="xp-count">30,000</b><span>XP</span></div>
+        <div class="xp-title" aria-hidden="true">התואר שלכם: <em class="xp-rank">אגדה</em></div>
+      </div>
+      <div>
+        <div class="lv-wrap">
+        <span class="lv-rail" aria-hidden="true"><i></i></span>
+        <ol class="lv-list">
+          <li class="lv on"><span class="k">רמה 1</span><h3>מתחיל <span class="xpn">0 XP</span></h3><p>הצעד הראשון. משימה אחת ביום זה מספיק.</p></li>
+          <li class="lv on"><span class="k">רמה 5</span><h3>מתמיד <span class="xpn">1,000 XP</span></h3><p>ההרגלים מתחילים לתפוס, והרצף כבר שווה משהו.</p></li>
+          <li class="lv on"><span class="k">רמה 10</span><h3>ממוקד <span class="xpn">3,000 XP</span></h3><p>יודעים מה חשוב, ועושים את זה גם בימים עמוסים.</p></li>
+          <li class="lv on"><span class="k">רמה 25</span><h3>מאסטר <span class="xpn">10,000 XP</span></h3><p>מה שפעם דרש כוח רצון, היום קורה מעצמו.</p></li>
+          <li class="lv on"><span class="k">רמה 50</span><h3>אגדה <span class="xpn">30,000 XP</span></h3><p>הגעתם רחוק. עכשיו אתם ההשראה של מישהו אחר.</p></li>
+        </ol>
+        </div>
+        <p class="note">הרמות ומספרי ה־XP הם להמחשה בלבד.</p>
+      </div>
+    </div>
+    <div class="levels-veil" aria-hidden="true"></div>
+  </div>
+</section>
+
+<!-- ========== 6. STATEMENT ========== -->
+<section class="statement" id="statement" aria-label="המשפט שלנו">
+  <div class="statement-stage">
+    <div class="st-before" aria-hidden="true"><span class="ring"></span><p>ועוד דבר אחד.</p></div>
+    <div class="st-reveal">
+      <svg class="topo" data-topo="st" preserveAspectRatio="xMidYMid slice" viewBox="0 0 1600 1000" aria-hidden="true"></svg>
+      <div class="st-text">
+        <span class="eyebrow">מה שמניע אותנו</span>
+        <blockquote data-split>התחרות היחידה היא <em>מי שהיית אתמול.</em></blockquote>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ========== 7. FAQ ========== -->
+<section class="faq on-light" id="faq" aria-labelledby="faq-title">
+  <div class="container faq-grid">
+    <div class="faq-intro">
+      <span class="eyebrow">05 · שאלות</span>
+      <h2 id="faq-title" data-split>שאלות ששואלים אותנו.</h2>
+      <p class="sub">התשובות הקצרות. אם משהו לא ברור, אנחנו כאן.</p>
+    </div>
+    <div class="faq-list">
+      <details>
+        <summary>האפליקציה בחינם?<span class="pm" aria-hidden="true"></span></summary>
+        <p class="ans">אפשר להוריד את Level Up ולהתחיל בחינם. אם יהיו אפשרויות בתשלום, תמיד יהיה ברור מה כלול בהן ומה לא.</p>
+      </details>
+      <details>
+        <summary>על אילו טלפונים זה עובד?<span class="pm" aria-hidden="true"></span></summary>
+        <p class="ans">על אייפון ועל אנדרואיד. מורידים מה־App Store או מ־Google Play ומתחילים תוך דקה.</p>
+      </details>
+      <details>
+        <summary>צריך חיבור לאינטרנט?<span class="pm" aria-hidden="true"></span></summary>
+        <p class="ans">בשביל המשימות היומיות לא. אפשר לסמן משימות גם בלי קליטה, והכל מסתנכרן כשחוזרים לרשת. אתגרים עם חברים צריכים חיבור.</p>
+      </details>
+      <details>
+        <summary>מה עם הפרטיות שלי?<span class="pm" aria-hidden="true"></span></summary>
+        <p class="ans">המטרות וההרגלים שלכם שייכים לכם. אתם מחליטים מה לשתף עם חברים, ומה נשאר רק אצלכם.</p>
+      </details>
+      <details>
+        <summary>מה קורה אם פספסתי יום?<span class="pm" aria-hidden="true"></span></summary>
+        <p class="ans">קורה לכולם. הרצף מתחיל מחדש, אבל ה־XP והרמה שצברתם נשארים. מחר בונים רצף חדש.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ========== 8. CTA ========== -->
+<section class="cta" id="download" aria-labelledby="cta-title">
+  <div class="cta-rings" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+  <svg class="topo" data-topo="cta" preserveAspectRatio="xMidYMid slice" viewBox="0 0 1600 1000" aria-hidden="true"></svg>
+  <div class="container cta-inner">
+    <span class="eyebrow">רמה 1 מחכה</span>
+    <h2 id="cta-title" data-split>הרמה הבאה <em>מתחילה היום.</em></h2>
+    <p class="lead cta-fade">מורידים, בוחרים מטרה אחת ומסיימים את המשימה הראשונה עוד היום.</p>
+    <div class="stores cta-fade">
+      <a class="btn-store" href="#download"><svg><use href="#i-dl"/></svg><span><small>להורדה ב־</small><b>App Store</b></span></a>
+      <a class="btn-store alt" href="#download"><svg><use href="#i-dl"/></svg><span><small>להורדה ב־</small><b>Google Play</b></span></a>
+    </div>
+    <p class="avail cta-fade">לאייפון ולאנדרואיד</p>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <a class="logo" href="#top"><span class="logo-mark"><svg><use href="#i-up"/></svg></span>Level Up</a>
+    <nav aria-label="קישורים בתחתית">
+      <a href="#faq">שאלות נפוצות</a>
+      <a href="#">פרטיות</a>
+      <a href="#">תנאי שימוש</a>
+      <a href="#">צרו קשר</a>
+    </nav>
+    <span class="ltr">© 2026 Level Up</span>
+  </div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lenis@1.1.13/dist/lenis.min.js"></script>
+<script>
+(function () {
+  'use strict';
+  var root = document.documentElement;
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- Topographic line art (decorative, runs always) ---------- */
+  function topo(svg, seed) {
+    var NS = 'http://www.w3.org/2000/svg';
+    var rnd = (function (s) { return function () { s = (s * 9301 + 49297) % 233280; return s / 233280; }; })(seed);
+    var cx = 300 + rnd() * 1000, cy = 200 + rnd() * 600;
+    var phase = rnd() * 6.28, f1 = 2 + Math.floor(rnd() * 3), f2 = 4 + Math.floor(rnd() * 3);
+    for (var k = 1; k <= 16; k++) {
+      var r = k * 62, d = '';
+      for (var i = 0; i <= 72; i++) {
+        var a = i / 72 * Math.PI * 2;
+        var wob = 1 + 0.16 * Math.sin(a * f1 + phase + k * 0.18) + 0.07 * Math.sin(a * f2 - phase * 1.3 + k * 0.3);
+        var x = cx + Math.cos(a) * r * wob * 1.35, y = cy + Math.sin(a) * r * wob;
+        d += (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1);
+      }
+      var p = document.createElementNS(NS, 'path');
+      p.setAttribute('d', d + 'Z');
+      p.setAttribute('opacity', (1 - k / 20).toFixed(2));
+      svg.appendChild(p);
+    }
+  }
+  var seeds = { hero: 7, what: 21, levels: 33, st: 48, cta: 59 };
+  document.querySelectorAll('[data-topo]').forEach(function (s) { topo(s, seeds[s.dataset.topo] || 3); });
+
+  /* ---------- Header XP HUD: fills as you scroll (works without libraries) ---------- */
+  var hudFill = document.getElementById('hudFill'), hudLvl = document.getElementById('hudLvl'), hudXp = document.getElementById('hudXp');
+  var lastLvl = 1, ticking = false;
+  var header = document.querySelector('.site-header');
+  var lightEls = [document.querySelector('.levels-stage'), document.querySelector('.faq')];
+  function hud() {
+    ticking = false;
+    var max = document.documentElement.scrollHeight - window.innerHeight;
+    var p = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+    var levels = 10, raw = p * levels;
+    var lvl = Math.min(levels, Math.floor(raw) + 1);
+    var within = p >= 1 ? 1 : raw - Math.floor(raw);
+    hudFill.style.transform = 'scaleX(' + within.toFixed(4) + ')';
+    if (lvl !== lastLvl) {
+      hudLvl.textContent = 'רמה ' + lvl;
+      if (!reduce) { hudLvl.classList.remove('bump'); void hudLvl.offsetWidth; hudLvl.classList.add('bump'); }
+      lastLvl = lvl;
+    }
+    hudXp.textContent = Math.round(p * 10000).toLocaleString('en-US') + ' XP';
+    var light = false;
+    for (var i = 0; i < lightEls.length; i++) {
+      var r = lightEls[i].getBoundingClientRect();
+      if (r.top <= 30 && r.bottom >= 30) { light = true; break; }
+    }
+    if (window.__stLight) light = true;
+    header.classList.toggle('light', light);
+  }
+  window.addEventListener('scroll', function () { if (!ticking) { ticking = true; requestAnimationFrame(hud); } }, { passive: true });
+  window.addEventListener('resize', hud);
+  hud();
+
+  function done() { root.classList.remove('pending'); }
+
+  if (reduce || !window.gsap || !window.ScrollTrigger) { done(); return; }
+
+  /* ---------- Text splitting (word masks + line grouping) ---------- */
+  function splitWords(el) {
+    var words = [];
+    (function walk(node) {
+      Array.prototype.slice.call(node.childNodes).forEach(function (n) {
+        if (n.nodeType === 3) {
+          var parts = n.textContent.split(/(\s+)/), frag = document.createDocumentFragment();
+          parts.forEach(function (t) {
+            if (!t) return;
+            if (/^\s+$/.test(t)) { frag.appendChild(document.createTextNode(' ')); return; }
+            var w = document.createElement('span'); w.className = 'w';
+            var wi = document.createElement('span'); wi.className = 'wi'; wi.textContent = t;
+            w.appendChild(wi); frag.appendChild(w); words.push(wi);
+          });
+          n.parentNode.replaceChild(frag, n);
+        } else if (n.nodeType === 1 && n.hasAttribute('data-keep')) {
+          // keep this element as one unit (e.g. the English brand name inside Hebrew text)
+          var kw = document.createElement('span'); kw.className = 'w';
+          var kwi = document.createElement('span'); kwi.className = 'wi';
+          n.parentNode.replaceChild(kw, n); kwi.appendChild(n); kw.appendChild(kwi); words.push(kwi);
+        } else if (n.nodeType === 1 && n.tagName !== 'BR') { walk(n); }
+      });
+    })(el);
+    return words;
+  }
+  function groupLines(words) {
+    var lines = [], lastTop = null;
+    words.forEach(function (w) {
+      var t = Math.round(w.parentNode.getBoundingClientRect().top);
+      if (lastTop === null || Math.abs(t - lastTop) > 6) { lines.push([]); lastTop = t; }
+      lines[lines.length - 1].push(w);
+    });
+    return lines;
+  }
+
+  function init() {
+    if (root.classList.contains('anim')) return;
+    root.classList.add('anim');
+    gsap.registerPlugin(ScrollTrigger);
+    ScrollTrigger.config({ ignoreMobileResize: true });
+
+    /* Smooth scrolling */
+    var lenis = null;
+    if (window.Lenis) {
+      lenis = new Lenis({ lerp: 0.09, smoothWheel: true });
+      lenis.on('scroll', ScrollTrigger.update);
+      gsap.ticker.add(function (t) { lenis.raf(t * 1000); });
+      gsap.ticker.lagSmoothing(0);
+      document.addEventListener('click', function (e) {
+        var a = e.target.closest('a[href^="#"]');
+        if (!a) return;
+        var id = a.getAttribute('href');
+        if (id === '#') return;
+        var target = document.querySelector(id);
+        if (!target) return;
+        e.preventDefault();
+        lenis.scrollTo(id === '#top' ? 0 : target, { duration: 1.6 });
+        if (id === '#main') target.focus && target.focus();
+      });
+    }
+
+    var mm = function () { return window.innerWidth < 900; };
+    var split = {};
+    document.querySelectorAll('[data-split]').forEach(function (el, i) {
+      el.dataset.sid = i;
+      var words = splitWords(el);
+      split[i] = { words: words, lines: el.dataset.split === 'lines' ? groupLines(words) : null };
+    });
+    function W(el) { return split[el.dataset.sid].words; }
+
+    /* ===== 1. HERO intro + parallax ===== */
+    var heroTitle = document.querySelector('.hero-title .ch-wrap');
+    // Split title into letters
+    var letters = [];
+    (function () {
+      var html = '';
+      var txt = [['Level', false], [' ', null], ['Up', true]];
+      txt.forEach(function (seg) {
+        if (seg[1] === null) { html += ' '; return; }
+        var inner = seg[0].split('').map(function (c) { return '<span class="w"><span class="wi">' + c + '</span></span>'; }).join('');
+        html += seg[1] ? '<span class="up">' + inner + '</span>' : inner;
+      });
+      heroTitle.innerHTML = html;
+      letters = heroTitle.querySelectorAll('.wi');
+    })();
+    var heroTag = W(document.querySelector('.hero .tagline'));
+    var intro = gsap.timeline({ defaults: { ease: 'expo.out' } });
+    intro.from('.hero-eyebrow', { opacity: 0, y: 20, duration: 1 }, 0.1)
+      .from(letters, { yPercent: 115, duration: 1.4, stagger: 0.05 }, 0.15)
+      .from(heroTag, { yPercent: 115, duration: 1.1, stagger: 0.06 }, 0.55)
+      .from('.hero-fade', { opacity: 0, y: 24, duration: 1.1, stagger: 0.12 }, 0.8)
+      .from('.hero-phone', { y: 160, rotate: -6, opacity: 0, duration: 1.8 }, 0.35)
+      .from('.hero-visual .halo', { scale: 0.6, opacity: 0, duration: 2, stagger: 0.15 }, 0.4)
+      .from('.float-chip', { scale: 0.7, opacity: 0, y: 20, duration: 1, stagger: 0.2, ease: 'back.out(1.8)' }, 1.1)
+      .from('.scroll-hint', { opacity: 0, duration: 1 }, 1.4);
+    done();
+
+    var heroTl = gsap.timeline({ scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: true } });
+    heroTl.to('.hero-copy', { yPercent: 30, opacity: 0.0, ease: 'none' }, 0)
+      .to('.hero-phone', { y: -140, rotate: 4, ease: 'none' }, 0)
+      .to('.float-chip.c1', { y: -220, ease: 'none' }, 0)
+      .to('.float-chip.c2', { y: -60, ease: 'none' }, 0)
+      .to('.hero .topo', { scale: 1.25, rotate: 4, ease: 'none' }, 0);
+    document.querySelectorAll('.hero [data-speed]').forEach(function (el) {
+      heroTl.to(el, { y: function () { return parseFloat(el.dataset.speed) * window.innerHeight * 0.6; }, ease: 'none' }, 0);
+    });
+
+    /* ===== 2. WHAT: small card grows into a full-screen panel ===== */
+    var whatH2 = W(document.querySelector('#what h2'));
+    var whatLines = split[document.querySelector('#what .big-p').dataset.sid].lines;
+    var whatTl = gsap.timeline({
+      scrollTrigger: { trigger: '.what-stage', start: 'top top', end: '+=190%', pin: true, scrub: 1, invalidateOnRefresh: true }
+    });
+    whatTl.fromTo('.what-panel',
+        { clipPath: function () { return mm() ? 'inset(31% 9% 31% 9% round 28px)' : 'inset(27% 32% 27% 32% round 36px)'; } },
+        { clipPath: 'inset(0% 0% 0% 0% round 0px)', ease: 'power2.inOut', duration: 1 }, 0)
+      .fromTo('.what-topo', { scale: 1.5 }, { scale: 1, ease: 'power2.out', duration: 1.2 }, 0)
+      .fromTo('.what-teaser', { scale: 1, opacity: 1 }, { scale: 0.55, opacity: 0, ease: 'power2.in', duration: 0.45 }, 0.35)
+      .fromTo('#what .eyebrow', { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.3 }, 0.8)
+      .fromTo(whatH2, { yPercent: 115 }, { yPercent: 0, stagger: 0.05, duration: 0.45, ease: 'power3.out' }, 0.85);
+    whatLines.forEach(function (line, i) {
+      whatTl.fromTo(line, { yPercent: 115, opacity: 0 }, { yPercent: 0, opacity: 1, duration: 0.5, ease: 'power3.out' }, 1.15 + i * 0.12);
+    });
+    whatTl.to({}, { duration: 0.4 });
+
+    /* ===== 3. HOW: pinned scene changes step by step ===== */
+    var steps = gsap.utils.toArray('.how-step'), screens = gsap.utils.toArray('.how .screen'), dots = gsap.utils.toArray('.how-dots i');
+    var numEl = document.querySelector('.how-num-v');
+    gsap.set(steps.slice(1), { opacity: 0, y: 40 });
+    gsap.set(screens.slice(1), { opacity: 0 });
+    var howTl = gsap.timeline({
+      scrollTrigger: {
+        trigger: '.how-stage', start: 'top top', end: '+=260%', pin: true, scrub: 1,
+        onUpdate: function (self) { var s = Math.min(2, Math.floor(self.progress * 3)); var v = '0' + (s + 1); if (numEl.textContent !== v) numEl.textContent = v; }
+      }
+    });
+    // Entry reveal runs while the section scrolls in, so the screen is never empty when the pin starts
+    gsap.timeline({ scrollTrigger: { trigger: '.how-stage', start: 'top 80%', end: 'top 10%', scrub: 1 } })
+      .from(W(document.querySelector('#how h2')), { yPercent: 115, stagger: 0.05, duration: 0.4, ease: 'power3.out' }, 0)
+      .from('.how-steps', { opacity: 0, y: 40, duration: 0.4 }, 0.15)
+      .from('.how .phone', { y: 80, opacity: 0, rotate: 4, duration: 0.6, ease: 'power3.out' }, 0);
+    howTl.to(dots[0], { scaleX: 1, duration: 1, ease: 'none' }, 0);
+    [1, 2].forEach(function (i) {
+      var at = i * 1.2;
+      howTl.to(steps[i - 1], { opacity: 0, y: -40, duration: 0.35, ease: 'power2.in' }, at)
+        .to(steps[i], { opacity: 1, y: 0, duration: 0.45, ease: 'power3.out' }, at + 0.3)
+        .to(screens[i - 1], { opacity: 0, scale: 0.94, duration: 0.4 }, at)
+        .fromTo(screens[i], { opacity: 0, scale: 1.08 }, { opacity: 1, scale: 1, duration: 0.5, ease: 'power3.out' }, at + 0.2)
+        .to('.how-stage', { backgroundColor: i === 1 ? '#0f2a1e' : '#123a2a', duration: 0.6, ease: 'none' }, at)
+        .to(dots[i], { scaleX: 1, duration: 0.9, ease: 'none' }, at + 0.3);
+    });
+    howTl.to({}, { duration: 0.3 });
+
+    /* ===== 4. FEATURES: horizontal strip driven by vertical scroll ===== */
+    var track = document.querySelector('.features-track'), vp = document.querySelector('.features-viewport');
+    var cards = gsap.utils.toArray('.fcard'), fcCur = document.querySelector('.fc-cur');
+    function dist() { return Math.max(0, track.offsetWidth - vp.clientWidth); }
+    gsap.from(W(document.querySelector('#features h2')), {
+      yPercent: 115, stagger: 0.05, duration: 1, ease: 'power3.out',
+      scrollTrigger: { trigger: '#features', start: 'top 70%' }
+    });
+    var featTl = gsap.timeline({
+      scrollTrigger: {
+        trigger: '.features-stage', start: 'top top', end: function () { return '+=' + (dist() * 1.1 + window.innerHeight * 0.3); },
+        pin: true, scrub: 1, invalidateOnRefresh: true,
+        onUpdate: function (self) { var n = Math.min(cards.length, Math.round(self.progress * (cards.length - 1)) + 1); var v = '0' + n; if (fcCur.textContent !== v) fcCur.textContent = v; }
+      }
+    });
+    // RTL: the strip overflows to the left, so it travels to the right (positive x)
+    featTl.to(track, { x: function () { return dist(); }, ease: 'none', duration: 1 }, 0.08)
+      .to('.features-progress i', { scaleX: 1, ease: 'none', duration: 1 }, 0.08);
+    // Card visuals drift slightly against the strip for depth (parallax inside the horizontal move)
+    // (kept within the card padding so nothing gets clipped at the card edge)
+    featTl.fromTo('.fvis > *', { x: function () { return mm() ? -10 : -20; } }, { x: function () { return mm() ? 10 : 20; }, ease: 'none', duration: 1 }, 0.08);
+
+    /* ===== 5. LEVELS: background crossfade, then progress fills as you scroll ===== */
+    var veil = document.querySelector('.levels-veil');
+    gsap.fromTo(veil, { opacity: 1 }, { opacity: 0, ease: 'none', scrollTrigger: { trigger: '.levels', start: 'top 85%', end: 'top 15%', scrub: true } });
+    var rows = gsap.utils.toArray('.lv'), countEl = document.querySelector('.xp-count'), rankEl = document.querySelector('.xp-rank');
+    var thresholds = [0, 1000, 3000, 10000, 30000], ranks = ['מתחיל', 'מתמיד', 'ממוקד', 'מאסטר', 'אגדה'];
+    rows.forEach(function (r, i) { r.classList.toggle('on', i === 0); });
+    countEl.textContent = '0'; rankEl.textContent = ranks[0];
+    var lvTl = gsap.timeline({
+      scrollTrigger: {
+        trigger: '.levels-stage', start: 'top top', end: '+=220%', pin: true, scrub: 0.6,
+        onUpdate: function (self) {
+          var p = gsap.utils.clamp(0, 1, (self.progress - 0.12) / 0.8);
+          var seg = p * 4, i = Math.min(3, Math.floor(seg)), f = seg - i;
+          var xp = p >= 1 ? thresholds[4] : thresholds[i] + (thresholds[i + 1] - thresholds[i]) * f;
+          countEl.textContent = Math.round(xp / 10) * 10 === 0 ? '0' : (Math.round(xp / 10) * 10).toLocaleString('en-US');
+          var active = p >= 1 ? 4 : Math.floor(seg + 0.0001);
+          rows.forEach(function (r, k) { r.classList.toggle('on', k <= active); });
+          if (rankEl.textContent !== ranks[active]) rankEl.textContent = ranks[active];
+        }
+      }
+    });
+    gsap.from(W(document.querySelector('#levels h2')), { yPercent: 115, stagger: 0.05, ease: 'power3.out',
+      scrollTrigger: { trigger: '.levels-stage', start: 'top 75%', end: 'top 15%', scrub: 1 } });
+    lvTl.fromTo('.lv-rail i', { scaleY: 0 }, { scaleY: 1, ease: 'none', duration: 0.8 }, 0.12)
+      .to({}, { duration: 0.08 });
+
+    /* ===== 6. STATEMENT: circular clip-path reveal + zoom ===== */
+    var stTl = gsap.timeline({ scrollTrigger: { trigger: '.statement-stage', start: 'top top', end: '+=170%', pin: true, scrub: 1,
+      onUpdate: function (self) { window.__stLight = self.isActive && self.progress > 0.35; }, onToggle: function (self) { if (!self.isActive) window.__stLight = false; } } });
+    stTl.from('.st-before p', { opacity: 0, y: 20, duration: 0.2 }, 0)
+      .from('.st-before .ring', { scale: 0.4, opacity: 0, duration: 0.3 }, 0)
+      .fromTo('.st-reveal', { clipPath: 'circle(0% at 50% 50%)' }, { clipPath: 'circle(80% at 50% 50%)', ease: 'power2.inOut', duration: 1 }, 0.25)
+      .to('.st-before .ring', { scale: 2.2, opacity: 0, duration: 0.8 }, 0.25)
+      .fromTo('.st-text', { scale: 1.35 }, { scale: 1, ease: 'power2.out', duration: 1.2 }, 0.25)
+      .from('.st-text .eyebrow', { opacity: 0, y: 14, duration: 0.25 }, 0.8)
+      .from(W(document.querySelector('.st-text blockquote')), { yPercent: 115, stagger: 0.06, duration: 0.4, ease: 'power3.out' }, 0.75)
+      .to({}, { duration: 0.35 });
+
+    /* ===== 7. FAQ: soft fade-up ===== */
+    gsap.from(W(document.querySelector('#faq h2')), { yPercent: 115, stagger: 0.05, duration: 1, ease: 'power3.out', scrollTrigger: { trigger: '#faq', start: 'top 70%' } });
+    gsap.from('.faq .sub', { opacity: 0, y: 20, duration: 1, scrollTrigger: { trigger: '#faq', start: 'top 65%' } });
+    gsap.from('.faq details', { opacity: 0, y: 30, duration: 0.9, stagger: 0.08, ease: 'power3.out', scrollTrigger: { trigger: '.faq-list', start: 'top 80%' } });
+
+    /* ===== 8. CTA: zoom-in scene ===== */
+    gsap.fromTo('.cta-rings', { scale: 0.45, rotate: -10 }, { scale: 1.05, rotate: 0, ease: 'none', scrollTrigger: { trigger: '.cta', start: 'top bottom', end: 'center center', scrub: true } });
+    gsap.fromTo('.cta .topo', { scale: 1.4 }, { scale: 1, ease: 'none', scrollTrigger: { trigger: '.cta', start: 'top bottom', end: 'bottom bottom', scrub: true } });
+    gsap.from(W(document.querySelector('#cta-title')), { yPercent: 115, stagger: 0.07, duration: 1.2, ease: 'expo.out', scrollTrigger: { trigger: '.cta', start: 'top 55%' } });
+    gsap.from('.cta .eyebrow, .cta-fade', { opacity: 0, y: 26, duration: 1, stagger: 0.12, ease: 'power3.out', scrollTrigger: { trigger: '.cta', start: 'top 50%' } });
+
+    ScrollTrigger.refresh();
+    window.addEventListener('load', function () { ScrollTrigger.refresh(); });
+  }
+
+  var started = false;
+  function start() { if (started) return; started = true; try { init(); } catch (e) { root.classList.remove('anim'); done(); if (window.console) console.warn('Level Up animations disabled:', e); } }
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(start);
+    setTimeout(start, 1500);
+  } else { start(); }
+})();
+</script>
+</body>
+</html>
