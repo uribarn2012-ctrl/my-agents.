@@ -130,6 +130,7 @@ body.mv #toasts{top:calc(var(--topH) + 62px + env(safe-area-inset-top))}
 .sl{display:block;margin:12px 0;font-size:14px}.sl small{display:block;color:var(--mut);font-size:12px;margin-top:2px}
 .sl input{width:100%;margin:6px 0 0;accent-color:var(--gold);height:28px}
 .box{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:14px;line-height:1.7}
+.box.ratio{margin:6px 0;font-size:13.5px;line-height:1.5;padding:6px 10px}
 .tbl{width:100%;border-collapse:collapse;font-size:14px}.tbl td{padding:4px 2px;border-bottom:1px solid var(--line)}.tbl td:last-child{text-align:left}
 .tbl tr.tot td{font-weight:800;border-bottom:0}
 .prog{height:10px;background:#202b38;border-radius:5px;overflow:hidden;flex:1}.prog>div{height:100%;background:var(--gold)}
@@ -233,6 +234,8 @@ ul.help li{margin:6px 0}
 #rcard .chips{margin:4px 0 2px}#rcard .warnbox{margin:6px 0;padding:6px 8px}
 .lnk{background:none;border:0;color:#8fb8ff;font-weight:700;padding:6px 0 0;cursor:pointer;font-size:13px}
 body.rc #toasts{top:calc(var(--topH) + 14px + var(--rcH,0px) + env(safe-area-inset-top))}
+body.rc #toasts .toast:not(:last-child){display:none}
+body.rc #toasts .toast{max-width:92vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:7px 12px;font-size:13px}
 .b.sm{min-height:36px;padding:6px 10px;font-size:13px;flex:0 1 auto;margin:6px 0 2px}
 .wst{margin:6px 0}
 .charts{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0}
@@ -271,6 +274,20 @@ h3.mh{margin:14px 0 4px;font-size:15px}
 /* while a dialog is open its title must stay readable: toasts wait behind it */
 #modal.open ~ #toasts{z-index:55}
 
+/* "what's urgent" button and list */
+#urgbtn{position:relative;min-width:32px;padding:0 6px;font-weight:900;color:var(--gold)}
+#urgbtn.hot{border-color:#a3323b;color:#ff8a8a}
+#urgbtn[data-badge]:not([data-badge=""])::after{content:attr(data-badge);position:absolute;top:-6px;left:-6px;background:var(--red);color:#fff;border-radius:9px;font-size:11px;min-width:18px;height:18px;line-height:18px;text-align:center;padding:0 3px}
+.ulist.urg button{flex-wrap:wrap;row-gap:0}.ulist.urg button b{flex:1 1 70%}.ulist.urg button small{flex:1 1 100%;padding-inline-start:18px;white-space:normal}
+.udot{width:10px;height:10px;border-radius:50%;flex:none;background:var(--orange)}.udot.bad{background:var(--red)}.udot.ok{background:var(--green)}.udot.warn{background:var(--orange)}
+.card.env h3{margin:2px 0}.card.env .fl small{width:52px}.card.env .fl span{font-size:12.5px;min-width:64px;text-align:left}
+/* tutorial: a ring around the thing being explained and a bubble; the map stays visible */
+#tut{position:fixed;inset:0;z-index:80;display:none;pointer-events:none}
+#tut.on{display:block}
+#tut-ring{position:fixed;border:2px solid var(--gold);border-radius:12px;box-shadow:0 0 0 9999px #0008,0 0 16px #f5b30188;transition:all .25s ease}
+#tut-b{position:fixed;left:12px;right:12px;max-width:380px;margin:0 auto;background:var(--panel);border:1px solid var(--gold);border-radius:14px;padding:10px 12px;box-shadow:0 12px 32px #000c;pointer-events:auto;line-height:1.55;font-size:14.5px}
+#tut-b p{margin:4px 0 2px}.tut-h{display:flex;justify-content:space-between;align-items:center}.tut-h b{color:var(--gold);font-size:16px}.tut-h .num{color:var(--mut);font-size:12px}
+#tut-b .btns{margin-top:6px}#tut-b .b{min-height:40px;padding:8px 10px}
 @media (min-width:900px){
   #rcard{left:12px;right:auto;width:400px}
   #sheet{left:auto;right:12px;top:calc(var(--topH) + 10px);bottom:calc(var(--barH) + 10px);width:410px;max-height:none;border-radius:14px;border:1px solid var(--line);transform:translateX(120%)}
@@ -293,6 +310,7 @@ h3.mh{margin:14px 0 4px;font-size:15px}
       <div id="speed" role="group" aria-label="מהירות הזמן">
         <button data-act="speed" data-v="0" aria-label="עצור">⏸</button><button data-act="speed" data-v="1">×1</button><button data-act="speed" data-v="2">×2</button><button data-act="speed" data-v="4">×4</button><button data-act="speed" data-v="8">×8</button>
       </div>
+      <button class="ic urg" id="urgbtn" data-act="urgent" aria-label="מה דחוף">!</button>
       <button class="ic" data-act="help" aria-label="איך משחקים">?</button>
     </div>
     <div class="r2">
@@ -387,6 +405,7 @@ h3.mh{margin:14px 0 4px;font-size:15px}
 <div id="toasts" aria-live="polite"></div>
 <div id="rcard" role="status" aria-live="polite"></div>
 <div id="flash"></div>
+<div id="tut" aria-live="polite"><div id="tut-ring"></div><div id="tut-b" role="dialog" aria-label="הדרכה"></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>

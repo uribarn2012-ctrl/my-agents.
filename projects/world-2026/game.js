@@ -410,10 +410,11 @@ function addNews(txt, k) { S.news.unshift({ t: S.day, txt, k: k || 'event' }); i
 const EQ_K = ['tanks', 'afv', 'art', 'air', 'heli', 'ships', 'subs', 'carriers', 'msl'];
 const EQ_HE1 = { tanks: 'טנק', afv: 'נגמ״ש', art: 'תותח', air: 'מטוס קרב', heli: 'מסוק', ships: 'ספינה', subs: 'צוללת', carriers: 'נושאת מטוסים', msl: 'טיל' }, EQ_F1 = { ships: 1, subs: 1, carriers: 1 };
 const EQ_HE = { tanks: 'טנקים', afv: 'נגמ״שים', art: 'תותחים', air: 'מטוסי קרב', heli: 'מסוקים', ships: 'ספינות', subs: 'צוללות', carriers: 'נושאות מטוסים', msl: 'טילים' };
-const newCas = () => ({ sk: 0, sw: 0, ck: 0, cw: 0, eq: {}, mu: 0, sp: 0, dm: 0 });
+const newCas = () => ({ sk: 0, sw: 0, ck: 0, cw: 0, eq: {}, mu: 0, sp: 0, dm: 0, pw: 0 });
 function addCas(a, b) {
   if (!a || !b) return a;
   a.sk += b.sk || 0; a.sw += b.sw || 0; a.ck += b.ck || 0; a.cw += b.cw || 0; a.mu += b.mu || 0; a.sp += b.sp || 0; a.dm += b.dm || 0;
+  if (b.pw) a.pw = (a.pw || 0) + b.pw;
   for (const k in b.eq || {}) a.eq[k] = (a.eq[k] || 0) + b.eq[k];
   return a;
 }
@@ -471,11 +472,15 @@ function countedBattle(w, fn) {
   const parts = A.concat(B).filter(m => S.c[m] && S.c[m].alive);
   const snaps = parts.map(m => invSnap(S.c[m]));
   const fA = w.f;
+  POWQ = {};
   fn();
   const lA = newCas(), lB = newCas();
   let mine = null;
   parts.forEach((m, i) => {
     const l = lossFrom(S.c[m], snaps[i]);
+    // soldiers who surrendered are prisoners, not dead or wounded
+    const q = POWQ[m] || 0, out = l.sk + l.sw;
+    if (q > 0 && out > 0) { const pw = Math.min(out, q * 1000), f = 1 - pw / out; l.sk *= f; l.sw *= f; l.pw = pw; }
     addCas(A.includes(m) ? lA : lB, l);
     if (m === S.player) mine = l;
   });
@@ -491,6 +496,7 @@ function countedBattle(w, fn) {
   if (S.player && inWar(w, S.player)) {
     const meA = w.A.includes(S.player), myCiv = meA ? cA : cB, theirCiv = meA ? cB : cA, lead = w.a === S.player || w.b === S.player;
     if (mine) addCas(PS().suf, mine);
+    POWQ = {};
     if (lead) {
       // our own civilians only count where the fighting is on our soil (allies' civilians are theirs)
       const civMe = (meA ? onA : 1 - onA) > 0 ? myCiv : 0;
@@ -628,10 +634,12 @@ function battle(w) {
   eA *= 1 - Math.max(0, -w.f) / 200; eB *= 1 - Math.max(0, w.f) / 200;
   if (w.f > 0) eB *= 1.3 + w.f / 250; else if (w.f < 0) eA *= 1.3 - w.f / 250;
   const r = eA / (eA + eB + 1e-9);
+  // how lopsided it is: a far stronger side breaks the weaker one and advances much faster
+  const rho = Math.max(eA, eB) / Math.max(0.5, Math.min(eA, eB)); w.rho = rho; w.rr = r;
   // big countries take longer to occupy
   const occupied = r >= 0.5 ? S.c[w.b] : S.c[w.a];
   const size = clamp(Math.sqrt(15 / Math.max(0.5, occupied ? occupied.pop : 15)), 0.3, 0.75);
-  let shift = ((r - 0.5) * 32 / DPM + (R() - 0.5) * 0.55) * size * (pSide ? 1 : 0.6);
+  let shift = ((r - 0.5) * 32 / DPM * pushMul(rho) + (R() - 0.5) * 0.55) * size * (pSide ? 1 : 0.6);
   // the deeper the occupation, the stronger the local resistance (insurgency, cities, supply lines)
   if (shift * w.f > 0) shift *= 1 - 0.5 * Math.abs(w.f) / 100;
   // invading across the sea (no shared border) is much slower than a land offensive
@@ -639,16 +647,19 @@ function battle(w) {
   const f0 = w.f;
   w.f = clamp(w.f + shift, -100, 100); w.last = shift; w.ms = (w.ms || 0) + shift;
   if (pSide && Math.sign(f0) !== Math.sign(w.f)) needMapRecolor = true;
-  const lossA = 0.006 * (1 - r) * 2 * lmA / DPM, lossB = 0.006 * r * 2 * lmB / DPM;
-  const hurt = (side, loss) => side.forEach(m => {
+  // the weaker side of a lopsided war loses its committed forces much faster, and many surrender
+  const cm = 1 + 15 * routLoss(rho), su = surShare(rho);
+  const lossA = 0.006 * (1 - r) * 2 * lmA / DPM * (r < 0.5 ? cm : 1), lossB = 0.006 * r * 2 * lmB / DPM * (r >= 0.5 ? cm : 1);
+  const hurt = (side, loss, weak) => side.forEach(m => {
     const c = S.c[m]; if (!c || !c.alive) return;
-    const k = commit(m, w) * loss, dead = c.inv.troops * k;
+    const k = Math.min(0.05, commit(m, w) * loss), dead = c.inv.troops * Math.min(0.5, k);
     hurtInv(c, k, ['troops', 'tanks', 'afv', 'art']);
     hurtInv(c, k * 0.5, ['air', 'heli']);
     hurtInv(c, k * 0.25, ['ships', 'subs', 'msl']);
-    if (m === S.player) S.p.cas += dead;
+    if (weak && su > 0) POWQ[m] = (POWQ[m] || 0) + dead * su;
+    if (m === S.player) S.p.cas += dead * (weak ? 1 - su * 0.7 : 1);
   });
-  hurt(w.A, lossA); hurt(w.B, lossB);
+  hurt(w.A, lossA, r < 0.5); hurt(w.B, lossB, r >= 0.5);
   checkWarEnd(w);
 }
 // monthly front report for the player's wars
@@ -660,6 +671,18 @@ function frontNews(w) {
   const myShift = pSide === 'A' ? s : -s;
   if (Math.abs(myShift) >= 1) addNews('חזית ' + nm(en) + ': ' + (myShift > 0 ? 'כוחותינו התקדמו' : 'האויב התקדם') + ' (' + (me >= 0 ? 'אנחנו מחזיקים ' + Math.round(me) + '% משטחם' : 'האויב מחזיק ' + Math.round(-me) + '% משטחנו') + ').', myShift > 0 ? 'good' : 'bad');
   if (myShift > 5) S.p.shock += 0.6;
+}
+// a heads-up when one of our wars is almost won or close to being lost (once each way)
+function warAlerts() {
+  if (!S.player) return;
+  warsOf(S.player).forEach(w => {
+    if (w.pause > 0 || !(w.a === S.player || w.b === S.player)) return;
+    const fp = mySideFront(w, S.player), en = enemyLeaderFor(w, S.player), cap = S.ct ? capOf(S.player) : null, cs = cap ? cst(cap) : null;
+    const al = w.al || (w.al = {});
+    if (fp >= 75 && !al.win) { al.win = 1; const t = 'כמעט ניצחנו: אנחנו מחזיקים ' + Math.round(fp) + '% מ' + nm(en) + '. עוד מעט היא תיפול — או שתציע שלום בתנאים טובים.'; toast(t); addNews(t, 'good'); warLog(w, 'כמעט ניצחון'); }
+    if ((fp <= -55 || (cs && ((cs.s > 0 && cs.b === en) || cs.o === en))) && !al.lose) { al.lose = 1; const t = 'סכנה! ' + (fp <= -55 ? nm(en) + ' מחזיקה ' + Math.round(-fp) + '% משטחנו' : 'הבירה שלנו בסכנה') + ' — כדאי להחזיר כוחות הביתה, לגייס מילואים או להציע הפסקת אש.'; toast(t, true); addNews(t, 'bad'); warLog(w, 'המלחמה הולכת רע'); }
+    if (fp < 50 && al.win) al.win = 0; if (fp > -35 && al.lose && !(cs && (cs.s > 0 || cs.o !== S.player))) al.lose = 0;
+  });
 }
 function checkWarEnd(w) {
   if (!S.wars.includes(w)) return;
@@ -920,8 +943,9 @@ function aiWars() {
   // AI wars ending
   S.wars.slice().forEach(w => {
     if (involvesPlayer(w) || !S.wars.includes(w) || w.pause > 0) return;
-    const age = S.turn - w.start, f = w.f;
-    if (Math.abs(f) >= 50 && R() < 0.12) {
+    const age = S.turn - w.start, f = w.f, lop = (w.rho || 1) >= 6 && ((w.rr || 0.5) >= 0.5) === (f > 0);
+    // a side that is being crushed gives up sooner
+    if (Math.abs(f) >= (lop ? 30 : 50) && R() < (lop ? 0.35 : 0.12)) {
       const win = f > 0 ? w.a : w.b, lose = f > 0 ? w.b : w.a;
       cede(win, lose, Math.abs(f) / 200);
       addNews(nm(lose) + ' נכנעה ל' + nm(win) + ' וויתרה על חלק משטחה בהסכם שלום.', 'world'); endWar(w);
@@ -1093,9 +1117,10 @@ function govAp() { const g = S.p && S.p.gov; if (!g) return 0; let s = 0; for (c
 function govSal() { const g = S.p && S.p.gov; if (!g) return 0; let s = 0; for (const r in g.m) if (g.m[r]) s += g.m[r].sal; return s; }
 const pctT = v => '⁦' + Math.round(v * 100) + '%⁩';
 // a minister's report: kept in the log, and shown as a small toast (not more than one every ~1.6 s)
-function logMin(r, txt, fx, bad) {
+function logMin(r, txt, fx, bad, quiet) {
   const g = G(), m = g.m[r];
   g.log.unshift({ d: S.day, r, t: txt, fx: fx || '', bad: !!bad }); if (g.log.length > 40) g.log.length = 40;
+  if (quiet) return;
   const now = performance.now();
   if (now - (logMin.t || 0) > 1600) { logMin.t = now; toast(mTitle(r, m) + ': ' + txt + (fx ? ' · ' + fx : ''), bad); }
 }
@@ -1128,12 +1153,70 @@ function govDay() {
 // once a month: popularity drifts with the government's, corrupt ministers take their share
 function govMonth() {
   const g = S.p && S.p.gov; if (!g) return;
+  // the finance minister's budget envelopes for the coming month
+  const e = setEnvelopes();
+  if (minOn('fin')) logMin('fin', 'תקציב לחודש הבא: ביטחון ⁦' + moneyTxt(e.def) + '⁩ · בינוי ⁦' + moneyTxt(e.int) + '⁩ · חוץ ⁦' + moneyTxt(e.fo) + '⁩' + (e.why ? ' (' + e.why + ')' : ''), '', S.p.treasury < 0, true);
   for (const r of MIN_ORDER) {
     const m = g.m[r]; if (!m) continue;
     m.pop = clamp(m.pop + (R() - 0.5) * 6 + (P().approval - 50) * 0.03 + (TRAITS[m.tr].ap || 0) * 0.3, 5, 95);
     if (TRAITS[m.tr].steal) { const s = P().gdp * 0.00012 * (0.5 + R()); S.p.treasury -= s; m.st = (m.st || 0) + s; }
   }
 }
+/* ---- money discipline: the finance minister's monthly envelopes; nobody spends money we don't have ---- */
+const ENV_R = ['def', 'int', 'fo'];
+// the debt above which nobody spends, even in an emergency (lower for poor countries)
+const safeDebt = () => { const c = P(), pc = c.gdp / Math.max(0.01, c.pop); return c.gdp * (pc < 5 ? 0.3 : pc < 15 ? 0.45 : 0.6); };
+// our homeland or capital under attack: the only case where the defence minister may still spend while in debt
+function homeEmergency() {
+  const me = S.player; if (!S.units) return false;
+  if (S.units.some(u => u.o !== me && u.at === me && domOf(u) === 'land' && atWar(u.o, me))) return true;
+  return !!(S.ct && citiesOfT(me).some(x => { const st = cst(x); return (st.s > 0 && st.b && atWar(st.b, me)) || (st.o && st.o !== me && atWar(st.o, me)); }));
+}
+// the finance minister (or, with no finance minister, a plain rule) splits what the country can afford this month
+function setEnvelopes() {
+  const g = G(), p = S.p, c = P(), fm = minOf('fin');
+  const bd = budgetDay(), net = bd.net * DPM, reserve = c.gdp * (fm && fm.tr === 'frugal' ? 0.04 : 0.02);
+  const atw = activeWars(S.player) > 0, losing = warsOf(S.player).some(w => w.pause === 0 && mySideFront(w, S.player) < -5);
+  const debt = p.treasury < 0;
+  const why = [];
+  let pool = 0;
+  if (p.bankrupt) why.push('פשיטת רגל — אין הוצאות');
+  else if (debt) why.push('הקופה במינוס — אין הוצאות חדשות');
+  else {
+    pool = Math.max(0, p.treasury - reserve) * 0.35 + Math.max(0, net) * 0.6;
+    if (net < 0) pool = Math.max(0, pool + net); // a deficit eats into what can be spent
+    if (fm) pool *= 1 + (mSk(fm) - 3) * 0.05;
+  }
+  let sh = atw ? { def: 0.75, int: 0.08, fo: 0.17 } : { def: 0.3, int: 0.45, fo: 0.25 };
+  if (atw) why.push(losing ? 'מלחמה שהולכת רע — ביטחון קודם' : 'מלחמה — ביטחון קודם');
+  if (c.approval < 38 && !losing) { sh.int += 0.15; sh.def -= atw ? 0.1 : 0.05; sh.fo -= atw ? 0.05 : 0.1; why.push('העם כועס — יותר לפרויקטים'); }
+  if (p.rep < 35) { sh.fo += 0.08; sh.int -= 0.08; why.push('מוניטין נמוך — יותר לשר החוץ'); }
+  if (!debt && net < 0 && !atw) { sh.int *= 0.5; why.push('גירעון — פחות פרויקטים'); }
+  const tot = sh.def + sh.int + sh.fo, old = g.env;
+  g.env = { d: S.day, pool, why: why.join(' · '), used: { def: 0, int: 0, fo: 0 } };
+  // what a minister did not spend is saved for him (up to 6 months' worth), so a big project can be afforded — but never while in debt
+  ENV_R.forEach(r => { const base = pool * Math.max(0, sh[r]) / tot, left = old && !debt && !p.bankrupt ? Math.max(0, (old[r] || 0) - (old.used[r] || 0)) : 0; g.env[r] = base + Math.min(left, base * 5); });
+  return g.env;
+}
+const envOf = () => { const g = G(); return g.env && S.day - g.env.d < 30 ? g.env : setEnvelopes(); };
+const envLeft = r => { const e = envOf(); return Math.max(0, (e[r] || 0) - (e.used[r] || 0)); };
+// why a minister may not spend this right now ('' = may spend)
+function noMoney(r, cost, emergency) {
+  const p = S.p; if (p.bankrupt) return 'פשיטת רגל';
+  if (emergency) return p.treasury - cost < -safeDebt() ? 'החוב גבוה מדי, גם בחירום' : '';
+  if (p.treasury - cost < 0) return p.treasury < 0 ? 'הקופה במינוס' : 'אין מספיק כסף בקופה';
+  if (ENV_R.includes(r) && cost > envLeft(r) + 1e-9) return 'מעבר לתקציב שקבע האוצר';
+  return '';
+}
+// every shekel a minister spends goes through here (and is counted)
+function minSpend(r, cost, emergency) {
+  if (noMoney(r, cost, emergency)) return false;
+  if (ENV_R.includes(r)) { const e = envOf(); e.used[r] = (e.used[r] || 0) + cost; }
+  const g = G(); g.spent = (g.spent || 0) + cost; (g.spR || (g.spR = {}))[r] = (g.spR[r] || 0) + cost;
+  return true;
+}
+// a "didn't do it, because..." line, at most once a month for the same reason
+function minWhyNot(r, k, txt) { const g = G(), nr = g.nr || (g.nr = {}), key = r + ':' + k; if ((nr[key] || 0) > S.day) return; nr[key] = S.day + 30; logMin(r, txt, '', true); }
 /* ---- the defence minister: runs the army ---- */
 function minDef(m) {
   const me = S.player, M = P(), pol = m.pol, g = G(), st = pol.st, tr = m.tr, es = mSk(m);
@@ -1182,23 +1265,34 @@ function minDef(m) {
       const r = planMove(u, p, 'def'); if (!r.err && !r.needWar) { commitMove(u, r, true); moved++; }
     });
     if (H < need) mine.filter(u => free(u) && domOf(u) !== 'sea' && u.at && u.at !== me).sort((a, b) => uStr(b) - uStr(a)).forEach(u => { if (H >= need) return; sendHome(u, true); H += uStr(u); rec++; });
-    if (H < need && pol.mob && M.res >= 1 && !cdLeft('mob') && !(M.mob > 0)) { mobilize(true); said.push('גיוס מילואים'); }
+    if (H < need && pol.mob && M.res >= 1 && !cdLeft('mob') && !(M.mob > 0)) {
+      const nm_ = noMoney('def', 0, true);
+      if (!nm_) { mobilize(true); said.push('גיוס מילואים — פלישה לשטחנו'); } else minWhyNot('def', 'mob', 'לא גייסתי מילואים — ' + nm_);
+    }
     if (moved || rec) said.push('הגנה על הבית: ' + [moved ? moved + ' יחידות נעו מול הפולשים' : '', rec ? rec + ' הוחזרו מהחזית' : ''].filter(Boolean).join(', '));
   }
   // c) take the fight to the enemy, one front per order (the weakest neighbour first), never a new war
   if (I <= 0 || H >= I * 2) {
-    const fronts = wars.map(w => ({ w, E: enemyLeaderFor(w, me) })).filter(x => S.c[x.E] && S.c[x.E].alive)
-      .sort((a, b) => (adjacent(b.E, me) - adjacent(a.E, me)) || (power(S.c[a.E]) - power(S.c[b.E])));
+    // concentrate on one front: where our force would count most (best ratio), weighted by what is at stake there
+    const homePool = mine.filter(u => S.units.includes(u) && domOf(u) === 'land' && u.at === me && !u.dest).reduce((s, u) => s + uStr(u), 0);
+    const fronts = wars.map(w => ({ w, E: enemyLeaderFor(w, me) })).filter(x => S.c[x.E] && S.c[x.E].alive).map(x => {
+      const Ec = S.c[x.E], inE = forcesIn(me, x.E, Ec.adv), dE = (hasUnits(x.E) ? defStr(forcesIn(x.E, x.E, M.adv)) : power(Ec) * 0.6) * 1.3;
+      x.est = (atkStr(inE) + homePool * 0.6) / (dE + 1); x.val = x.est * (adjacent(x.E, me) ? 1.5 : 1) * (1 + Math.min(1, Math.max(0, mySideFront(x.w, me)) / 60)); return x;
+    }).sort((a, b) => b.val - a.val);
     for (const { w, E } of fronts) {
       const Ec = S.c[E];
       const totLand = mine.filter(u => S.units.includes(u) && domOf(u) === 'land').reduce((s, u) => s + uStr(u), 0);
       let avail = mine.filter(u => S.units.includes(u) && domOf(u) === 'land' && u.at === me && !u.dest).reduce((s, u) => s + uStr(u), 0) - totLand * ({ def: 0.6, bal: 0.35, atk: 0.2 }[st]);
       const inE = forcesIn(me, E, Ec.adv);
       const dE = (hasUnits(E) ? defStr(forcesIn(E, E, M.adv)) : power(Ec) * 0.6) * (1.3 + Math.max(0, mySideFront(w, me)) / 250);
-      const thr = { def: 2.0, bal: 1.15, atk: 0.85 }[st] * (tr === 'aggr' ? 0.85 : tr === 'careful' ? 1.2 : 1) * (1 + (R() - 0.5) * (6 - es) * 0.08);
+      // never into a hopeless fight: a good minister wants a clear edge, even a poor one at least 1.2:1
+      const thr = Math.max(es >= 3 ? 1.4 : 1.2, { def: 2.2, bal: 1.6, atk: 1.4 }[st] * (tr === 'aggr' ? 0.9 : tr === 'careful' ? 1.2 : 1) * (1 + (R() - 0.5) * (6 - es) * 0.08));
       let l = inE.l, s = inE.s;
       const ratio = () => atkStr({ l, s }) / (dE + 1);
-      const pool = mine.filter(u => free(u) && domOf(u) === 'land' && u.at === me).sort((a, b) => uStr(b) - uStr(a));
+      // the capital is never left empty: the unit closest to it stays when nobody else guards it
+      const capM = S.ct ? capOf(me) : null, guard = capM ? mine.filter(u => S.units.includes(u) && domOf(u) === 'land' && u.at === me && km([u.lon, u.lat], cityPt(capM)) < 200) : [];
+      const keep = capM && guard.length <= 1 ? mine.filter(u => S.units.includes(u) && domOf(u) === 'land' && u.at === me).sort((a, b) => km([a.lon, a.lat], cityPt(capM)) - km([b.lon, b.lat], cityPt(capM)))[0] : null;
+      const pool = mine.filter(u => free(u) && domOf(u) === 'land' && u.at === me && u !== keep).sort((a, b) => uStr(b) - uStr(a));
       const sent = [];
       // the objective: the most important enemy city within reach (big, the capital, close to us)
       const tcity = S.ct ? warCityTarget(E, me, pool[0] ? [pool[0].lon, pool[0].lat] : (TERR[mainTid(me)] || {}).c) : null;
@@ -1232,7 +1326,9 @@ function minDef(m) {
           logMin('def', 'אין מספיק כוח כדי לפלוש ל' + nm(E) + ' — הכוחות נשארים להגן. כדאי לשקול רכש או בעלות ברית', '', true);
         }
       }
-      if (sent.length) said.push((sent.length === 1 ? uName(sent[0]) + ' נשלחה' : sent.length + ' יחידות נשלחו') + (tcity ? ' לכבוש את ' + cityName(tcity) : ' לחזית ' + nm(E)));
+      if (sent.length) said.push((sent.length === 1 ? uName(sent[0]) + ' נשלחה' : 'ריכזתי ' + sent.length + ' יחידות') + (tcity ? ' לכבוש את ' + cityName(tcity) : ' מול ' + nm(E)) + ' — יחס ⁦' + ratioTxt(atkStr({ l, s }), dE) + '⁩');
+      // air and missile strikes on their army first (before and during the ground assault)
+      if (wars.length && (sent.length || l > 0 || ratio() < thr * 1.1)) { const t = minStrike(m, E); if (t) said.push(t); }
       // air cover over our troops in their land
       if (l > 0 && !mine.some(u => domOf(u) === 'air' && S.units.includes(u) && (u.at === E || (u.dest && u.mode === 'atk')))) {
         const air = mine.find(u => domOf(u) === 'air' && u.at === me && free(u));
@@ -1250,17 +1346,25 @@ function minDef(m) {
     }
   }
   // d) reserves: called up when the war goes badly, sent home after the peace
-  if (pol.mob && wars.length && !(M.mob > 0) && M.res >= 1 && !cdLeft('mob') && wars.some(w => mySideFront(w, me) < -8)) { mobilize(true); said.push('גיוס מילואים — החזית בבעיה'); }
+  if (pol.mob && wars.length && !(M.mob > 0) && M.res >= 1 && !cdLeft('mob') && wars.some(w => mySideFront(w, me) < -8)) {
+    // the enemy holds part of our land: an emergency, so even in debt (up to a safe limit)
+    const nm_ = noMoney('def', 0, true);
+    if (!nm_) { mobilize(true); said.push('גיוס מילואים — האויב בשטחנו'); } else minWhyNot('def', 'mob', 'לא גייסתי מילואים — ' + nm_);
+  }
   if (!wars.length && M.mob > 0 && S.day - (S.p.lastWar || 0) > 30) { demobilize(true); said.push('המילואימניקים שוחררו הביתה'); }
   // e) once a month: the defence budget follows the wars (unless the player set it himself), and purchases
   if (S.day - (g.lb || -99) >= 30) {
     g.lb = S.day;
     const p = S.p;
     if (!(g.ovr.def > S.day)) {
-      if (wars.length && st !== 'def' && p.defPct < Math.min(0.12, p.defPct0 * 1.5)) { p.defPct = Math.min(0.12, Math.round((p.defPct + 0.005) * 1000) / 1000); said.push('תקציב הביטחון הוגדל ל-' + '⁦' + (p.defPct * 100).toFixed(1) + '%⁩'); }
+      const emg = homeEmergency(), cant = p.treasury < 0 && !emg;
+      if (wars.length && st !== 'def' && p.defPct < Math.min(0.12, p.defPct0 * 1.5) && cant) minWhyNot('def', 'defpct', 'לא הגדלתי את תקציב הביטחון — הקופה במינוס');
+      else if (wars.length && st !== 'def' && p.defPct < Math.min(0.12, p.defPct0 * 1.5) && (!emg || !noMoney('def', 0, true))) { p.defPct = Math.min(0.12, Math.round((p.defPct + 0.005) * 1000) / 1000); said.push('תקציב הביטחון הוגדל ל-' + '⁦' + (p.defPct * 100).toFixed(1) + '%⁩'); }
       else if (!wars.length && S.day - (p.lastWar || -999) > 90 && p.defPct > p.defPct0 * 1.05 && st !== 'atk') { p.defPct = Math.max(p.defPct0, Math.round((p.defPct - 0.003) * 1000) / 1000); said.push('תקציב הביטחון הוחזר ל-' + '⁦' + (p.defPct * 100).toFixed(1) + '%⁩'); }
     }
     if (pol.buy) { const b = minBuy(m); if (b) said.push(b); }
+    // in debt, the army shrinks back to its normal budget once there is no war
+    if (!(g.ovr.def > S.day) && !wars.length && p.treasury < 0 && p.defPct > p.defPct0 + 0.001) { p.defPct = Math.max(p.defPct0, Math.round((p.defPct - 0.005) * 1000) / 1000); said.push('קיצצתי בתקציב הביטחון ל-⁦' + (p.defPct * 100).toFixed(1) + '%⁩ — הקופה במינוס'); }
     // the minister may suggest a war, but never starts one
     if (st !== 'def' && !wars.length && !(g.sw > S.day) && R() < 0.3) {
       const t = neighborsOf(me).filter(x => S.c[x] && S.c[x].alive && justified(x) && rel(x, me) < -50 && power(M) > power(S.c[x]) * 2.5 && !isAlly(x, me))[0];
@@ -1271,10 +1375,12 @@ function minDef(m) {
 }
 // weapons the defence minister orders on his own, within his share of the treasury
 function minBuy(m) {
-  const c = P(), p = S.p; if (p.bankrupt) return null;
+  const c = P(), p = S.p;
   const atw = activeWars(S.player) > 0;
-  const share = (m.pol.buy === 2 ? 0.3 : 0.12) * (atw ? 1.5 : 1) * (m.tr === 'frugal' ? 0.6 : 1);
-  const budget = (p.treasury - c.gdp * 0.02) * share; if (budget <= 0) return null;
+  const nm0 = noMoney('def', 0); if (nm0) { minWhyNot('def', 'buy', 'לא קניתי נשק — ' + nm0); return null; }
+  // his envelope from the finance minister; a modest policy uses only part of it
+  const budget = envLeft('def') * (m.pol.buy === 2 ? 1 : 0.6) * (m.tr === 'frugal' ? 0.7 : 1);
+  if (budget <= 0) { minWhyNot('def', 'buy', 'לא קניתי נשק — תקציב הביטחון של החודש נוצל'); return null; }
   // count what is already ordered and on its way, so he does not re-order the same thing every month
   const onWay = {}; (p.queue || []).forEach(q => { if (BUY[q.k]) onWay[q.k] = (onWay[q.k] || 0) + q.n; });
   const ratio = k => ((c.inv[k] || 0) + (onWay[k] || 0) + 1) / ((c.inv0[k] || 0) + 1);
@@ -1284,8 +1390,26 @@ function minBuy(m) {
   const k = keys.sort((a, b) => ratio(a) - ratio(b))[0];
   const room = Math.max(1, Math.ceil(((c.inv0[k] || 0) * cap - (c.inv[k] || 0) - (onWay[k] || 0)) / BUY[k].n));
   const B = BUY[k], mul = Math.min(20, room, Math.floor(budget / B.cost)); if (mul < 1) return null;
-  if (!buyPkg(k, mul, true)) return null;
+  if (!minSpend('def', B.cost * mul) || !buyPkg(k, mul, true)) return null;
   return 'רכש: ' + (k === 'troops' ? troopsPlain(B.n * mul) + ' חיילים' : '⁦' + B.n * mul + '⁩ ' + B.unit) + ' (' + '⁦' + moneyTxt(B.cost * mul) + '⁩)';
+}
+// an air or missile strike on the enemy's army (never on a city) before and during a ground assault
+function minStrike(m, E) {
+  if (m._st === S.day) return ''; m._st = S.day;
+  const me = P(), w = S.wars.find(x => inWar(x, E) && inWar(x, S.player)); if (!w || w.pause > 0) return '';
+  const opts = [];
+  unitsOf(S.player).forEach(u => {
+    if (u.dest) return;
+    if ((u.m.air || 0) >= 4 && distToC(E, [u.lon, u.lat]) <= AIR_RANGE && !cdLeft('air:' + E + ':' + u.id)) opts.push({ u, k: 'air' });
+    if (u.t === 'msl' && me.mlv > 0 && (u.m.msl || 0) >= 5 && distToC(E, [u.lon, u.lat]) <= MIS_RANGE[me.mlv] && !cdLeft('mis:' + E + ':' + u.id)) opts.push({ u, k: 'mis' });
+  });
+  const o = opts.find(x => x.k === 'air') || opts[0]; if (!o) return '';
+  const cost = strikeCost(o.k), why = noMoney('def', cost);
+  if (why) { minWhyNot('def', 'strike', 'לא תקפתי מהאוויר — ' + why); return ''; }
+  const t0 = PS().strikes; strike(E, o.k, o.u.id, null, true);
+  if (PS().strikes === t0) return '';
+  minSpend('def', cost);
+  return (o.k === 'air' ? 'תקיפה אווירית' : 'מטח טילים') + ' על צבא ' + nm(E) + ' לפני ההסתערות';
 }
 /* ---- the finance minister: tax and welfare ---- */
 function minFin(m) {
@@ -1301,11 +1425,12 @@ function minFin(m) {
     else if (p.welfare > 0.09 && ap > 38) { k = 'welfare'; d = -0.01; } else if (p.tax < 0.5) { k = 'tax'; d = 0.01; }
   } else if (ap < 34 && debt < lim + 0.3) {
     why = 'העם כועס';
+    if (p.treasury < 0 && netY < 0) { if (!(g.nr && g.nr['fin:ang'] > S.day)) minWhyNot('fin', 'ang', 'העם כועס, אבל הקופה במינוס — לא מוריד מסים ולא מגדיל רווחה'); return; }
     if (goal === 'wel' && p.welfare < 0.3) { k = 'welfare'; d = 0.01; } else if (p.tax > 0.16) { k = 'tax'; d = -0.01; }
   } else if (netY > 0.004 && p.treasury > res) {
     why = 'עודף בקופה';
     if (goal === 'grow' && p.tax > 0.18) { k = 'tax'; d = -0.01; }
-    else if (goal === 'wel' && p.welfare < 0.28) { k = 'welfare'; d = 0.01; }
+    else if (goal === 'wel' && p.welfare < 0.28 && p.treasury > 0) { k = 'welfare'; d = 0.01; }
     else if (goal === 'bal' && (ap < 52 || p.treasury > c.gdp * 0.08) && p.tax > 0.2) { k = 'tax'; d = -0.01; }
   } else if (netY < ({ grow: -0.025, bal: -0.006, wel: -0.02 }[goal] - (tr === 'popul' ? 0.01 : 0)) && (goal === 'bal' || debt > 0.1)) {
     why = 'גירעון';
@@ -1322,19 +1447,25 @@ function minFin(m) {
 /* ---- the construction minister: national projects from spare money ---- */
 const INT_ORD = { people: ['hosp', 'house', 'school', 'infra', 'green'], growth: ['infra', 'school', 'green', 'hosp', 'house'], green: ['green', 'infra', 'school', 'hosp', 'house'] };
 function minInt(m) {
-  const p = S.p, c = P(); if (p.bankrupt) return;
-  const debt = p.treasury < 0 ? -p.treasury / c.gdp : 0; if (debt > 0.3) return;
+  const p = S.p, c = P();
+  const nm0 = noMoney('int', 0); if (nm0) { minWhyNot('int', 'build', 'לא התחלתי פרויקט — ' + nm0); return; }
   const reserve = c.gdp * (m.tr === 'frugal' ? 0.05 : m.tr === 'popul' ? 0.01 : 0.025);
-  const free = p.treasury - reserve; if (free <= 0) return;
+  const free = Math.min(p.treasury - reserve, envLeft('int') * (m.tr === 'popul' ? 1.3 : 1));
+  if (free <= 0) { minWhyNot('int', 'build', 'לא התחלתי פרויקט — ' + (p.treasury <= reserve ? 'צריך להשאיר רזרבה בקופה' : 'תקציב הבינוי של החודש נוצל')); return; }
   if (p.proj.length >= (m.tr === 'careful' || m.tr === 'frugal' ? 1 : 2)) return;
-  for (const k of INT_ORD[m.pol.pri] || INT_ORD.people) {
+  // angry people: projects that raise approval first
+  const ord = (INT_ORD[m.pol.pri] || INT_ORD.people).slice();
+  if (c.approval < 38) ord.sort((a, b) => (PROJ[b].ap || 0) - (PROJ[a].ap || 0));
+  let tooBig = null;
+  for (const k of ord) {
     if (p.proj.some(q => q.k === k) || (p.built[k] || 0) >= projMax(k)) continue;
-    const cost = projCost(k); if (cost > free * 0.7) continue;
-    if (!startProj(k, true)) return;
+    const cost = projCost(k); if (cost > free) { tooBig = tooBig || k; continue; }
+    if (!minSpend('int', cost) || !startProj(k, true)) return;
     const D = PROJ[k];
-    logMin('int', 'התחלת בנייה: ' + D.he + ' (' + '⁦' + moneyTxt(cost) + '⁩, ' + Math.round(D.days / DPM) + ' חודשים)', D.ap ? 'העם +' + D.ap + ' בסיום' : '');
+    logMin('int', 'התחלת בנייה: ' + D.he + ' (' + '⁦' + moneyTxt(cost) + '⁩, ' + Math.round(D.days / DPM) + ' חודשים)' + (c.approval < 38 && D.ap ? ' — העם כועס, אז קודם מה שמשפר את מצב הרוח' : ''), D.ap ? 'העם +' + D.ap + ' בסיום' : '');
     return;
   }
+  if (tooBig) minWhyNot('int', 'big', 'חוסך ל' + PROJ[tooBig].he + ' — עוד אין מספיק בתקציב הבינוי');
 }
 /* ---- the foreign minister: trade, aid, relations, peace ---- */
 function minFo(m) {
@@ -1365,11 +1496,18 @@ function minFo(m) {
     }
   }
   // 3) reputation below the target: aid and gestures to countries that matter
-  if (S.p.rep < m.pol.rep && S.day - (g.lg || -99) >= (m.tr === 'frugal' ? 60 : 30) && !S.p.bankrupt) {
+  if (S.p.rep < m.pol.rep && S.day - (g.lg || -99) >= (m.tr === 'frugal' ? 60 : 30)) {
     g.lg = S.day;
+    const why = noMoney('fo', giftAmt());
+    if (why) {
+      // no money: cheap gestures instead (a summit, a visit) — a small gain with a friendly country
+      const l = alive().filter(o => o !== me && !atWar(o, me) && rel(o, me) > -20 && rel(o, me) < 60).sort((a, b) => S.c[b].gdp - S.c[a].gdp).slice(0, 6), o = l.length ? pick(l) : null;
+      if (o) { const parts = applyFx({ rel: { [o]: 3 + Math.round(es / 2) } }); logMin('fo', 'ביקור מדיני ב' + nm(o) + ' במקום סיוע — ' + why, parts.join(' · ')); }
+      return;
+    }
     const l = alive().filter(o => o !== me && !atWar(o, me) && rel(o, me) > -40 && rel(o, me) < 70 && !cdLeft('gift:' + o)).sort((a, b) => giftRep(b) - giftRep(a) || S.c[b].gdp - S.c[a].gdp).slice(0, 8);
     const o = l.length ? pick(l) : null, amt = giftAmt();
-    if (o && S.p.treasury > -P().gdp * 0.5 && spend(amt)) {
+    if (o && minSpend('fo', amt) && spend(amt)) {
       setCd('gift:' + o, 30);
       const parts = applyFx({ rep: giftRep(o), rel: { [o]: giftRel(o) } });
       addNews('שלחנו סיוע הומניטרי ל' + nm(o) + '.', 'dip');
@@ -1384,9 +1522,11 @@ function pushAid(id, kind, size) {
   if (!m) { S.pending.push({ type: 'aid', from: id, kind, size }); return; }
   const C = S.c[id]; if (!C) return;
   const big = Math.max(0.01, Math.min(P().gdp * 0.002, C.gdp * size * 0.5 + 0.02));
-  const goBig = S.p.rep < m.pol.rep && m.tr !== 'frugal' && S.p.treasury > big * 4;
+  const goBig = S.p.rep < m.pol.rep && m.tr !== 'frugal' && S.p.treasury > big * 4 && !noMoney('fo', big);
   const amt = goBig ? big : big * 0.25, e = goBig ? { ap: 1, rep: 6, rel: { [id]: 18 } } : { rep: 3, rel: { [id]: 8 } };
-  if (S.p.bankrupt || !spend(amt)) { logMin('fo', 'אין כסף לסיוע ל' + C.he, '', true); return; }
+  const why = noMoney('fo', amt);
+  if (why) { applyFx({ rel: { [id]: 2 } }); logMin('fo', 'שלחנו ל' + C.he + ' מכתב תנחומים בלי כסף — ' + why, '', true); return; }
+  if (!minSpend('fo', amt) || !spend(amt)) return;
   const parts = applyFx(e);
   addNews((goBig ? 'שלחנו משלחת סיוע גדולה ל' : 'צוותי חילוץ שלנו נחתו ב') + C.he + ' אחרי ה' + kind + '.', 'good');
   logMin('fo', (goBig ? 'משלחת סיוע ל' : 'צוותי חילוץ ל') + C.he + ' (' + kind + ')', parts.join(' · '));
@@ -1880,11 +2020,14 @@ function evMinPick(m, e, c) {
   e.ch.forEach((ch, i) => {
     if (!evOk(ch, c)) return;
     const x = effAdd(e.b, ch.e), mon = ((x.m || 0) + (x.cash || 0) / gdp) * 1000;
+    // a choice that costs money we don't have is off the table (unless every choice costs)
+    const cost = -((x.m || 0) * gdp + (x.cash || 0));
     let s = (x.ap || 0) * Wap + (x.rep || 0) * Wrep + (x.at || 0) * Math.min(1, (x.ad || 180) / 180) * Wap + mon * Wm + (x.gdp || 0) * 1000 * Wm +
       (x.gv || 0) * (x.gd || 365) / 365 * 1000 * Wm + (x.ro || 0) * 0.05 + (x.rd || 0) * 0.15 - (x.un || 0) * 2 - (x.mil ? (tr === 'careful' ? 3 : 1) : 0);
     if (tr === 'aggr') s -= (x.ro || 0) * 0.12;
     if (tr === 'corrupt') s += mon * 0.5;
     s += (R() - 0.5) * (6 - es) * 1.5;
+    if (cost > 0 && noMoney(e.r || 'fin', cost)) s -= 1e6;
     if (s > bs) { bs = s; best = i; }
   });
   return best < 0 ? e.ch.length - 1 : best;
@@ -1946,7 +2089,11 @@ function eventsDay() {
   if (!e.ch) { evNews(e, ctx); return; }
   E.ld = S.day; E.dn++;
   const m = e.r && minOn(e.r);
-  if (m) { evChoose(e, evMinPick(m, e, ctx), ctx, { m, r: e.r }); return; }
+  if (m) {
+    const i = evMinPick(m, e, ctx), x = effAdd(e.b, (e.ch[i] || {}).e), cost = -((x.m || 0) * P().gdp + (x.cash || 0));
+    if (cost > 0) { const g = G(); g.spent = (g.spent || 0) + cost; (g.spR || (g.spR = {}))[e.r] = (g.spR[e.r] || 0) + cost; if (ENV_R.includes(e.r)) { const v = envOf(); v.used[e.r] = (v.used[e.r] || 0) + cost; } }
+    evChoose(e, i, ctx, { m, r: e.r }); return;
+  }
   // too many dialogs waiting: the cautious default happens and it becomes news
   if (S.pending.some(p => p.type === 'ev') || S.pending.length >= 2) { evChoose(e, e.ch.length - 1, ctx, { auto: 1 }); return; }
   S.pending.push({ type: 'ev', id: e.id, x: extra });
@@ -1981,6 +2128,7 @@ function dayTick() {
   if (S.day % 7 === 0) S.wars.slice().forEach(w => { warSample(w); weekLog(w); if (S.ct) aiCityFlip(w); });
   if (!S.over) unitsDay();
   if (!S.over) cityDay();
+  if (!S.over) warAlerts();
   if (!S.over) approvalStep();
   if (!S.over) deliveries();
   if (!S.over) worldDay();
@@ -2038,6 +2186,7 @@ function deliveries() {
       c.inv[q.k] = (c.inv[q.k] || 0) + q.n; c.bought[q.k] = (c.bought[q.k] || 0) + q.n;
       const t = q.k === 'troops' ? 'סיימו אימון: ' + num(q.n * 1000).replace(/<[^>]+>/g, '') + ' חיילים חדשים' : 'נמסרו לצבא: ' + q.n + ' ' + BUY[q.k].unit;
       addNews(t + '.', 'good'); toast(t);
+      (p.dl || (p.dl = [])).push({ d: S.day, t }); if (p.dl.length > 8) p.dl.shift();
     }
     return false;
   });
@@ -2626,17 +2775,51 @@ function navyNear(owner, cid, r) {
 }
 const atkStr = f => f.l > 0 ? f.l + Math.min(f.s, f.l * 2) : 0;
 const defStr = f => f.l + Math.min(f.s, f.l * 2 + 5);
+/* ---- lopsided fights: the bigger the force ratio, the faster the weaker side breaks ---- */
+// 0 up to 2:1, rising on a log scale to 1 at 100:1
+const crushF = rho => clamp((Math.log10(Math.max(1, rho)) - 0.301) / 1.699, 0, 1);
+// extra share of the weaker force lost each day (3:1 ≈ 3%, 10:1 ≈ 26%, 30:1 ≈ 57%, 100:1 = all of it)
+const routLoss = rho => Math.pow(crushF(rho), 1.5);
+// share of the weaker side's losses who surrender instead of dying (prisoners)
+const surShare = rho => clamp((Math.log10(Math.max(1, rho)) - 0.7) / 1.3, 0, 0.85);
+// ground is taken (and cities fall) faster when the defender has almost nothing left
+const pushMul = rho => 1 + 3 * Math.pow(crushF(rho), 1.2);
+const NORM_L = 0.012 / DPM;
+// days until the weaker side of a fight is broken (≈95% of it gone)
+function breakDays(rho) {
+  if (!(rho > 0)) return Infinity;
+  const r = rho / (rho + 1), q = Math.min(1, NORM_L * r + routLoss(rho));
+  return q >= 0.999 ? 1 : Math.max(1, Math.ceil(Math.log(0.05) / Math.log(1 - q)));
+}
+// "330:1" (ours first), and a short forecast in plain Hebrew
+function ratioTxt(a, d) {
+  if (!(a > 0) && !(d > 0)) return '—';
+  const big = Math.max(a, d) / Math.max(0.01, Math.min(a, d)), v = big >= 9.5 ? Math.round(big) : Math.round(big * 10) / 10;
+  return a >= d ? v + ':1' : '1:' + v;
+}
+function forecastTxt(a, d) {
+  if (!(a > 0) || !(d > 0)) return a > 0 ? 'אין מולנו כוח — ניצחון מהיר' : d > 0 ? 'אין לנו כוח בשטח' : '';
+  const rho = a >= d ? a / d : d / a;
+  if (rho < 1.6) return 'כוחות שקולים — קרב ממושך';
+  const n = breakDays(rho), t = n > 300 ? 'קרב ארוך' : (a >= d ? 'ניצחון צפוי' : 'תבוסה צפויה') + ' תוך ~' + (n === 1 ? 'יום-יומיים' : n + ' ימים');
+  return n > 300 ? (a >= d ? 'יתרון לנו — אבל ' : 'יתרון להם — ') + t : t;
+}
+// captured soldiers waiting to be counted (thousands, by owner) — the battle that took them moves them into the statistics
+let POWQ = {};
 // losses come off the units that are actually fighting (and off the inventory with them)
-function hurtUnit(u, k, foeAdv) {
+function hurtUnit(u, k, foeAdv, rout, sur) {
   const c = S.c[u.o]; if (!c) return 0;
-  let dead = 0;
+  let dead = 0; rout = rout || 0;
   for (const key in u.m) {
     const f = key === 'msl' ? k * 0.25 : LAND_K[key] ? k : AIR_K[key] ? k * 0.5 * (1 + 0.5 * (foeAdv || 0)) : k * 0.25;
-    const lost = (u.m[key] || 0) * clamp(f, 0, 0.5);
+    // a broken force: ground troops and their gear go fast, aircraft and ships mostly get away
+    const rk = rout * (LAND_K[key] ? 1 : AIR_K[key] ? 0.35 : 0.15);
+    const lost = (u.m[key] || 0) * clamp(clamp(f, 0, 0.5) + rk, 0, 1);
     u.m[key] -= lost; c.inv[key] = Math.max(0, (c.inv[key] || 0) - lost);
     if (key === 'troops') dead += lost;
   }
-  if (u.o === S.player) S.p.cas += dead;
+  if (sur > 0 && dead > 0) POWQ[u.o] = (POWQ[u.o] || 0) + dead * sur;
+  if (u.o === S.player) S.p.cas += dead * (1 - (sur || 0) * 0.7);
   if (dead > 0.0004) markHit(u);
   return dead;
 }
@@ -2678,11 +2861,13 @@ function unitBattle(w) {
   aE *= 1 - Math.max(0, -fp) / 200; aP *= 1 - Math.max(0, fp) / 200;
   const rE = aE > 0 ? aE / (aE + dE + 1e-9) : 0, rP = aP > 0 ? aP / (aP + dP + 1e-9) : 0;
   const actE = fp > 0 || aE > 0, actP = fp < 0 || aP > 0;
-  w.ru = { aE: Math.round(aE), dE: Math.round(dE), aP: Math.round(aP), dP: Math.round(dP), rE, rP };
+  // force ratios (stronger : weaker) in each theatre
+  const rhoE = aE > 0 ? Math.max(aE, dE) / Math.max(0.5, Math.min(aE, dE)) : 1, rhoP = aP > 0 ? Math.max(aP, dP) / Math.max(0.5, Math.min(aP, dP)) : 1;
+  w.ru = { aE: Math.round(aE), dE: Math.round(dE), aP: Math.round(aP), dP: Math.round(dP), rE, rP, xE: aE, yE: dE, xP: aP, yP: dP };
   let shift = 0;
   if (actE || actP) {
     const K = 32 / DPM;
-    shift = (actE ? (rE - 0.5) * K : 0) - (actP ? (rP - 0.5) * K : 0) + (R() - 0.5) * 0.55;
+    shift = (actE ? (rE - 0.5) * K * (aE > 0 ? pushMul(rhoE) : 1) : 0) - (actP ? (rP - 0.5) * K * (aP > 0 ? pushMul(rhoP) : 1) : 0) + (R() - 0.5) * 0.55;
     const occ = fp >= 0 ? Ec : M;
     shift *= clamp(Math.sqrt(15 / Math.max(0.5, occ ? occ.pop : 15)), 0.3, 0.75);
     if (shift * fp > 0) shift *= 1 - 0.5 * Math.abs(fp) / 100;
@@ -2701,15 +2886,32 @@ function unitBattle(w) {
   w.f = pA ? nf : -nf; w.last = w.f - f0; w.ms = (w.ms || 0) + (w.f - f0);
   if (Math.sign(f0) !== Math.sign(w.f)) needMapRecolor = true;
   // losses
-  const L = 0.012 / DPM;
+  const L = NORM_L;
+  // the weaker side of a lopsided fight breaks: heavy losses, many surrender, attackers fall back
+  const wkE = aE >= dE ? 'd' : 'a', wkP = aP >= dP ? 'd' : 'a';
+  const roE = routLoss(rhoE), roP = routLoss(rhoP), suE = surShare(rhoE), suP = surShare(rhoP);
   if (aE > 0) {
-    myInE.list.forEach(u => hurtUnit(u, L * (1 - rE) * lm, Ec.adv));
-    enInE.list.forEach(u => hurtUnit(u, L * rE, M.adv));
+    myInE.list.forEach(u => hurtUnit(u, L * (1 - rE) * lm, Ec.adv, wkE === 'a' ? roE : 0, wkE === 'a' ? suE : 0));
+    enInE.list.forEach(u => hurtUnit(u, L * rE, M.adv, wkE === 'd' ? roE : 0, wkE === 'd' ? suE : 0));
     myNav.list.forEach(u => hurtUnit(u, L * (1 - rE) * 0.5, 0)); enNav.list.forEach(u => hurtUnit(u, L * rE * 0.5, 0));
   }
   if (aP > 0) {
-    enInMe.list.forEach(u => hurtUnit(u, L * (1 - rP), M.adv));
-    myInMe.list.forEach(u => hurtUnit(u, L * rP * lm, Ec.adv));
+    enInMe.list.forEach(u => hurtUnit(u, L * (1 - rP), M.adv, wkP === 'a' ? roP : 0, wkP === 'a' ? suP : 0));
+    myInMe.list.forEach(u => hurtUnit(u, L * rP * lm, Ec.adv, wkP === 'd' ? roP : 0, wkP === 'd' ? suP : 0));
+  }
+  // hopeless attacks are called off: the attacker pulls back home (counting our reinforcements already on the way)
+  if (aE > 0 && wkE === 'a') {
+    const coming = S.units.filter(u => u.o === me && u.dest && u.mode === 'atk' && domOf(u) === 'land' && ownerAt(u.dest[0], u.dest[1]) === E).reduce((s, u) => s + uStr(u), 0);
+    if (dE >= (aE + coming * 1.2) * 6) {
+      const out = myInE.list.filter(u => domOf(u) === 'land' && !u.dest);
+      out.forEach(u => sendHome(u, true));
+      if (out.length) { const t = (out.length === 1 ? uName(out[0]) + ' נסוגה' : out.length + ' יחידות נסוגו') + ' מ' + nm(E) + ' — יחס כוחות ' + ratioTxt(aE, dE); toast(t, true); addNews(t + '.', 'bad'); warLog(w, t); }
+    }
+  }
+  if (aP > 0 && wkP === 'a' && dP >= aP * 6) {
+    const out = enInMe.list.filter(u => domOf(u) === 'land' && !(u.dest && u.mode === 'ret'));
+    out.forEach(u => { sendHome(u, true); u.mode = 'ret'; u.ai = null; });
+    if (out.length) { addNews('כוחות ' + nm(E) + ' נשברו ונסוגים מהשטח שלנו (יחס כוחות ' + ratioTxt(dP, aP) + ').', 'good'); warLog(w, 'כוחות האויב נסוגו מהשטח שלנו'); }
   }
   if (aE > 0 || aP > 0) {
     const r = aE > 0 ? rE : 1 - rP;
@@ -2932,6 +3134,19 @@ function garrison(x, st) {
   return (1.5 + x.pop * 2.5) * (1 + 0.6 * (st.f || 0)) * (st.o === S.owner[x.tid] ? 1 : 0.5) * (C.q || 1) * (x.cap ? 1.3 : 1);
 }
 const siegeDays = (x, st) => clamp(5 + 3 * Math.sqrt(x.pop) + 4 * (st.f || 0), 5, 40) * (x.cap ? 1.3 : 1);
+// siege progress a day (%): a tiny garrison against a huge army falls within a day or two
+const siegeRate = (x, st, aS, dS) => { const rho = aS / Math.max(0.1, dS); return 100 / siegeDays(x, st) * clamp(rho / 1.5, 1, 2) * (1 + 15 * Math.pow(crushF(rho), 1.5)); };
+// attackers and defenders at a city right now (the same count the siege uses)
+function siegeForces(x) {
+  const st = cst(x), C = st.o, Cc = S.c[C], D = { l: 0, s: 0 }, A = { l: 0, s: 0 }; if (!Cc || !S.units) return { aS: 0, dS: 0 };
+  for (const u of S.units) {
+    const dom = domOf(u); if (dom === 'sea' || u.dest || km([u.lon, u.lat], cityPt(x)) > (dom === 'air' ? 120 : CR_KM)) continue;
+    const land = dom === 'land';
+    if (u.o === C || (isAlly(u.o, C) && !atWar(u.o, C))) { if (land) { const p = uPow(u, 0); D.l += p.l; D.s += p.s; } }
+    else if (atWar(u.o, C)) { const p = uPow(u, Cc.adv); if (land) A.l += p.l; A.s += p.s; }
+  }
+  return { aS: atkStr(A), dS: defStr(D) + garrison(x, st) };
+}
 const dmgDrag = id => DMGS[id] && S.c[id] ? Math.min(0.05, DMGS[id] / Math.max(0.05, S.c[id].pop) * 0.3) : 0;
 // once a day: damaged cities slowly rebuild, armies standing at cities besiege them
 function cityDay() {
@@ -2967,7 +3182,7 @@ function siegeStep(x, us) {
   if (aS <= 0) { if (was) { st.s = Math.max(0, was - 15); if (!st.s) { delete st.s; delete st.b; } citiesDirty = true; } return; }
   const b = Object.keys(by).sort((p, q) => by[q] - by[p])[0];
   if (aS >= dS * 1.5) {
-    st.s = was + 100 / siegeDays(x, st) * clamp(aS / (dS * 1.5), 1, 2); st.b = b;
+    st.s = was + siegeRate(x, st, aS, dS); st.b = b; st.ra = Math.round(aS / Math.max(0.1, dS) * 10) / 10;
     if (!was) { citiesDirty = true; siegeStarted(x, st, b); }
     if (st.s >= 100) captureCity(x, b);
   } else if (was) { st.s = Math.max(0, was - 2); st.b = b; if (!st.s) { delete st.s; delete st.b; citiesDirty = true; } }
@@ -2980,7 +3195,8 @@ function siegeStarted(x, st, b) {
     if ((x.cap || x.pop >= 0.25 || citiesOfT(me).length <= 4) && S.day - (st.al == null ? -999 : st.al) > 45 && S.day - (S.p.sal == null ? -999 : S.p.sal) > 7) { st.al = S.day; S.p.sal = S.day; S.pending.push({ type: 'siege', ci: x.id, from: b }); }
   } else if (b === me) {
     addNews('כוחותינו פתחו במצור על ' + cityName(x) + ' (' + nm(st.o) + ').', 'war');
-    toast('מצור על ' + cityName(x) + ' · כיבוש בעוד כ-⁦' + Math.ceil(siegeDays(x, st)) + '⁩ ימים');
+    const sf = siegeForces(x), n = Math.max(1, Math.ceil(100 / Math.max(0.1, siegeRate(x, st, sf.aS, sf.dS))));
+    toast('מצור על ' + cityName(x) + ' · יחס ⁦' + ratioTxt(sf.aS, sf.dS) + '⁩ · כיבוש בעוד ' + (n === 1 ? 'כיום אחד' : 'כ-⁦' + n + '⁩ ימים'));
   }
 }
 // a city changes hands; quiet = a war between other countries (only the map changes)
@@ -3100,7 +3316,7 @@ function initMap() {
   gRoutes = gUnits.append('g').attr('class', 'routes').node();
   gIcons = gUnits.append('g').attr('class', 'icons').node();
   UEL.clear(); RTEL.clear(); curT = d3.zoomIdentity;
-  gLand.on('click', ev => { if (uMode) return; const t = ev.target && ev.target.getAttribute('data-t'); if (t) onMapTap(t); });
+  gLand.on('click', ev => { if (uMode) return; const t = ev.target && ev.target.getAttribute('data-t'); if (t) { try { keepSelVisible.p = evLonLat(ev); keepSelVisible.t = t; } catch (e) { keepSelVisible.p = null; } onMapTap(t); } });
   // a tap anywhere (land or sea) while choosing a destination for a unit
   svg.on('click.units', ev => {
     if (!uMode) { if (fanIds) { fanIds = null; drawUnits(); } return; }
@@ -3209,6 +3425,18 @@ function drawMarks() {
   });
   scaleMarks();
 }
+// zoomed in, our country's name (and the enemy's) slides up or down to a spot no unit icon covers
+function placeMarkLabels() {
+  if (!gMarks || !UBOX) return;
+  gMarks.selectAll('text').each(function () {
+    const fs = +this.getAttribute('font-size') * curK, x = curT.x + curK * +this.getAttribute('x'), y = curT.y + curK * +this.getAttribute('y'), w = (this.textContent || '').length * fs * 0.62;
+    if (!(fs > 0)) return;
+    let best = 0;
+    for (const dy of [0, -24, 24, -44, 44, -64]) { const b = [x - w / 2, y + dy - fs * 0.6, x + w / 2, y + dy + fs * 0.6]; if (!ovl(b, UBOX)) { best = dy; break; } }
+    const tr = best ? 'translate(0,' + (best / curK).toFixed(4) + ')' : '';
+    if ((this.getAttribute('transform') || '') !== tr) { if (tr) this.setAttribute('transform', tr); else this.removeAttribute('transform'); }
+  });
+}
 function scaleMarks() {
   if (!gMarks) return;
   gMarks.selectAll('circle').attr('r', function () { return +this.getAttribute('data-r') / curK; }).attr('stroke-width', 2 / curK);
@@ -3305,6 +3533,26 @@ function buildItems() {
     }
   }
   gl.forEach(g => { if (g) items.push(g); });
+  // zoomed out, a big stack sits right on its country's middle: step it aside so the country's name and its capital stay readable
+  if (curK < 9 && gMarks) {
+    const av = [];
+    gMarks.selectAll('text').each(function () {
+      const fs = +this.getAttribute('font-size') * curK, x = curT.x + curK * +this.getAttribute('x'), y = curT.y + curK * +this.getAttribute('y'), w = (this.textContent || '').length * fs * 0.62;
+      if (fs > 0) av.push([x - w / 2 - 2, y - fs * 0.6 - 2, x + w / 2 + 2, y + fs * 0.6 + 2]);
+    });
+    if (S.ct) [S.player].concat(enemiesAtWar()).forEach(id => { const x = capOf(id); if (!x || !(x.mx === x.mx)) return; const sx = curT.x + curK * x.mx, sy = curT.y + curK * x.my; av.push([sx - 9, sy - 9, sx + 9, sy + 9]); });
+    for (const it of items) {
+      if (it.fan || it.us[0].id === selUnit) continue;
+      const big = it.us.length > 1;
+      for (let t = 0; t < 3; t++) {
+        const b = big ? [it.x - 30, it.y - 22, it.x + 24, it.y + 39] : [it.x - 16, it.y - 15, it.x + 16, it.y + 24];
+        const hit = av.find(q => b[0] < q[2] && b[2] > q[0] && b[1] < q[3] && b[3] > q[1]); if (!hit) break;
+        // below the label when there is room, otherwise above it
+        const down = hit[3] + (big ? 23 : 16), up = hit[1] - (big ? 40 : 25);
+        it.y = down + 40 < H ? down : up;
+      }
+    }
+  }
   // push apart icons of different sides that sit on top of each other
   for (let it = 0; it < 3; it++) for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
     const a = items[i], b = items[j]; if (a.fan || b.fan || (a.o === b.o && a.us[0].id !== selUnit && b.us[0].id !== selUnit)) continue;
@@ -3373,6 +3621,7 @@ function drawUnits() {
     });
   }
   UEL.forEach((g, k) => { if (!seen.has(k)) { g.remove(); UEL.delete(k); } });
+  placeMarkLabels();
   // dashed routes with arrival time for moving units, and battle markers of other wars
   const rs = new Set();
   for (const it of items) if (it.fan) {
@@ -3511,7 +3760,7 @@ function drawCities() {
   // what must not be covered: unit icons and the country names
   const occ = [], MB = [];
   if (gMarks) gMarks.selectAll('text').each(function () {
-    const fs = +this.getAttribute('font-size') * k, x = curT.x + k * +this.getAttribute('x'), y = curT.y + k * +this.getAttribute('y'), w = (this.textContent || '').length * fs * 0.62;
+    const tf = this.getAttribute('transform'), fs = +this.getAttribute('font-size') * k, x = curT.x + k * +this.getAttribute('x'), y = curT.y + k * (+this.getAttribute('y') + (tf ? parseFloat(tf.split(',')[1]) || 0 : 0)), w = (this.textContent || '').length * fs * 0.62;
     MB.push([x - w / 2, y - fs * 0.6, x + w / 2, y + fs * 0.6]);
   });
   const max = W < 600 ? 90 : 170, labels = k >= 1.2, seen = new Set(); let n = 0;
@@ -3613,9 +3862,11 @@ function viewCity() {
     '<div><small>יחידות שלנו בעיר</small>' + num(F.my) + (F.my ? ' <small>(עוצמה ' + num(F.myS) + ')</small>' : '') + '</div>' +
     '<div><small>יחידות אויב בעיר</small><span class="' + (F.en ? 'bad' : '') + '">' + num(F.en) + '</span>' + (F.en ? ' <small>(עוצמה ' + num(F.enS) + ')</small>' : '') + '</div></div>';
   if (st.s > 0 && st.b) {
-    const left = Math.max(1, Math.ceil((100 - st.s) / 100 * siegeDays(x, st)));
+    const sf = siegeForces(x), rate = sf.aS >= sf.dS * 1.5 ? siegeRate(x, st, sf.aS, sf.dS) : 100 / siegeDays(x, st);
+    const left = Math.max(1, Math.ceil((100 - st.s) / Math.max(0.1, rate)));
+    const rr = '<p class="sub">יחס כוחות בעיר: <b>' + '<span class="num" dir="ltr">' + (st.b === me ? ratioTxt(sf.aS, sf.dS) : ratioTxt(sf.dS, sf.aS)) + '</span></b></p>';
     h += '<div class="front"><div class="fl"><small>מצור של ' + esc(nm(st.b)) + '</small><div class="prog ' + (st.b === me ? 'g' : 'r') + '"><div style="width:' + clamp(st.s, 0, 100).toFixed(0) + '%"></div></div>' + pct(st.s) + '</div></div>' +
-      '<p class="sub">' + (st.b === me ? 'אם הכוחות שלנו יישארו חזקים מהמגינים (פי <span class="num">1.5</span>) — העיר תיפול בעוד כ-' + num(left) + ' ימים.' : 'אם לא נחזק את העיר — היא תיפול בעוד כ-' + num(left) + ' ימים.') + '</p>';
+      '<p class="sub">' + (st.b === me ? 'אם הכוחות שלנו יישארו חזקים מהמגינים (פי <span class="num">1.5</span>) — העיר תיפול בעוד כ-' + (left === 1 ? 'יום אחד' : num(left) + ' ימים') + '.' : 'אם לא נחזק את העיר — היא תיפול בעוד כ-' + (left === 1 ? 'יום אחד' : num(left) + ' ימים') + '.') + '</p>' + rr;
   }
   if (st.lg && terr === me) h += '<p class="sub">הכיבוש עולה לכלכלה שלנו ' + money(st.lg) + ' בשנה. שחרור העיר יחזיר את רובו.</p>';
   h += '<div class="btns">';
@@ -3813,12 +4064,13 @@ function fxReveal(a, b) {
 function holdFor(ms) { fxHold = Math.max(fxHold, performance.now() + ms); }
 // an air strike or missile salvo, ours or the enemy's, ending with the result card
 function fxStrike(kind, lp, tp_, used, r) {
-  const show = r.by === S.player || r.at === S.player;
+  // (a strike ordered by the defence minister on his own does not grab the screen: it is in his report)
+  const show = (r.by === S.player && !r.min) || r.at === S.player;
   const card = d => { if (show) setTimeout(() => showCard(r), d); };
   if (FXMODE === 'off' || !fxCx) { card(0); return; }
-  if (r.by === S.player || performance.now() - (fxStrike.pan || 0) > 25000) { fxStrike.pan = performance.now(); fxReveal(lp, tp_); }
+  if ((r.by === S.player && !r.min) || performance.now() - (fxStrike.pan || 0) > 25000) { fxStrike.pan = performance.now(); fxReveal(lp, tp_); }
   const z = fxZ(), kd = killed(r.cas), en = r.by !== S.player;
-  if (FXMODE === 'low') { fxBoom(tp_, 14 * z, { one: 1, delay: 450 }); fxNum(tp_, kd, { one: 1, delay: 650 }); card(900); holdFor(1200); return; }
+  if (FXMODE === 'low') { fxBoom(tp_, 14 * z, { one: 1, delay: 450 }); fxNum(tp_, kd, { one: 1, delay: 650 }); card(900); if (show) holdFor(1200); return; }
   const delay = 560; // let the camera arrive first
   const a = toScreen(lp), b = toScreen(tp_), dpx = a && b ? Math.hypot(a[0] - b[0], a[1] - b[1]) : 300;
   if (kind === 'air') {
@@ -3829,7 +4081,7 @@ function fxStrike(kind, lp, tp_, used, r) {
         drop: () => { for (let j = 0; j < 3; j++) fxBoom(tp_, (8 + R() * 5) * z, { one: 1, o: jit(16 * z), delay: j * 120 }); if (last) fxNum(tp_, kd, { one: 1, delay: 300 }); } });
     }
     const hit = delay + (nj - 1) * 110 + dur * 0.5;
-    card(hit + 900); holdFor(Math.min(2500, hit + 1000));
+    card(hit + 900); if (show) holdFor(Math.min(2500, hit + 1000));
   } else {
     const n = clamp(Math.round(used / 10), 2, 6), dur = clamp(dpx / 330, 0.8, 1.8) * 1000;
     for (let i = 0; i < n; i++) {
@@ -3838,7 +4090,7 @@ function fxStrike(kind, lp, tp_, used, r) {
         end: () => { fxBoom(tp_, 12 * z, { one: 1, o: o2 }); if (last) fxNum(tp_, kd, { one: 1, o: [0, -8] }); } });
     }
     const hit = delay + (n - 1) * 150 + dur;
-    card(hit + 600); holdFor(Math.min(2500, hit + 800));
+    card(hit + 600); if (show) holdFor(Math.min(2500, hit + 800));
   }
 }
 function fxNuke(lp, pt, r) {
@@ -4085,6 +4337,13 @@ function showCard(r) {
   const el = $('#rcard'); if (!el || !S || !S.player) return;
   el.innerHTML = cardHtml(r); el.className = 'on' + (r.at === S.player ? ' bad' : '');
   document.body.classList.add('rc');
+  // on a phone with the panel open: the card and one toast under it must both fit above the panel's header
+  el.style.maxHeight = '';
+  const sh = $('#sheet');
+  if (W < 900 && sh && sh.classList.contains('open')) {
+    const top = el.getBoundingClientRect().top, room = sh.getBoundingClientRect().top - top - 58;
+    if (room < el.offsetHeight) el.style.maxHeight = Math.max(120, room) + 'px';
+  }
   document.documentElement.style.setProperty('--rcH', el.offsetHeight + 'px');
   clearTimeout(showCard.t); showCard.t = setTimeout(hideCard, r.k === 'nuke' ? 16000 : 11000);
 }
@@ -4114,6 +4373,7 @@ function renderTop() {
   document.querySelectorAll('#speed button').forEach(b => b.classList.toggle('on', +b.dataset.v === S.speed));
   const n = S.wars.filter(involvesPlayer).length;
   const b = $('#tabwars'); if (b && b.dataset.badge !== String(n || '')) b.dataset.badge = n || '';
+  const ub = $('#urgbtn'); if (ub) { const l = urgentItems(), v = l.length; const sv = v ? String(v) : ''; if (ub.dataset.badge !== sv) ub.dataset.badge = sv; ub.classList.toggle('hot', l.some(x => x.cls === 'bad')); }
   const bh = $('#tabhome'); if (bh) { const v = S.p.proj.length ? String(S.p.proj.length) : ''; if (bh.dataset.badge !== v) bh.dataset.badge = v; }
 }
 function openTab(t) {
@@ -4123,10 +4383,20 @@ function openTab(t) {
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === (tab === 'world' ? 'news' : tab)));
   $('#sheet').classList.toggle('open', !!tab);
   if (tab) renderSheet();
+  if (tab === 'country' && S && S.player) setTimeout(keepSelVisible, 60);
+}
+// the panel must not hide the country we are looking at: pan the map (same zoom) so it shows above the panel
+function keepSelVisible() {
+  if (tab !== 'country' || !MAP_PROJ || uMode) return;
+  const t = selected || mainTid(S.player); const T = t && TERR[t]; if (!T) return;
+  // where the player tapped (a big country stays put), else the country's middle
+  const q = MAP_PROJ(keepSelVisible.t === t && keepSelVisible.p ? keepSelVisible.p : T.c); keepSelVisible.p = null; if (!q) return;
+  const s = [curT.x + curK * q[0], curT.y + curK * q[1]], [vx0, vy0, vx1, vy1] = visibleRect(), m = 30;
+  if (s[0] < vx0 + m || s[0] > vx1 - m || s[1] < vy0 + m || s[1] > vy1 - m) zoomToMapPt(q, curK);
 }
 function renderSheet() {
   const el = $('#sheet-body'); if (!el) return;
-  const fn = { country: viewCountry, eco: viewEco, home: viewHome, gov: viewGov, mil: viewMil, wars: viewWars, news: viewNews, world: viewWorld, unit: viewUnit, ulist: viewUnitList, stats: viewStats, city: viewCity }[tab];
+  const fn = { urgent: viewUrgent, country: viewCountry, eco: viewEco, home: viewHome, gov: viewGov, mil: viewMil, wars: viewWars, news: viewNews, world: viewWorld, unit: viewUnit, ulist: viewUnitList, stats: viewStats, city: viewCity }[tab];
   const h = fn ? fn() : '';
   if (el.__h !== h) { el.innerHTML = h; el.__h = h; }
 }
@@ -4293,11 +4563,21 @@ function minCard(r) {
   h += '<div class="btns">' + btn('gappoint', 'החלף', '', ' data-r="' + r + '"') + btn('gfire', 'פטר', 'danger', ' data-r="' + r + '"') + '</div></div>';
   return h;
 }
+// the monthly budget envelopes: how much each minister may still spend this month
+function envHtml() {
+  const e = envOf(), fm = minOf('fin');
+  const bar = (r, l) => { const tot = e[r] || 0, used = Math.min(tot, e.used[r] || 0), w = tot > 0 ? used / tot * 100 : 0;
+    return '<div class="fl"><small>' + l + '</small><div class="prog' + (w >= 99 ? ' r' : ' g') + '"><div style="width:' + w.toFixed(0) + '%"></div></div><span class="nw">' + money(Math.max(0, tot - used), true) + '</span></div>'; };
+  return '<div class="card env"><h3>תקציב השרים לחודש <small class="hint">' + (fm ? 'קובע: ' + esc(mTitle('fin', fm)) : 'אין שר אוצר — חלוקה קבועה') + '</small></h3>' +
+    '<div class="front">' + bar('def', 'ביטחון') + bar('int', 'בינוי') + bar('fo', 'חוץ') + '</div>' +
+    '<p class="sub">נשאר לכל שר עד סוף החודש. ' + (e.why ? esc(e.why) + '. ' : '') + 'שר לא מוציא כסף שאין: כשהקופה במינוס — אין רכש, פרויקטים או סיוע (חוץ מגיוס חירום כשפולשים אלינו).</p></div>';
+}
 function viewGov() {
   const g = G();
   let h = '<h2>ממשלה <small>' + num(govN()) + ' מתוך 4 שרים</small></h2>';
   h += '<p class="sub">שר עם <b>"פועל לבד"</b> עושה את העבודה בעצמו לפי המדיניות שבחרת, ומדווח על כל צעד. החלטה שלך תמיד גוברת: שר לא נוגע במה ששינית בעצמך, ואף שר לא מכריז מלחמה.</p>';
   h += '<div class="grid"><div><small>השפעת השרים על העם</small>' + sgn(govAp()) + '</div><div><small>שכר השרים בשנה</small>' + money(govSal()) + '</div></div>';
+  h += envHtml();
   MIN_ORDER.forEach(r => { h += minCard(r); });
   h += '<h3>דיווחי השרים</h3>' + (g.log.length ? '<ul class="news blog">' + g.log.slice(0, 20).map(x => '<li class="' + (x.bad ? 'bad' : 'good') + '"><small>' + dayHtml(x.d) + ' · ' + MIN_R[x.r].sh + '</small> ' + isoNums(esc(x.t)) + (x.fx ? ' <small>(' + isoNums(esc(x.fx)) + ')</small>' : '') + '</li>').join('') + '</ul>' : '<p class="sub">עוד אין דיווחים. מנה שרים כדי שיתחילו לעבוד.</p>');
   return h;
@@ -4513,7 +4793,9 @@ function viewUnit() {
   if (!u) return '<p class="hint">היחידה כבר לא קיימת.</p>';
   const mine = u.o === S.player, dom = domOf(u);
   let h = '<h2>' + uIc(u, !mine) + ' ' + esc(uName(u)) + ' <small>' + esc(nm(u.o)) + (mine ? '' : ' · אויב') + '</small></h2>';
-  h += '<p class="sub">' + uStateTxt(u) + '</p>' + uRows(u);
+  h += '<p class="sub">' + uStateTxt(u) + '</p>';
+  const ur = unitRatio(u); if (ur) h += '<div class="box ratio">' + ur.txt + '</div>';
+  h += uRows(u);
   if (!mine) return h + '<p class="sub">כדי להילחם בה — שלח לשם יחידות יבשה משלך, או תקוף מהאוויר.</p>';
   h += '<div class="btns">';
   h += btn('umove', 'הזז', 'primary') + btn('uattack', 'תקוף מדינה', 'danger');
@@ -4545,6 +4827,16 @@ function frontBars(w) {
     '<div class="fl"><small>שטחנו בידי האויב</small><div class="prog r"><div style="width:' + Math.max(0, -fp) + '%"></div></div>' + pct(Math.max(0, -fp)) + '</div></div>';
 }
 // who is actually fighting on the ground, from the units on the map
+const ratioBadge = (a, d) => '<span class="num ' + (a >= d * 1.6 ? 'ok' : d >= a * 1.6 ? 'bad' : 'warn') + '" dir="ltr">' + ratioTxt(a, d) + '</span>';
+// the force ratio where a unit stands (ours first) and the forecast, from the last day of fighting
+function unitRatio(u) {
+  const me = S.player; if (!S.units || domOf(u) === 'sea' || !u.at) return null;
+  const foe = u.o === me ? u.at : u.o, inFoe = u.at !== me;
+  const w = S.wars.find(v => v.pause === 0 && (v.a === me || v.b === me) && enemyLeaderFor(v, me) === foe); if (!w || !w.ru) return null;
+  const a = inFoe ? w.ru.xE : w.ru.yP, d = inFoe ? w.ru.yE : w.ru.xP;
+  if (!(a > 0) || !(inFoe ? w.ru.aE : w.ru.aP)) return null;
+  return { a, d, txt: 'יחס כוחות ' + ratioBadge(a, d) + ' — ' + forecastTxt(a, d) };
+}
 function unitFront(w, en) {
   if (!(w.a === S.player || w.b === S.player) || w.pause > 0) return '';
   const mineIn = S.units.filter(u => u.o === S.player && u.at === en && domOf(u) !== 'sea');
@@ -4553,7 +4845,10 @@ function unitFront(w, en) {
   let h = '<div class="box" style="font-size:13px;line-height:1.6">';
   h += 'יחידות שלנו בתוך ' + esc(nm(en)) + ': <b>' + num(mineIn.length) + '</b>' + (mineIn.length ? ' (עוצמה ' + num(mineIn.reduce((s, u) => s + uStr(u), 0)) + ')' : '');
   h += '<br>יחידות אויב בשטחנו: <b class="' + (theirsIn.length ? 'bad' : '') + '">' + num(theirsIn.length) + '</b>';
-  if (w.ru && (w.ru.aE || w.ru.aP)) h += '<br>יחס כוחות בשטח: ' + (w.ru.aE ? 'אצלם ' + pct(w.ru.rE * 100) + ' לטובתנו' : '') + (w.ru.aP ? (w.ru.aE ? ' · ' : '') + 'אצלנו ' + pct((1 - w.ru.rP) * 100) + ' לטובתנו' : '');
+  if (w.ru && w.ru.aE) h += '<br>יחס כוחות בתוך ' + esc(nm(en)) + ': <b>' + ratioBadge(w.ru.xE, w.ru.yE) + '</b> — ' + forecastTxt(w.ru.xE, w.ru.yE);
+  if (w.ru && w.ru.aP) h += '<br>יחס כוחות בשטחנו: <b>' + ratioBadge(w.ru.yP, w.ru.xP) + '</b> — ' + forecastTxt(w.ru.yP, w.ru.xP);
+  { const st = warSt(w), meA = w.A.includes(S.player), tw = (st[meA ? 'B' : 'A'].pw || 0), mw = (st[meA ? 'A' : 'B'].pw || 0);
+    if (tw >= 1 || mw >= 1) h += '<br>שבויים: ' + (tw >= 1 ? 'לקחנו ' + num(tw) : '') + (mw >= 1 ? (tw >= 1 ? ' · ' : '') + '<span class="bad">שלנו בשבי ' + num(mw) + '</span>' : ''); }
   if (S.ct) {
     const tk = citiesOfT(en).filter(x => sideOf(cst(x).o, S.player) && cst(x).o !== en), ls = citiesOfT(S.player).filter(x => cst(x).o !== S.player);
     const sg = citiesOfT(en).filter(x => cst(x).s > 0 && cst(x).b === S.player);
@@ -4593,9 +4888,44 @@ function viewWars() {
     h += '<h3>מלחמות בעולם</h3>';
     world.forEach(w => { const st = warSt(w); h += '<div class="card"><b>' + esc(nm(w.a)) + '</b> נגד <b>' + esc(nm(w.b)) + '</b>' + (w.pause > 0 ? ' ' + chip('הפסקת אש', 'teal') : '') +
       '<div class="sub">' + (w.f >= 0 ? esc(nm(w.a)) + ' מחזיקה ' + pct(w.f) + ' מ' + esc(nm(w.b)) : esc(nm(w.b)) + ' מחזיקה ' + pct(-w.f) + ' מ' + esc(nm(w.a))) +
+      (w.rho && w.pause === 0 ? '<br>יחס כוחות: <span class="num" dir="ltr">' + ratioTxt(w.rr >= 0.5 ? w.rho : 1, w.rr >= 0.5 ? 1 : w.rho) + '</span> לטובת ' + esc(nm(w.rr >= 0.5 ? w.a : w.b)) + (w.rho >= 6 ? ' — המלחמה צפויה להסתיים מהר' : w.rho < 1.6 ? ' — כוחות שקולים' : '') : '') +
       '<br>הרוגים מאז תחילת המשחק: ' + num(killed(st.A) + killed(st.B)) + ' <small>(חיילים ' + num(st.A.sk + st.B.sk) + ' · אזרחים ' + num(st.A.ck + st.B.ck) + ')</small></div></div>'; });
   }
   return h;
+}
+/* ---- "what's urgent": everything that needs the player now, one tap to get there ---- */
+let URG = { d: -1, l: [] };
+function urgentItems(force) {
+  const now = performance.now();
+  if (!force && URG.d === S.day && URG.n === S.pending.length && now - URG.t < 1500) return URG.l;
+  const me = S.player, p = S.p, c = P(), l = [];
+  const add = (t, cls, act, data, sub) => l.push({ t, cls, act, data: data || {}, sub: sub || '' });
+  if (S.pending.length) add('החלטה מחכה לך (' + S.pending.length + ')', 'bad', 'urgpend');
+  if (S.ct) {
+    citiesOfT(me).forEach(x => { const st = cst(x); if (st.o !== me && st.o) add('העיר ' + cityName(x) + ' בידי ' + nm(st.o), 'bad', 'selcity', { ci: x.id }, 'שלח כוחות לשחרר אותה'); else if (st.s > 0 && st.b) add('העיר ' + cityName(x) + ' במצור (' + Math.round(st.s) + '%)', 'bad', 'selcity', { ci: x.id }, 'שלח כוחות להגן'); });
+  }
+  warsOf(me).forEach(w => { if (w.pause > 0) return; const fp = mySideFront(w, me), en = enemyLeaderFor(w, me);
+    if (fp < -10) add('המלחמה מול ' + nm(en) + ' הולכת רע', 'bad', 'tab', { tab: 'wars' }, 'האויב מחזיק ' + Math.round(-fp) + '% משטחנו');
+    else if (fp >= 75) add('כמעט ניצחנו את ' + nm(en), 'ok', 'tab', { tab: 'wars' }, Math.round(fp) + '% משטחם בידינו'); });
+  if (S.units && warsOf(me).some(w => w.pause === 0 && (w.a === me || w.b === me)) && !minOn('def')) {
+    const idle = unitsOf(me).filter(u => domOf(u) === 'land' && !u.dest && u.at === me && uStr(u) >= 1 && !S.units.some(e => e.o !== me && e.at === me));
+    if (idle.length >= 2) add(idle.length + ' יחידות יבשה מחכות בבסיס', 'warn', 'urgidle', { ids: idle.map(u => u.id).join(',') }, 'יש מלחמה — אפשר לשלוח אותן לחזית');
+  }
+  if (p.bankrupt) add('פשיטת רגל!', 'bad', 'tab', { tab: 'eco' }, 'העלה מסים או קצץ הוצאות');
+  else if (p.treasury < 0) add('הקופה במינוס: ' + plainT(moneyTxt(-p.treasury)) + ' חוב', -p.treasury > c.gdp * 0.6 ? 'bad' : 'warn', 'tab', { tab: 'eco' }, 'השרים לא יוציאו כסף עד שהקופה תתאזן');
+  if (c.approval < 30) add('העם כועס (' + Math.round(c.approval) + '%)', 'bad', 'tab', { tab: 'eco' }, 'מתחת ל-15% — מהפכה');
+  if (p.rep < 25) add('המוניטין בעולם בשפל (' + Math.round(p.rep) + ')', 'warn', 'tab', { tab: 'gov' }, 'סיוע ושלום מעלים אותו');
+  (p.dl || []).filter(x => S.day - x.d <= 7 && x.d > (p.dlSeen == null ? -1 : p.dlSeen)).forEach(x => add(x.t, 'ok', 'tab', { tab: 'mil' }));
+  if (!MIN_ORDER.some(minOf) && S.day > 20) add('אין שרים בממשלה', 'warn', 'tab', { tab: 'gov' }, 'שרים עושים חלק מהעבודה בשבילך');
+  URG = { d: S.day, n: S.pending.length, l, t: now };
+  return l;
+}
+function viewUrgent() {
+  const l = urgentItems(true);
+  S.p.dlSeen = S.day;
+  let h = '<h2>מה דחוף <small>' + (l.length ? num(l.length) + ' דברים' : 'הכול רגוע') + '</small></h2>';
+  if (!l.length) return h + '<p class="hint">אין כרגע שום דבר שמחכה לך. אפשר להריץ את הזמן.</p>';
+  return h + '<div class="ulist urg">' + l.map(x => '<button data-act="' + x.act + '"' + Object.keys(x.data).map(k => ' data-' + k + '="' + esc(x.data[k]) + '"').join('') + '><span class="udot ' + x.cls + '"></span><b>' + isoNums(esc(x.t)) + '</b>' + (x.sub ? '<small>' + isoNums(esc(x.sub)) + '</small>' : '') + '</button>').join('') + '</div>';
 }
 /* ---- statistics: war cards, charts and the stats screen ---- */
 const wstOpen = new Set();
@@ -4630,6 +4960,7 @@ function casTable(a, b, la, lb) {
   const rowc = (l, x, y, cls) => '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + l + '</td><td>' + x + '</td><td>' + y + '</td></tr>';
   let h = '<table class="tbl t3"><tr class="hd"><td></td><td>' + la + '</td><td>' + lb + '</td></tr>';
   h += rowc('חיילים הרוגים', num(a.sk), num(b.sk)) + rowc('חיילים פצועים', num(a.sw), num(b.sw));
+  if ((a.pw || 0) >= 1 || (b.pw || 0) >= 1) h += rowc('חיילים שנפלו בשבי (שבויים)', num(a.pw || 0), num(b.pw || 0));
   h += rowc('אזרחים הרוגים', num(a.ck), num(b.ck), 'civ') + rowc('אזרחים פצועים', num(a.cw), num(b.cw));
   EQ_K.forEach(k => { if ((a.eq[k] || 0) >= 0.5 || (b.eq[k] || 0) >= 0.5) h += rowc(EQ_HE[k] + ' שהושמדו', cnt(a.eq[k] || 0), cnt(b.eq[k] || 0)); });
   if (a.mu || b.mu) h += rowc('טילים ששוגרו', cnt(a.mu || 0), cnt(b.mu || 0));
@@ -4887,6 +5218,12 @@ const ACT = {
   startpick: () => beginGame(),
   centerme: () => S && S.player && zoomToTid(S.player, 10),
   legend: () => $('#legend').classList.toggle('open'),
+  urgent: () => openTabFresh('urgent'),
+  urgpend: () => { openTab(null); processPending(); },
+  urgidle: d => { ulistIds = String(d.ids).split(',').map(Number); selUnit = null; openTabFresh('ulist'); },
+  tutnext: () => tutStep(1),
+  tutskip: () => tutEnd(),
+  tutstart: () => tutStart(),
   /* units */
   selunit: d => selectUnit(+d.u, 4),
   umove: () => { if (unitById(selUnit)) setMode('move', selUnit); },
@@ -5061,7 +5398,7 @@ function confirmWar(o, after, what) {
 }
 // air strike or missile salvo, during a war or as a stand-alone attack
 const sancTxt = n => n === 1 ? 'מדינה אחת הטילה עלינו סנקציות' : n + ' מדינות הטילו עלינו סנקציות';
-function strike(o, kind, uid, ci) {
+function strike(o, kind, uid, ci, byMin) {
   if (!o || !S.c[o] || !S.c[o].alive || o === S.player) return;
   const me = P(), E = S.c[o], sr = strikeRange(o);
   // a strike on one city (civilians) instead of on military targets
@@ -5139,7 +5476,7 @@ function strike(o, kind, uid, ci) {
     fx = cx ? applyFx({ ap: me.gov === 'democracy' ? -3 : -1, rep: (justified(o) ? -3 : -10) + repCiv, rel: { [o]: -50 } }) : applyFx({ ap: preview.ap, rep: preview.rep + repCiv, rel: preview.rel });
     retal = R() < Math.min(0.95, retaliateChance(o) + (cx ? 0.2 : 0));
   }
-  const r = strikeRecord({ k: kind, by: S.player, at: o, cas: loss, own, fx, unit: su ? uName(su) : null, war: !!w, used, lost, sanc: sancN, ci: cx ? cx.id : null, cn: cx ? cityName(cx) : null, cd: cdInc });
+  const r = strikeRecord({ k: kind, by: S.player, at: o, cas: loss, own, fx, unit: su ? uName(su) : null, war: !!w, used, lost, sanc: sancN, ci: cx ? cx.id : null, cn: cx ? cityName(cx) : null, cd: cdInc, min: byMin ? 1 : 0 });
   addNews(what + (w ? '' : ' (בלי הכרזת מלחמה)') + (cx ? ' (' + E.he + ')' : ' ב' + E.he) + ': ' + nT(killed(loss)) + ' הרוגים' + (eqTxt(loss.eq, 3) ? ', הושמדו ' + eqTxt(loss.eq, 3) : '') + (lost ? (lost === 1 ? '. איבדנו מטוס אחד' : '. איבדנו ' + lost + ' מטוסים') : '') + '.' + (sancN ? ' ' + sancTxt(sancN) + '.' : ''), 'war');
   if (sancN) toast(sancTxt(sancN), true);
   if (retal) {
@@ -5235,6 +5572,9 @@ function showHelp() {
     '<li><b>תקיפה על עיר:</b> הורגת הרבה יותר אזרחים מתקיפה על מטרות צבאיות, ופוגעת קשה במוניטין. עיר שנפגעה מאטה את הכלכלה עד שהיא משתקמת (לאט). בערים שלך אפשר לבנות ביצורים (קשה יותר לכבוש) והגנה אווירית (פחות נפגעים). עיר שנכבשה מורידה את הכלכלה ואת אהבת העם.</li>' +
     '<li><b>נמלים:</b> צי שעוגן ליד נמל שלך מקבל תיקונים וספינות חדשות.</li>' +
     '<li><b>האויב:</b> יחידות האויב בסמלים אדומים. הן מגינות, ולפעמים פולשות למדינה שלך — השאר כוח בבית! כשהמפה רחוקה, יחידות באותה מדינה מתאחדות לסמל אחד עם מספר; הקש עליו או הגדל את המפה כדי לראות כל יחידה. ⚔ = קרב בין מדינות אחרות.</li>' +
+    '<li><b>יחס כוחות:</b> בכרטיס היחידה ובלשונית מלחמות כתוב יחס הכוחות (למשל <span class="num" dir="ltr">8:1</span>) ומתי צפוי ניצחון. כשצד אחד חזק פי כמה — הקרב נגמר מהר: הצד החלש נשבר, נסוג או נכנע (שבויים). כוחות שקולים — מלחמה ארוכה.</li>' +
+    '<li><b>מה דחוף (!):</b> הכפתור למעלה מראה מה מחכה לך — עיר במצור, קופה במינוס, מלחמה שהולכת רע, יחידות שמחכות, משלוחים שהגיעו. הקש על שורה כדי להגיע לשם.</li>' +
+    '<li><b>תקציב השרים:</b> שר האוצר נותן לכל שר תקציב לחודש. כשהקופה במינוס אף שר לא קונה, בונה או שולח סיוע — חוץ מגיוס חירום כשפולשים אלינו.</li>' +
     '<li><b>שלום:</b> בלשונית מלחמות. ככל שאתה מנצח יותר, תוכל לדרוש יותר.</li>' +
     '<li><b>אבדות וסטטיסטיקות:</b> אחרי כל תקיפה (שלך או עליך) קופץ כרטיס "תוצאות התקיפה": הרוגים ופצועים — חיילים ואזרחים — ציוד שהושמד, עלות, ומה זה עשה לעם ולעולם. בלשונית מלחמות יש לכל מלחמה גרפים ויומן קרבות, ובתפריט ☰ ← "סטטיסטיקות" — כל המספרים שלך ושל העולם.</li>' +
     '<li><b>מחיר הדם:</b> חיילים שנהרגים מורידים את אהבת העם, ואזרחים שלנו שנהרגים — עוד יותר. אזרחים שאנחנו הורגים (בעיקר בטילים ובגרעין) פוגעים במוניטין בעולם.</li>' +
@@ -5248,7 +5588,7 @@ function showHelp() {
 }
 function showMenu() {
   const fxSeg = '<h3 class="mh">אנימציות (פיצוצים וקרבות)</h3><div class="seg">' + [['full', 'מלאות'], ['low', 'מופחתות'], ['off', 'כבויות']].map(([v, l]) => '<button class="' + (FXMODE === v ? 'on' : '') + '" data-act="fxmode" data-v="' + v + '">' + l + '</button>').join('') + '</div>';
-  modal({ title: 'תפריט', html: '<div class="btns col">' + btn('help', 'איך משחקים') + btn('tab', 'ממשלה ושרים', '', ' data-tab="gov"') + btn('goworld', 'העולם — דירוג ומגמות') + btn('stats', 'סטטיסטיקות ואבדות') + btn('centerme', 'מרכז את המפה על המדינה שלי') + btn('newgame', 'משחק חדש', 'danger') + '</div>' + fxSeg + '<p class="sub">"מופחתות" — רק פיצוץ קצר במקום הפגיעה, בלי הבזקים ורעידות. המשחק נשמר אוטומטית כל כמה שניות.</p>',
+  modal({ title: 'תפריט', html: '<div class="btns col">' + btn('help', 'איך משחקים') + btn('tutstart', 'הדרכה קצרה (7 צעדים)') + btn('tab', 'ממשלה ושרים', '', ' data-tab="gov"') + btn('goworld', 'העולם — דירוג ומגמות') + btn('stats', 'סטטיסטיקות ואבדות') + btn('centerme', 'מרכז את המפה על המדינה שלי') + btn('newgame', 'משחק חדש', 'danger') + '</div>' + fxSeg + '<p class="sub">"מופחתות" — רק פיצוץ קצר במקום הפגיעה, בלי הבזקים ורעידות. המשחק נשמר אוטומטית כל כמה שניות.</p>',
     buttons: [{ label: 'סגור' }], onShow: () => document.querySelectorAll('#m-body .btns [data-act]').forEach(b => b.addEventListener('click', () => { modalQ.shift(); $('#modal').classList.remove('open'); setTimeout(showModal, 30); }, { once: true })) });
 }
 
@@ -5292,7 +5632,39 @@ function beginGame() {
   S.speed = 1;
   selected = null; save(); renderAll(); homeView(16);
   modal({ title: 'ברוך הבא, מנהיג ' + P().he, html: '<p>1 בינואר 2026. העולם מתוח. <b>הזמן רץ</b> — יום אחד בשנייה. אפשר לעצור (⏸) או להאיץ (×2, ×4, ×8) בכפתורים למעלה.</p><p>הצבא שלך מופיע על המפה כ<b>סמלים צהובים</b> — הקש על סמל כדי להזיז יחידה, לתקוף או להגן.</p><p>טיפ: התחל מלשונית <b>כלכלה</b>, שמור על העם מרוצה ועל המוניטין שלך בעולם, ובנה בריתות לפני שאתה יוצא למלחמה.</p>',
-    buttons: [{ label: 'איך משחקים?', fn: showHelp }, { label: 'קדימה', cls: 'primary' }] });
+    buttons: [{ label: 'איך משחקים?', fn: showHelp }, { label: 'קדימה', cls: 'primary', fn: () => { if (!tutSeen()) setTimeout(tutStart, 400); } }] });
+}
+/* ---- first-game tutorial: 7 short steps, each pointing at the thing it explains; can be skipped any time ---- */
+const TUT = [
+  { sel: '#speed', t: 'השעון', d: 'הזמן רץ לבד. ⏸ עוצר, ×1 עד ×8 מאיצים. כשקורה משהו חשוב — המשחק עוצר ושואל אותך.' },
+  { sel: null, t: 'המפה', d: 'גרור כדי לזוז, צבוט כדי להגדיל. צהוב = אתה, כחול = בעלות ברית, אדום = במלחמה איתך. הקש על מדינה או על עיר כדי לפתוח אותה.' },
+  { sel: '[data-tab=country]', t: 'המדינה שלך', d: 'כאן הכרטיס של המדינה שלך, או של כל מדינה שהקשת עליה: סיוע, סחר, בריתות, סנקציות ומלחמה.' },
+  { sel: '.units .icons .ui.me', t: 'הצבא על המפה', d: 'הסמלים הצהובים הם היחידות שלך, עם מספר החיילים. הקש על יחידה, בחר "הזז" או "תקוף מדינה", ואז הקש על היעד במפה.' },
+  { sel: '[data-tab=wars]', t: 'מלחמה ושלום', d: 'כאן כל מלחמה: יחס הכוחות, ערים במצור ואבדות. מכאן גם מציעים שלום. מכריזים מלחמה מהכרטיס של מדינה.' },
+  { sel: '[data-tab=gov]', t: 'השרים', d: 'מנה שרים שיעבדו בשבילך: ביטחון, אוצר, בינוי וחוץ. שר האוצר נותן לכל שר תקציב לחודש, ואף שר לא מוציא כסף שאין.' },
+  { sel: '#top .r2', t: 'העם והעולם', d: '"אהבת העם" מתחת ל-15% לאורך זמן = מהפכה. "מוניטין" נמוך = סנקציות ואויבים. הכפתור "!" למעלה מראה מה דחוף עכשיו.' }
+];
+let TUTI = -1, tutSpeed = 1;
+const tutSeen = () => { try { return localStorage.getItem('w26_tut') === '1'; } catch (e) { return true; } };
+function tutStart() { if (!S || !S.player) return; tutSpeed = S.speed || S.lastSpeed || 1; setSpeed(0); openTab(null); TUTI = 0; tutShow(); }
+function tutEnd() {
+  TUTI = -1; const el = $('#tut'); if (el) el.className = '';
+  try { localStorage.setItem('w26_tut', '1'); } catch (e) { /* storage unavailable */ }
+  if (S && S.player && !S.speed) setSpeed(tutSpeed || 1);
+}
+function tutStep(d) { TUTI += d; if (TUTI >= TUT.length) tutEnd(); else tutShow(); }
+function tutShow() {
+  const el = $('#tut'); if (!el || TUTI < 0) return;
+  const s = TUT[TUTI], tg = s.sel ? [...document.querySelectorAll(s.sel)].find(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.bottom > 0 && r.top < innerHeight && e.style.display !== 'none'; }) : null;
+  const r = tg ? tg.getBoundingClientRect() : null, ring = $('#tut-ring'), bub = $('#tut-b');
+  if (r) { const pd = 4; Object.assign(ring.style, { display: 'block', left: (r.left - pd) + 'px', top: (r.top - pd) + 'px', width: (r.width + pd * 2) + 'px', height: (r.height + pd * 2) + 'px' }); }
+  else ring.style.display = 'none';
+  bub.innerHTML = '<div class="tut-h"><b>' + s.t + '</b><span class="num">' + (TUTI + 1) + '/' + TUT.length + '</span></div><p>' + s.d + '</p><div class="btns"><button class="b primary" data-act="tutnext">' + (TUTI === TUT.length - 1 ? 'סיום — בוא נשחק' : 'הבא') + '</button>' + (TUTI < TUT.length - 1 ? '<button class="b" data-act="tutskip">דלג על ההדרכה</button>' : '') + '</div>';
+  el.className = 'on';
+  // the bubble goes below the target when it is in the top half, above it otherwise; centred when there is no target
+  const bh = bub.offsetHeight, vh = innerHeight;
+  let top = r ? (r.top + r.height / 2 < vh / 2 ? r.bottom + 12 : r.top - bh - 12) : (vh - bh) / 2;
+  bub.style.top = clamp(top, 8, vh - bh - 8) + 'px';
 }
 
 /* ================= clock ================= */
@@ -5304,7 +5676,7 @@ function setSpeed(v) {
 }
 let sliderT0 = null;
 let lastT = 0, acc = 0, lastUi = 0, lastSheet = 0, lastSave = 0, uiBusy = 0;
-const LIVE_TABS = { eco: 1, home: 1, gov: 1, mil: 1, wars: 1, country: 1, news: 1, world: 1, unit: 1, ulist: 1, stats: 1, city: 1 };
+const LIVE_TABS = { urgent: 1, eco: 1, home: 1, gov: 1, mil: 1, wars: 1, country: 1, news: 1, world: 1, unit: 1, ulist: 1, stats: 1, city: 1 };
 function frame(t) {
   requestAnimationFrame(frame);
   const dt = lastT ? Math.min(0.25, (t - lastT) / 1000) : 0; lastT = t;
@@ -5397,13 +5769,13 @@ function boot() {
   requestAnimationFrame(frame);
   window.__W26 = { get S() { return S; }, dayTick, FX: { enemyStrike, nukeImpact, showCard, hideCard, setFxMode, get n() { return FXL.length; }, get mode() { return FXMODE; }, PS, WST, warSt }, runDays: n => { for (let i = 0; i < n && !S.over; i++) dayTick(); renderAll(); }, declareWar, annex, power, rel, ACT, setSpeed, strike,
     selectTid: t => { selected = t; recolor(); openTab('country'); }, zoomToTid, processPending, wipe, openTab,
-    GOV: { minOf, candsFor, hireMin, fireMin, G, govAp, govSal,
+    GOV: { minOf, candsFor, hireMin, fireMin, G, govAp, govSal, envOf, setEnvelopes, noMoney,
       autoAll: (pol) => { MIN_ORDER.forEach(r => { if (!minOf(r)) { const l = candsFor(r).slice().sort((a, b) => b.sk - a.sk); hireMin(r, l[0]); } const m = minOf(r); m.auto = true; if (pol && pol[r]) Object.assign(m.pol, pol[r]); }); } },
     C: { get CITY() { return CITY; }, CITYI, drawCities, cityDay, captureCity, openCity, reconcileCities, aiCityFlip, citiesOfT, heldShare, nukeCityEst, cityStand, get selCity() { return selCity; } },
     EVS: { EV, EVI, eventsDay, evCtx, evChoose, evDialog, worldCoup, rebel, ranks, worldSnap },
     STATS: () => ({ ev: S.ev && S.ev.n, dec: S.ev && S.ev.dn, wc: S.wc || {}, log: S.p && S.p.gov ? S.p.gov.log.length : 0 }),
     U: { unitById, unitsOf, planMove, orderTo, commitMove, selectUnit, setMode, modeTap, syncAllUnits, buildItems, uStr, distToC, nearIn, tidAt, ownerAt, isSeaAt, snapSea, toScreen, drawUnits, zoomToMapPt, tp, mapProj: p => MAP_PROJ(p),
-      get curK() { return curK; }, get uMode() { return uMode; }, get selUnit() { return selUnit; } } };
+      get curK() { return curK; }, get uMode() { return uMode; }, get selUnit() { return selUnit; } }, CB: { crushF, routLoss, breakDays, ratioTxt, forecastTxt, siegeForces, siegeRate } };
 }
 window.addEventListener('DOMContentLoaded', () => {
   // cities: the full file, else the small sample, else only a capital generated for each country
