@@ -1,0 +1,102 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LEVEL UP part 1 workouts</title>
+<link rel="stylesheet" href="../../fonts/fonts.css">
+<link rel="stylesheet" href="../../lib/ad.css">
+<script src="../../lib/ad.js"></script>
+</head><body>
+<script>
+// Part 1 — Workouts: "Built by AI. In seconds."  (~15 s, one language per render: --lang en | he)
+// Labels, exercise names and the coach's reply are the real app strings (design/demo/levelup-live.html).
+const DICT = {
+  en: {
+    t1a: 'Built by AI.', t1b: 'In seconds.', s1: 'Tell the coach what you want to train.',
+    t2a: '107 exercises.', t2b: 'Picked for you.', s2: 'Fits your time, muscles and equipment.',
+    t3a: 'Add any', t3b: 'exercise.', s3: 'Tap Add exercise and pick one.',
+    coachKick: 'Coach sees all your data', coach: 'AI coach', inbar: 'Message your coach…',
+    ask: 'Build me a 45-min full-body workout',
+    reply: 'Built it: <b>Full body</b>, 45 min, 5 exercises.', saved: '🏋️ Workout saved: Full body · 45′', open: 'Open',
+    wKick: 'Home · 45′', wTitle: 'Full body', exercises: 'exercises', sets: 'sets', effort: 'effort',
+    ex: [['Goblet squat', '3 × 12'], ['Push-ups', '3 × 12'], ['One-arm dumbbell row', '3 × 10'], ['Walking lunges', '3 × 12'], ['Plank', '3 × 0:40']],
+    added: ['Jump rope', '3 × 1:00'],
+    add: 'Add exercise', start: '▶  Start workout', search: 'jump', count: '107 exercises',
+    results: [['Jumping jacks', 'Cardio'], ['Jump rope', 'Cardio']], pick: 1,
+    kicker: 'Feel every beat.', exName: 'Goblet squat', setFmt: 'SET %s · REP %r', zoneFmt: 'ZONE %z',
+    tag: 'Connects to your watch. Works for you.', link: 'Link in bio', sample: 'Sample data',
+  },
+  he: {
+    t1a: 'אימון מה-AI.', t1b: 'תוך שניות.', s1: 'תגיד למאמן איזה אימון בא לך.',
+    t2a: '107 תרגילים.', t2b: 'נבחרים בשבילך.', s2: 'לפי הזמן, השרירים והציוד שלך.',
+    t3a: 'מוסיפים', t3b: 'כל תרגיל.', s3: 'לוחצים "הוסף תרגיל" ובוחרים.',
+    coachKick: 'המאמן רואה את כל הנתונים שלך', coach: 'מאמן AI', inbar: 'כתוב למאמן…',
+    ask: 'תבנה לי אימון כל הגוף של 45 דקות',
+    reply: 'בניתי לך: <b>כל הגוף</b>, 45 דקות, 5 תרגילים.', saved: '🏋️ האימון נשמר: כל הגוף · 45′', open: 'פתח',
+    wKick: 'בבית · 45′', wTitle: 'כל הגוף', exercises: 'תרגילים', sets: 'סטים', effort: 'מאמץ',
+    ex: [['גובלט סקוואט', '3 × 12'], ['שכיבות סמיכה', '3 × 12'], ['חתירה עם משקולת ביד אחת', '3 × 10'], ['מכרעים בהליכה', '3 × 12'], ['פלאנק', '3 × 0:40']],
+    added: ['קפיצה בחבל', '3 × 1:00'],
+    add: 'הוסף תרגיל', start: '▶  התחל אימון', search: 'קפיצ', count: '107 תרגילים',
+    results: [['קפיצה בחבל', 'קרדיו'], ['קפיצות על קופסה', 'רגליים']], pick: 0,
+    kicker: 'מרגישים כל פעימה.', exName: 'גובלט סקוואט', setFmt: 'סט %s · חזרה %r', zoneFmt: 'אזור %z',
+    tag: 'מתחבר לשעון. עובד בשבילך.', link: 'לינק בביו', sample: 'נתונים לדוגמה',
+  },
+};
+
+const DB = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3CEB5F" stroke-width="2.6" stroke-linecap="round"><path d="M6 7v10M3 9.5v5M18 7v10M21 9.5v5M6 12h12"/></svg>`;
+const row = (n, r, attrs = '') => `<div class="row" ${attrs}><span class="ic">${DB}</span><span class="nm">${n}</span><span class="rp">${r}</span></div>`;
+
+// beat times
+const A = 0, B = 3.7, Cc = 7.0, D = 10.2, END = 12.7;
+const ROWS = [4.05, 4.4, 4.75, 5.1, 5.45];
+const ROW_H = 54, GAP = 8;   // workout list rows (logical px on the 390x844 screen)
+
+Ad.define({
+  duration: 15.0, fps: 30, dict: DICT, langs: ['en', 'he'],
+  beats: [
+    { t0: 0.25, t1: 3.55, l1: 't1a', l2: 't1b', sub: 's1' },
+    { t0: 3.85, t1: 6.95, l1: 't2a', l2: 't2b', sub: 's2' },
+    { t0: 7.1, t1: 10.05, l1: 't3a', l2: 't3b', sub: 's3' },
+  ],
+  // phone top edge (px): rises in, stays, sinks out before the neon beat
+  phone: [
+    { t: 0, y: 1960 }, { t: 0.8, y: 600, ease: [1, 0.6] },
+    { t: 10.0, y: 600, ease: 'io' }, { t: 10.45, y: 1960, o: 1, ease: 'in' },
+  ],
+  notes: [[4.0, 9.35, 528], [10.4, 12.6]],   // [t0, t1, top px]: above the phone while it is on screen
+  neon: { t0: D + 0.05, t1: END + 0.05, kicker: 'kicker', name: 'exName', setFmt: 'setFmt', zoneFmt: 'zoneFmt', set: 2,
+          bpm: [98, 124], zones: [[0, 1], [96, 2], [116, 3], [134, 4], [152, 5]], period: 1.6 },
+  end: { t0: END, tag: 'tag', link: 'link' },
+  glow: t => (t > END ? 1.6 : 1),
+
+  screens: (T, lang) => `
+    <!-- coach chat -->
+    <div class="scr" data-show="0,${B + 0.05}">
+      <div class="kick">${T.coachKick}</div><div class="h1">${T.coach}</div>
+      <div style="height:6px"></div>
+      <div class="bub me" data-in="0.85" data-anim="pop"><span data-type="0.95,2.1" data-caret data-text="${T.ask}"></span></div>
+      <div class="dots" data-in="2.25" data-out="2.7" data-anim="fade" data-dots="2.25,2.7"><i></i><i></i><i></i></div>
+      <div class="bub ai" data-in="2.75">${T.reply}</div>
+      <div class="chip" data-in="3.05"><span>${T.saved}</span><span class="open" style="position:relative">${T.open}<i class="tap" data-tap="3.45" style="left:50%;top:50%"></i></span></div>
+      <div class="inbar"><span>${T.inbar}</span><i></i></div>
+    </div>
+    <!-- the workout -->
+    <div class="scr" data-show="${B - 0.1},20" style="gap:${GAP}px">
+      <div class="kick" style="color:#3CEB5F;font-weight:700">${T.wKick}</div><div class="h1">${T.wTitle}</div>
+      <div class="meta">
+        <div><b><span data-show="0,9.6" data-count="0,5,3.9,4.9">0</span><span data-show="9.6,99">6</span></b><small>${T.exercises}</small></div>
+        <div><b><span data-show="0,9.6" data-count="0,15,3.9,4.9">0</span><span data-show="9.6,99">18</span></b><small>${T.sets}</small></div>
+        <div><b dir="ltr" style="color:#FF8A3D;unicode-bidi:isolate">~<span data-count="0,55,3.9,4.9">0</span>%</b><small>${T.effort}</small></div>
+      </div>
+      ${T.ex.map(([n, r], i) => row(n, r, `data-in="${ROWS[i]}" style="height:${ROW_H}px"`)).join('')}
+      ${row(T.added[0], T.added[1], `data-in="9.55" data-anim="grow" data-h="${ROW_H}" data-flash="9.62" style="height:0"`)}
+      <div class="addbtn" data-in="5.8" style="position:relative">＋ ${T.add}<i class="tap" data-tap="7.5" style="left:50%;top:50%"></i></div>
+      <div class="cta" data-in="5.95">${T.start}</div>
+      <!-- add-exercise sheet -->
+      <div class="sheet" data-in="7.65" data-out="9.3" data-anim="sheet">
+        <div class="grab"></div><div class="lbl">${T.add}</div>
+        <div class="search"><span data-type="8.05,8.55" data-caret data-text="${T.search}" style="direction:${lang === 'he' ? 'rtl' : 'ltr'}"></span></div>
+        <div class="cnt">${T.count}</div>
+        ${T.results.map(([n, c], i) => `<div class="res" data-in="${8.6 + i * 0.08}" style="position:relative">${n}<span>${c}</span>${i === T.pick ? `<i class="tap" data-tap="9.05" style="left:40%;top:50%"></i>` : ''}</div>`).join('')}
+      </div>
+    </div>`,
+});
+</script>
+</body></html>

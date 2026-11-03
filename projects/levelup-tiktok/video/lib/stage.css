@@ -1,0 +1,72 @@
+/* LEVEL UP. TikTok series — shared stage styles (1080x1920). */
+:root{--lime:#C6FF00;--white:#fff;--grey:#A3A9B1;--bg:#000}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1080px;height:1920px;background:#000;overflow:hidden}
+body{font-family:'Heebo',system-ui,sans-serif;color:#fff;-webkit-font-smoothing:antialiased}
+#frame{position:absolute;inset:0;overflow:hidden;background:#000}
+
+/* ---------- the phone (drawn here, not a stock mockup) ---------- */
+#world{position:absolute;inset:0;perspective:2600px;perspective-origin:540px 900px}
+#rig{position:absolute;left:0;top:0;width:572px;height:1201px;transform-style:preserve-3d;will-change:transform}
+.face{position:absolute;inset:0;border-radius:88px;backface-visibility:hidden;-webkit-backface-visibility:hidden;
+  background:#0a0a0b;
+  box-shadow:inset 0 0 0 2px #4a4c50, inset 0 0 0 4px #1b1c1e, inset 0 0 0 6px #050505, 0 0 0 1px rgba(255,255,255,.10)}
+.face.front{transform:translateZ(12px)}
+.face.back{transform:rotateY(180deg) translateZ(12px)}
+.face .btn{position:absolute;width:5px;border-radius:3px;background:linear-gradient(90deg,#2a2b2e,#5a5c61,#2a2b2e)}
+.screen{position:absolute;left:16px;top:16px;width:540px;height:1169px;border-radius:72px;overflow:hidden;background:#000;isolation:isolate}
+.screen img.shot{position:absolute;inset:0;width:540px;height:1169px;display:block}
+.island{position:absolute;left:50%;top:22px;width:170px;height:50px;margin-left:-85px;border-radius:25px;background:#000;z-index:5;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.04)}
+.island::after{content:'';position:absolute;right:30px;top:17px;width:16px;height:16px;border-radius:50%;background:radial-gradient(circle at 40% 40%,#1d2a3a,#05070a 70%)}
+.sb{position:absolute;left:0;right:0;top:30px;height:36px;display:flex;justify-content:space-between;align-items:center;padding:0 54px 0 58px;
+  font:600 23px/1 -apple-system,'Inter','Heebo',sans-serif;letter-spacing:.01em;z-index:4;direction:ltr}
+.sb.light{color:#fff}.sb.dark{color:#0b0b0c}
+.sb .ic{display:flex;gap:9px;align-items:center}
+.sb .bat{width:36px;height:17px;border-radius:5px;border:2px solid currentColor;opacity:.9;position:relative;padding:2px}
+.sb .bat i{display:block;height:100%;width:78%;background:currentColor;border-radius:2px}
+.sb .sig{display:flex;gap:2px;align-items:flex-end;height:15px}.sb .sig i{width:4px;background:currentColor;border-radius:1px}
+.glare{position:absolute;inset:0;z-index:6;pointer-events:none;mix-blend-mode:screen;
+  background:linear-gradient(115deg,rgba(255,255,255,0) 35%,rgba(255,255,255,.07) 47%,rgba(255,255,255,0) 60%);background-size:300% 100%}
+.taps{position:absolute;inset:0;z-index:7;pointer-events:none}
+.tap{position:absolute;width:84px;height:84px;margin:-42px 0 0 -42px;border-radius:50%;
+  background:rgba(150,155,160,.38);border:3px solid rgba(255,255,255,.9);box-shadow:0 0 0 2px rgba(0,0,0,.25),0 0 24px rgba(255,255,255,.25)}
+.edge{position:absolute;top:120px;height:961px;width:24px;left:274px;border-radius:12px;
+  background:linear-gradient(90deg,#1a1b1d,#55575c 45%,#2b2c2f 55%,#111214)}
+.edge.r{transform:rotateY(90deg) translateZ(286px)}
+.edge.l{transform:rotateY(-90deg) translateZ(286px)}
+
+/* darkens the top of whatever is under the headline (invisible on pure black) */
+#scrim{position:absolute;left:0;right:0;top:0;height:640px;pointer-events:none;
+  background:linear-gradient(180deg,rgba(0,0,0,.88) 0,rgba(0,0,0,.82) 380px,rgba(0,0,0,0) 620px)}
+#dim{position:absolute;inset:0;background:#000;opacity:0;pointer-events:none}
+
+/* ---------- kinetic type ---------- */
+#titles{position:absolute;inset:0;pointer-events:none}
+.title{position:absolute;left:180px;width:720px;top:210px;text-align:center;direction:rtl}  /* 180..900: clear of the right 15% */
+.part{display:block;will-change:transform,opacity,filter}
+.ln{display:block;font-weight:900;font-size:116px;line-height:1.02;letter-spacing:-.012em;transform:skewX(-7deg)}
+.ln.m{font-size:96px}
+.ln.s{font-size:84px}
+.w{display:inline-block;will-change:transform,opacity,filter}
+.lime{color:var(--lime)}
+.grey{color:var(--grey)}
+.step{display:inline-block;font-family:'Barlow Condensed','Heebo',sans-serif;font-style:italic;font-weight:900;color:var(--lime);
+  font-size:.78em;margin-inline-end:.22em;transform:translateY(-.04em)}
+.count{font-family:'Barlow Condensed','Heebo',sans-serif;font-style:italic;font-weight:900;color:var(--lime);font-size:1.18em;
+  display:inline-block;min-width:1.45em;text-align:left;direction:ltr}
+.ltr{direction:ltr;unicode-bidi:isolate}
+
+/* ---------- series logo sting + end card ---------- */
+.logo{font-family:'Barlow Condensed',sans-serif;font-style:italic;font-weight:900;text-transform:uppercase;letter-spacing:-.01em;line-height:.9;direction:ltr;white-space:nowrap}
+.logo .dot{display:inline-block}
+#sting{position:absolute;inset:0;display:none}
+#sting .line{position:absolute;left:150px;top:1000px;height:5px;border-radius:3px;background:var(--lime);box-shadow:0 0 18px rgba(198,255,0,.7)}
+#sting .logo{position:absolute;left:0;right:0;top:820px;text-align:center;font-size:210px}
+#endcard{position:absolute;inset:0;display:none;text-align:center}
+#endcard .logo{position:absolute;left:0;right:0;top:700px;font-size:220px}
+#endcard .link{position:absolute;left:0;right:0;top:960px;font-weight:800;font-size:72px;color:var(--grey);direction:rtl;letter-spacing:-.005em}
+#endcard .sub{position:absolute;left:0;right:0;top:1080px;font-weight:600;font-size:38px;color:#6d727a;direction:rtl;letter-spacing:.01em}
+#note{position:absolute;left:0;right:0;top:1468px;text-align:center;display:none}
+#note span{display:inline-block;direction:rtl;font-weight:600;font-size:32px;color:var(--grey);background:rgba(0,0,0,.62);padding:8px 22px;border-radius:24px;letter-spacing:.01em}
+#flash{position:absolute;inset:0;background:var(--lime);opacity:0;pointer-events:none}
