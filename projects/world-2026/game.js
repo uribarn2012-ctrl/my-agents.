@@ -136,7 +136,7 @@ let OWN = {}; const ADJ = new Map(), DIST = new Map(), BASE = new Map(); let STA
 function rebuildOwn() {
   OWN = {};
   for (const t in S.owner) { const o = S.owner[t]; if (o) (OWN[o] = OWN[o] || []).push(t); }
-  ADJ.clear(); DIST.clear();
+  ADJ.clear(); DIST.clear(); CBY = null;
 }
 const tidsOf = c => OWN[c] || [];
 const alive = () => Object.keys(S.c).filter(id => S.c[id].alive);
@@ -238,6 +238,7 @@ function newGame(playerId) {
     if (w) { w.f = (a === '643' && b === '804') ? 18 : 6; w.start = -24; w.startDay = -730; }
   });
   S.worldGdp0 = worldGdp();
+  ensureCityState();
   if (playerId) setupPlayer(playerId);
   return S;
 }
@@ -521,7 +522,7 @@ function eqTxt(eq, max) {
   return EQ_K.filter(k => (eq[k] || 0) >= 0.5).sort((a, b) => eq[b] * unitPrice(b) - eq[a] * unitPrice(a)).slice(0, max || 9).map(k => nT(eq[k]) + ' ' + EQ_HE[k]).join(', ');
 }
 function strikeLine(r) {
-  return (r.by === S.player ? '' : nm(r.by) + ': ') + KIND_HE[r.k] + (r.by === S.player ? ' שלנו' : '') + ' על ' + nm(r.at) + ' — ' + nT(killed(r.cas)) + ' הרוגים' + (eqTxt(r.cas.eq, 2) ? ', הושמדו ' + eqTxt(r.cas.eq, 2) : '');
+  return (r.by === S.player ? '' : nm(r.by) + ': ') + KIND_HE[r.k] + (r.by === S.player ? ' שלנו' : '') + ' על ' + (r.cn ? r.cn + ' (' + nm(r.at) + ')' : nm(r.at)) + ' — ' + nT(killed(r.cas)) + ' הרוגים' + (eqTxt(r.cas.eq, 2) ? ', הושמדו ' + eqTxt(r.cas.eq, 2) : '');
 }
 // archive a war the player fought in, for the stats screen
 function archiveWar(w, res) {
@@ -592,6 +593,7 @@ function endWar(w, res) {
   addRel(w.a, w.b, 60); // from -100 back to hostile
   S.pending = S.pending.filter(p => !p.wid || p.wid !== w.id || p.type === 'attacked');
   needMapRecolor = true;
+  reconcileCities();
 }
 function aidFor(side, enemy, w) {
   let s = 0, n = 0;
@@ -677,6 +679,8 @@ function annex(win, lose) {
   for (const k in S.sanc) if (k.split('>').includes(lose)) delete S.sanc[k];
   S.pending = S.pending.filter(p => !p.wid || S.wars.some(w => w.id === p.wid));
   rebuildOwn();
+  // every city the loser held (on its own land or captured elsewhere) goes to the winner or back to its land's owner
+  if (S.ct) { CITY.forEach(x => { const st = cst(x); if (st.o === lose) { st.o = S.owner[x.tid] === win ? win : (S.owner[x.tid] || null); delete st.s; delete st.b; delete st.lg; } }); reconcileCities(); }
   alive().forEach(c => { if (c !== win) addRel(c, win, S.c[c].gov === 'democracy' ? -15 : -8); });
   if (lose === S.player) {
     gameOver('annexed', nm(win) + ' כבשה את ' + L.he + ' כולה וסיפחה אותה. המדינה שלך כבר לא קיימת.');
@@ -750,6 +754,7 @@ function playerEconomy() {
   const debtRatio = p.treasury < 0 ? -p.treasury / c.gdp : 0;
   if (debtRatio > 0.6) g -= (debtRatio - 0.6) * 0.05;
   if (p.bankrupt) g -= 0.03;
+  g -= dmgDrag(S.player); // bombed cities slow the economy until they are rebuilt
   c.gdp *= 1 + g / DPY;
   c.pop *= 1 + 0.008 / DPY;
   equipStep(c);
@@ -775,7 +780,7 @@ function aiEconomy() {
     // poorer countries grow faster; recessions, booms and national projects move it up or down
     const pc = c.gdp / Math.max(0.01, c.pop), base = 0.017 + 0.022 * clamp(1 - pc / 60, 0, 1);
     const cy = c.cy ? (c.cy.k === 'rec' ? -0.035 : 0.02) : 0;
-    const g = base + (R() - 0.5) * 0.02 - sanctionHit(id) * 0.05 - wars * 0.015 - rec + cy + (c.gb || 0);
+    const g = base + (R() - 0.5) * 0.02 - sanctionHit(id) * 0.05 - wars * 0.015 - rec + cy + (c.gb || 0) - dmgDrag(id);
     c.gdp *= 1 + g / DPY; c.pop *= 1 + 0.008 / DPY;
     c.def = c.gdp * c.defPct * (wars ? 1.5 : 1);
     equipStep(c);
@@ -930,7 +935,8 @@ function aiWars() {
     if (w.pause > 0 || S.pending.some(p => p.wid === w.id)) return;
     const lead = w.a === S.player || w.b === S.player; if (!lead) return;
     const en = enemyLeaderFor(w, S.player), fp = mySideFront(w, S.player), age = S.turn - w.start;
-    if (fp > 40 && R() < 0.25) S.pending.push({ type: 'peace', wid: w.id, from: en, kind: fp > 70 ? 'terr' : 'repar', share: fp / 200 });
+    const capT = S.ct && capHeldBy(en, S.player);
+    if ((fp > 40 || (capT && fp > 20)) && R() < (capT ? 0.5 : 0.25)) S.pending.push({ type: 'peace', wid: w.id, from: en, kind: fp > 70 ? 'terr' : 'repar', share: fp / 200 });
     else if (fp < -35 && R() < 0.2) S.pending.push({ type: 'demand', wid: w.id, from: en, share: -fp / 200 });
     else if (age > 12 && Math.abs(fp) < 15 && R() < 0.08) S.pending.push({ type: 'peace', wid: w.id, from: en, kind: 'white' });
   });
@@ -1150,6 +1156,22 @@ function minDef(m) {
   const I = intr.reduce((s, u) => s + uStr(u), 0);
   const homeF = () => mine.filter(u => S.units.includes(u) && domOf(u) !== 'sea' && u.at === me).reduce((s, u) => s + uStr(u), 0);
   let H = homeF();
+  // our cities under siege or in enemy hands (the capital first), and the capital when invaders come near it
+  if (S.ct) {
+    const capM = capOf(me);
+    const thr = citiesOfT(me).filter(x => { const st = cst(x); return (st.o === me && st.s > 0 && st.b && atWar(st.b, me)) || (st.o && st.o !== me && atWar(st.o, me)) ||
+      (x === capM && intr.some(u => km([u.lon, u.lat], cityPt(x)) < 250)); }).sort((a, b) => (b.cap - a.cap) || (b.pop - a.pop));
+    const tc = thr[0];
+    if (tc) {
+      const near = mine.filter(u => S.units.includes(u) && domOf(u) === 'land' && km([u.lon, u.lat], cityPt(tc)) <= CR_KM).length;
+      const want = tc.cap ? 3 : 2; let sent = 0;
+      mine.filter(u => free(u) && domOf(u) === 'land' && u.at === me && km([u.lon, u.lat], cityPt(tc)) > CR_KM).sort((a, b) => km([a.lon, a.lat], cityPt(tc)) - km([b.lon, b.lat], cityPt(tc))).forEach(u => {
+        if (near + sent >= want) return;
+        const r = planMove(u, cityStand(tc), cst(tc).o === me ? 'def' : 'atk'); if (r.err || r.needWar) return; r.cty = tc.id; commitMove(u, r, true); sent++;
+      });
+      if (sent) said.push((cst(tc).o === me ? 'הגנה על ' : 'לשחרר את ') + cityName(tc) + ': ' + (sent === 1 ? 'יחידה אחת נשלחה' : sent + ' יחידות נשלחו'));
+    }
+  }
   if (I > 0) {
     const need = I * ({ def: 1.8, bal: 1.5, atk: 1.25 }[st]);
     const tgt = intr.slice().sort((a, b) => uStr(b) - uStr(a))[0];
@@ -1177,15 +1199,31 @@ function minDef(m) {
       const ratio = () => atkStr({ l, s }) / (dE + 1);
       const pool = mine.filter(u => free(u) && domOf(u) === 'land' && u.at === me).sort((a, b) => uStr(b) - uStr(a));
       const sent = [];
+      // the objective: the most important enemy city within reach (big, the capital, close to us)
+      const tcity = S.ct ? warCityTarget(E, me, pool[0] ? [pool[0].lon, pool[0].lat] : (TERR[mainTid(me)] || {}).c) : null;
+      // units already inside their land but not at a city: on to the objective
+      let re = 0;
+      // (one unit stays behind in a city we took while enemy troops are around, so it is not lost again at once)
+      const kept = new Set();
+      if (S.ct) mine.filter(u => free(u) && domOf(u) === 'land' && u.at === E).sort((a, b) => uStr(a) - uStr(b)).forEach(u => {
+        const held = citiesNear([u.lon, u.lat], CR_KM).find(x => cst(x).o === me && S.owner[x.tid] === E);
+        if (!held || kept.has(held.id)) return;
+        if (S.units.some(e => e.o === E && domOf(e) === 'land' && km([e.lon, e.lat], cityPt(held)) < 250)) { kept.add(held.id); u.gar = held.id; }
+      });
+      if (S.ct) mine.filter(u => free(u) && domOf(u) === 'land' && u.at === E && !(u.gar && kept.has(u.gar)) && !citiesNear([u.lon, u.lat], CR_KM).some(x => { const o = cst(x).o; return o && !sideOf(o, me); })).forEach(u => {
+        const t = warCityTarget(E, me, [u.lon, u.lat]); if (!t) return;
+        const r = planMove(u, cityStand(t), 'atk'); if (r.err || r.needWar) return; r.cty = t.id; commitMove(u, r, true); re++;
+      });
+      if (re) said.push((re === 1 ? 'יחידה אחת ממשיכה' : re + ' יחידות ממשיכות') + ' לעבר ערי ' + nm(E));
       if (ratio() < thr * 1.1 && avail > 0 && pool.length) {
         let L2 = l, S2 = s, A = avail;
         for (const u of pool) { if (A <= 0) break; const pw = uPow(u, Ec.adv); L2 += pw.l; S2 += pw.s; A -= uStr(u); }
         if (atkStr({ l: L2, s: S2 }) / (dE + 1) >= thr) {
           for (const u of pool) {
             if (avail <= 0 || ratio() >= thr * 1.15) break;
-            const p = nearIn(E, [u.lon, u.lat]); if (!p) break;
+            const p = tcity ? cityStand(tcity) : nearIn(E, [u.lon, u.lat]); if (!p) break;
             const r = planMove(u, p, 'atk'); if (r.err || r.needWar) continue;
-            commitMove(u, r, true); u.pk = uStr(u);
+            r.cty = tcity ? tcity.id : null; commitMove(u, r, true); u.pk = uStr(u);
             const pw = uPow(u, Ec.adv); l += pw.l; s += pw.s; avail -= uStr(u); sent.push(u);
           }
         } else if (!(g.sg && g.sg[E] > S.day)) {
@@ -1193,7 +1231,7 @@ function minDef(m) {
           logMin('def', 'אין מספיק כוח כדי לפלוש ל' + nm(E) + ' — הכוחות נשארים להגן. כדאי לשקול רכש או בעלות ברית', '', true);
         }
       }
-      if (sent.length) said.push((sent.length === 1 ? uName(sent[0]) + ' נשלחה' : sent.length + ' יחידות נשלחו') + ' לחזית ' + nm(E));
+      if (sent.length) said.push((sent.length === 1 ? uName(sent[0]) + ' נשלחה' : sent.length + ' יחידות נשלחו') + (tcity ? ' לכבוש את ' + cityName(tcity) : ' לחזית ' + nm(E)));
       // air cover over our troops in their land
       if (l > 0 && !mine.some(u => domOf(u) === 'air' && S.units.includes(u) && (u.at === E || (u.dest && u.mode === 'atk')))) {
         const air = mine.find(u => domOf(u) === 'air' && u.at === me && free(u));
@@ -1498,6 +1536,7 @@ function rebel(L) {
   const n = genName(L.id); L.ld = n.n; L.lg = n.g; tag(L, 'rebel', 365);
   if (wid === S.player) { S.p.annexed = S.p.annexed.filter(x => x !== L.id); S.p.shock -= 3; }
   rebuildOwn(); WG_CACHE.t = -1;
+  if (S.ct) citiesOfT(L.id).forEach(x => { const st = cst(x); if (st.o === wid) { st.o = L.id; delete st.s; delete st.b; delete st.lg; citiesDirty = true; } });
   const w = declareWar(L.id, wid, { noJoin: true, provoked: true, silent: wid !== S.player, noRally: true });
   if (w) { w.f = 0; w.startDay = S.day; }
   addNews('מרד ב' + L.he + ': המורדים הכריזו עצמאות מ' + W.he + ' והשתלטו על ' + (tids.length > 1 ? 'רוב השטח' : 'השטח') + '. ' + n.n + ' ' + vg(L, 'עומד', 'עומדת') + ' בראשם.', wid === S.player ? 'war' : 'world');
@@ -1932,8 +1971,9 @@ function dayTick() {
   aiEconomy();
   if (S.units && !S.over) syncAllUnits();
   S.wars.slice().forEach(w => { if (S.wars.includes(w) && !S.over) countedBattle(w, () => battle(w)); });
-  if (S.day % 7 === 0) S.wars.forEach(w => { warSample(w); weekLog(w); });
+  if (S.day % 7 === 0) S.wars.slice().forEach(w => { warSample(w); weekLog(w); if (S.ct) aiCityFlip(w); });
   if (!S.over) unitsDay();
+  if (!S.over) cityDay();
   if (!S.over) approvalStep();
   if (!S.over) deliveries();
   if (!S.over) worldDay();
@@ -1954,7 +1994,7 @@ function monthTick(m) {
   if (!S.over) randomEvents();
   if (!S.over) nukeProgram();
   if (!S.over) approvalMonthly();
-  if (!S.over) { govMonth(); worldRebels(); }
+  if (!S.over) { govMonth(); worldRebels(); reconcileCities(); }
   if (p.tm) p.tm = p.tm.filter(x => x.u > S.day);
   if (p.tg) p.tg = p.tg.filter(x => x.u > S.day);
   if (m % 3 === 0) worldSnap();
@@ -1981,6 +2021,12 @@ function deliveries() {
       c[q.k] = Math.min(3, (c[q.k] || 0) + 1);
       const t = q.k === 'mlv' ? 'תוכנית הטילים שודרגה לרמה ' + LVL_HE[c.mlv] + ' (טווח ' + MIS_RANGE[c.mlv].toLocaleString('en-US') + ' ק״מ)' : 'מערך ההגנה האווירית שודרג לרמה ' + LVL_HE[c.adv];
       addNews(t + '.', 'good'); toast(t);
+    } else if (q.k === 'cfort' || q.k === 'cad') {
+      const x = CITYI[q.ci];
+      if (x && S.ct) {
+        const st = cst(x); if (q.k === 'cfort') st.f = Math.min(3, (st.f || 0) + 1); else st.a = 1;
+        const t = (q.k === 'cfort' ? 'ביצורים חדשים הושלמו ב' : 'מערך הגנה אווירית הוצב ב') + cityName(x); addNews(t + '.', 'good'); toast(t); citiesDirty = true;
+      }
     } else {
       c.inv[q.k] = (c.inv[q.k] || 0) + q.n; c.bought[q.k] = (c.bought[q.k] || 0) + q.n;
       const t = q.k === 'troops' ? 'סיימו אימון: ' + num(q.n * 1000).replace(/<[^>]+>/g, '') + ' חיילים חדשים' : 'נמסרו לצבא: ' + q.n + ' ' + BUY[q.k].unit;
@@ -2014,24 +2060,27 @@ function gameOver(reason, txt) { S.over = { reason, txt }; addNews('סוף המ�
 /* ================= nuclear ================= */
 // people killed by one nuclear strike on a country's biggest city: tens of thousands in a small country, up to ~1.5 million in a giant one
 function nukeDead(T) { return Math.round(Math.min(T.pop * 0.3, clamp(T.pop * 0.004 + 0.03, 0.01, 1.5) * (0.7 + R() * 0.6)) * 1e6); }
-function nukeHit(att, tgt) {
-  const T = S.c[tgt], before = invSnap(T), dead = nukeDead(T);
-  T.pop = Math.max(0.01, T.pop - dead / 1e6); T.gdp *= 0.65;
+function nukeHit(att, tgt, ci) {
+  const T = S.c[tgt], before = invSnap(T), x = (ci && CITYI[ci]) || (S.ct ? nukeTargetCity(tgt) : null);
+  const dead = x ? nukeCityDead(T, x) : nukeDead(T);
+  const share = x ? clamp(x.pop / Math.max(0.05, T.pop), 0, 0.6) : 0.1;
+  T.pop = Math.max(0.01, T.pop - dead / 1e6); T.gdp *= x ? 1 - clamp(0.15 + share * 1.2, 0.2, 0.5) : 0.65;
   hurtInv(T, Math.min(0.3, 150 / Math.max(1, T.inv.troops)), ['troops']); hurtInv(T, 0.5, ['tanks', 'afv', 'art', 'air', 'heli', 'ships', 'subs', 'msl']);
   const loss = lossFrom(T, before); civCas(loss, dead, 1.6);
-  const lp = launchPt(att, 'mis', tgt), pt = nukePt(tgt);
-  S.scorch = (S.scorch || []).filter(x => x.d > S.day).slice(-11); S.scorch.push({ p: pt, d: S.day + 240 }); scorchDirty = true;
-  const r = strikeRecord({ k: 'nuke', by: att, at: tgt, cas: loss, own: newCas() });
+  const lp = launchPt(att, 'mis', tgt), pt = x ? cityPt(x) : nukePt(tgt);
+  if (x) { const st = cst(x); st.d = Math.max(st.d || 0, 90); delete st.s; delete st.b; citiesDirty = true; }
+  S.scorch = (S.scorch || []).filter(s => s.d > S.day).slice(-11); S.scorch.push({ p: pt, d: S.day + (x ? 720 : 240) }); scorchDirty = true;
+  const r = strikeRecord({ k: 'nuke', by: att, at: tgt, cas: loss, own: newCas(), ci: x ? x.id : null, cn: x ? cityName(x) : null, cd: x ? 90 : 0 });
   r._lp = lp; r._pt = pt;
   return r;
 }
-function nukeImpact(att, tgt, ai) {
+function nukeImpact(att, tgt, ai, ci) {
   const T = S.c[tgt], A = S.c[att];
-  const r = nukeHit(att, tgt);
+  const r = nukeHit(att, tgt, ci);
   T.approval = clamp(T.approval - 20, 0, 100);
   noteGrievance(att, tgt);
-  if (att !== S.player && S.p) S.pending.push({ type: 'nukealert', att, tgt, dead: r.cas.ck });
-  addNews('☢ ' + A.he + ' שיגרה נשק גרעיני על ' + T.he + ': ' + nT(r.cas.ck) + ' אזרחים ו-' + nT(r.cas.sk) + ' חיילים נהרגו. העולם בהלם.', 'war');
+  if (att !== S.player && S.p) S.pending.push({ type: 'nukealert', att, tgt, dead: r.cas.ck, cn: r.cn });
+  addNews('☢ ' + A.he + ' שיגרה נשק גרעיני על ' + (r.cn ? r.cn + ' (' + T.he + ')' : T.he) + ': ' + nT(r.cas.ck) + ' אזרחים ו-' + nT(r.cas.sk) + ' חיילים נהרגו. העולם בהלם.', 'war');
   fxNuke(r._lp, r._pt, r);
   alive().forEach(id => {
     if (id === att) return;
@@ -2074,6 +2123,7 @@ function load() {
     if (!Array.isArray(S.p.tm)) S.p.tm = []; if (!Array.isArray(S.p.tg)) S.p.tg = [];
     if (!S.ev || typeof S.ev !== 'object') S.ev = { nx: S.day + 5, cd: {}, ld: S.day, n: 0, dn: 0 };
     if (!S.wh) worldSnap();
+    ensureCityState(); // older saves: cities start from the data
     return true;
   } catch (e) { return false; }
 }
@@ -2373,7 +2423,8 @@ const uEmpty = u => Object.keys(u.m).every(k => (u.m[k] || 0) < 0.5);
 // keep the units equal to the inventory: losses come off proportionally, new equipment goes to units at home
 function atHome(u) {
   if (u.dest) return false;
-  return domOf(u) === 'sea' ? km([u.lon, u.lat], u.hb) < 400 : u.at === u.o;
+  // a fleet is at home near its base, or anchored at any of our ports (there it gets repairs and new ships)
+  return domOf(u) === 'sea' ? km([u.lon, u.lat], u.hb) < 400 || nearOwnPort(u.o, [u.lon, u.lat], 150) : u.at === u.o;
 }
 function depotFor(cid, us, k, d) {
   const home = us.filter(atHome);
@@ -2519,7 +2570,7 @@ function planMove(u, p, mode) {
 }
 function commitMove(u, r, quiet) {
   if (!S.units.includes(u)) return;
-  u.dest = r.dest; u.via = r.via || null; u.slow = r.slow; u.mode = r.mode;
+  u.dest = r.dest; u.via = r.via || null; u.slow = r.slow; u.mode = r.mode; u.cty = r.cty || null;
   if (u.o === S.player && !quiet) toast(uName(u) + ' בדרך · ' + (r.days < 1 ? 'מגיעה תוך פחות מיום' : 'עוד ' + daysTxt(r.days).replace(/<[^>]+>/g, '')));
   unitsDirty = true;
 }
@@ -2633,6 +2684,12 @@ function unitBattle(w) {
   let nf = clamp(fp + shift, -100, 100);
   if (fp >= 0 && nf < 0 && !(aP > 0 && rP > 0.5)) nf = 0;
   if (fp <= 0 && nf > 0 && !(aE > 0 && rE > 0.5)) nf = 0;
+  // cities held count towards the occupation, by population
+  if (S.ct) {
+    const hE = heldShare(E, me) * 80, hP = heldShare(me, E) * 80;
+    if (hE > 0 && nf < hE && hE >= hP) nf = Math.min(hE, nf + Math.max(0.12, (hE - nf) * 0.05));
+    if (hP > 0 && -nf < hP && hP > hE) nf = Math.max(-hP, nf - Math.max(0.12, (hP + nf) * 0.05));
+  }
   const f0 = w.f;
   w.f = pA ? nf : -nf; w.last = w.f - f0; w.ms = (w.ms || 0) + (w.f - f0);
   if (Math.sign(f0) !== Math.sign(w.f)) needMapRecolor = true;
@@ -2681,9 +2738,11 @@ function aiUnits() {
     // beaten attackers fall back
     fighters.forEach(u => { if (u.ai === 'atk' && u.at === S.player && !u.dest && uStr(u) < (u.s0 || 0) * 0.45) { sendHome(u, true); u.ai = null; addNews('כוחות ' + nm(E) + ' נסוגים מהשטח שלנו.', 'good'); } });
     const intruders = S.units.filter(u => u.o === S.player && domOf(u) === 'land' && u.at === E);
+    // first the invaders who took (or besiege) one of their cities
+    const atCity = S.ct ? intruders.filter(u => citiesNear([u.lon, u.lat], CR_KM).some(x => S.owner[x.tid] === E)) : [];
     if (intruders.length && S.day % 9 === 0) fighters.forEach(u => {
       if (domOf(u) !== 'land' || u.at !== E || u.dest || u.ai === 'atk' || R() > 0.5) return;
-      const tg = pick(intruders), p = nearIn(E, [tg.lon, tg.lat]);
+      const tg = pick(atCity.length && R() < 0.75 ? atCity : intruders), p = tidAt(tg.lon, tg.lat) && ownerAt(tg.lon, tg.lat) === E ? [tg.lon, tg.lat] : nearIn(E, [tg.lon, tg.lat]);
       if (p && km(p, [u.lon, u.lat]) > 60) { u.dest = p; u.mode = 'move'; u.slow = 1; }
     });
     if (S.day % 7 !== 0 || !adjacent(E, S.player)) return;
@@ -2697,7 +2756,9 @@ function aiUnits() {
     let sent = 0; const go = [];
     home.sort((a, b) => uStr(b) - uStr(a)).forEach(u => { if (sent < theirs * (busy.length ? 0.25 : 0.45) && (domOf(u) === 'land' || (domOf(u) === 'air' && go.length))) { go.push(u); sent += uStr(u); } });
     if (!go.length) return;
-    go.forEach(u => { const p = nearIn(S.player, [u.lon, u.lat]); if (!p) return; u.dest = p; u.mode = 'move'; u.slow = 1; u.ai = 'atk'; u.s0 = uStr(u); });
+    // the invasion heads for one of our cities: the nearest one worth taking
+    const g0 = go[0], tcity = S.ct ? warCityTarget(S.player, E, [g0.lon, g0.lat]) : null;
+    go.forEach(u => { const p = tcity && km([u.lon, u.lat], cityPt(tcity)) < 900 ? cityStand(tcity) : nearIn(S.player, [u.lon, u.lat]); if (!p) return; u.dest = p; u.mode = 'move'; u.slow = 1; u.ai = 'atk'; u.s0 = uStr(u); u.cty = tcity ? tcity.id : null; });
     addNews('כוחות ' + nm(E) + ' חצו את הגבול ופלשו לשטחנו!', 'war'); warLog(w, 'כוחות ' + nm(E) + ' פלשו לשטחנו');
     S.pending.push({ type: 'invaded', wid: w.id, from: E, uid: go[0].id });
   });
@@ -2714,34 +2775,45 @@ function aiStrikes() {
     enemyStrike(E, mis && (!air || R() < 0.55) ? 'mis' : 'air');
   });
 }
-function enemyStrike(E, kind) {
+// a city of ours for the enemy to hit (bigger cities more likely)
+function myTargetCity() {
+  const l = S.ct ? citiesOfT(S.player).filter(x => cst(x).o === S.player) : []; if (!l.length) return null;
+  let t = 0; for (const x of l) t += Math.sqrt(x.pop); let r = R() * t;
+  for (const x of l) { r -= Math.sqrt(x.pop); if (r <= 0) return x; }
+  return l[0];
+}
+function enemyStrike(E, kind, ci) {
   const Ec = S.c[E], me = P(); if (!Ec || !Ec.alive || !me) return null;
   const before = invSnap(me), dens = densF(S.player);
-  let used, frac, lost = 0, civ;
+  // now and then they aim at a city (more often for harsh regimes)
+  const cx = ci && CITYI[ci] ? CITYI[ci] : R() < (Ec.gov === 'authoritarian' ? 0.45 : 0.3) ? myTargetCity() : null, cS = cx ? cst(cx) : null;
+  let used, frac, lost = 0, civ, cdInc = 0;
   if (kind === 'air') {
     used = clamp(Math.round(Ec.inv.air * 0.06), 4, 80);
-    frac = clamp(used * (Ec.q || 1) / (me.inv.air * 0.5 + me.inv.tanks * 0.03 + 40) * 0.1, 0.003, 0.08) * (1 - 0.15 * me.adv);
-    lost = Math.round(used * [0.003, 0.01, 0.025, 0.05][me.adv] * (0.5 + R())); Ec.inv.air = Math.max(0, Ec.inv.air - lost);
+    frac = clamp(used * (Ec.q || 1) / (me.inv.air * 0.5 + me.inv.tanks * 0.03 + 40) * 0.1, 0.003, 0.08) * (1 - 0.15 * me.adv) * (cx ? 0.3 : 1);
+    lost = Math.round(used * [0.003, 0.01, 0.025, 0.05][me.adv] * (0.5 + R()) * (cx && cS.a ? 1.6 : 1)); Ec.inv.air = Math.max(0, Ec.inv.air - lost);
     hurtInv(me, frac, ['air', 'heli', 'tanks', 'art', 'msl']); hurtInv(me, frac * 0.4, ['ships', 'afv']); hurtInv(me, frac * 0.15, ['troops']);
     me.gdp *= 1 - frac * 0.04;
-    civ = used * 0.35 * dens * (0.4 + R() * 0.8);
+    civ = cx ? cityCiv(cx, 'air', used, cS.a) * (0.7 + R() * 0.6) : used * 0.35 * dens * (0.4 + R() * 0.8);
+    if (cx) cdInc = cityHit(cx, cityDmgInc('air', used, cS.a));
   } else {
     used = clamp(Math.round(Ec.inv.msl * 0.08), 5, 150); Ec.inv.msl = Math.max(0, Ec.inv.msl - used);
     const hits = used * (1 - [0, 0.25, 0.5, 0.75][me.adv]);
-    frac = clamp(hits / (hits + 300) * 0.2, 0.002, 0.05);
+    frac = clamp(hits / (hits + 300) * 0.2, 0.002, 0.05) * (cx ? 0.3 : 1);
     hurtInv(me, frac, ['air', 'art', 'msl', 'ships']); hurtInv(me, frac * 0.5, ['tanks']); hurtInv(me, frac * 0.2, ['troops']);
     me.gdp *= 1 - frac * 0.08;
-    civ = hits * 0.8 * dens * (0.4 + R() * 0.8);
+    civ = cx ? cityCiv(cx, 'mis', hits, cS.a) * (0.7 + R() * 0.6) : hits * 0.8 * dens * (0.4 + R() * 0.8);
+    if (cx) cdInc = cityHit(cx, cityDmgInc('mis', hits, cS.a));
   }
   const loss = lossFrom(me, before); civCas(loss, Math.round(civ), 2.5 + R());
   me.pop = Math.max(0.01, me.pop - loss.ck / 1e6);
   S.p.cas += Math.max(0, before.troops - me.inv.troops);
   const own = newCas(); if (kind === 'air') { if (lost) own.eq.air = lost; } else own.mu = used;
   // dead civilians at home shake the public
-  const fx = applyFx({ ap: -Math.min(4, 0.5 + Math.sqrt(loss.ck) / 12) });
-  const r = strikeRecord({ k: kind, by: E, at: S.player, cas: loss, own, fx, war: true, used, lost });
+  const fx = applyFx({ ap: -Math.min(cx ? 8 : 4, 0.5 + Math.sqrt(loss.ck) / (cx ? 10 : 12)) });
+  const r = strikeRecord({ k: kind, by: E, at: S.player, cas: loss, own, fx, war: true, used, lost, ci: cx ? cx.id : null, cn: cx ? cityName(cx) : null, cd: cdInc });
   addNews('אזעקה! ' + strikeLine(r) + '.', 'war');
-  const lp = launchPt(E, kind, S.player), pt = targetPt(S.player, lp);
+  const lp = launchPt(E, kind, S.player), pt = cx ? cityPt(cx) : targetPt(S.player, lp);
   fxStrike(kind, lp, pt, used, r);
   if (S.units) syncAllUnits();
   return r;
@@ -2757,6 +2829,239 @@ function unitsDay() {
   aiStrikes();
   syncAllUnits();
 }
+
+/* ================= cities: real cities, objectives in war, targets for strikes ================= */
+// the fixed list comes from cities.js (or the sample, or a capital generated at the heart of each country);
+// what changes during the game lives in S.ct[id]: o = who controls it, d = damage %, s = siege progress, b = besieger,
+// f = fortifications (0–3), a = air defence, lg = economy lost while occupied, al = day of the last siege alert
+let CITY = [], CITYI = {}, CBY = null, DMGS = {};
+const CGRID = new Map(), CR_KM = 45;
+const cgk = (x, y) => x + ',' + y;
+function addCity(x) {
+  x.i = CITY.length; CITY.push(x); CITYI[x.id] = x;
+  const k = cgk(Math.floor(x.lon), Math.floor(x.lat)); let a = CGRID.get(k); if (!a) CGRID.set(k, a = []); a.push(x);
+  if (MAP_PROJ) { const p = MAP_PROJ([x.lon, x.lat]); x.mx = p ? p[0] : NaN; x.my = p ? p[1] : NaN; }
+}
+function initCities() {
+  CITY = []; CITYI = {}; CGRID.clear(); CBY = null;
+  (Array.isArray(window.CITIES) ? window.CITIES : []).forEach(d => {
+    if (!d || d.id == null || !isFinite(+d.lat) || !isFinite(+d.lon)) return;
+    const id = String(d.id); if (CITYI[id]) return;
+    const c = d.c != null ? String(d.c) : '';
+    const tid = TERR[c] && !HIDDEN.has(c) ? c : tidAt(+d.lon, +d.lat);
+    if (!tid || !TERR[tid] || HIDDEN.has(tid)) return;
+    addCity({ id, c: c || tid, he: String(d.he || d.en || id), en: String(d.en || ''), lat: +d.lat, lon: +d.lon, pop: clamp(+d.pop || 0.05, 0.01, 60), cap: d.cap ? 1 : 0, port: d.port ? 1 : 0, tid });
+  });
+}
+// a place inside the country as close as possible to its centre (always the same point)
+function genCapPt(t) {
+  const T = TERR[t], c = T.c;
+  if (tidAt(c[0], c[1]) === t) return c;
+  const [[x0, y0], [x1, y1]] = d3.geoBounds(T.best), X1 = x1 < x0 ? x1 + 360 : x1;
+  let best = c, bd = 1e9;
+  for (let i = 1; i < 9; i++) for (let j = 1; j < 9; j++) {
+    let lon = x0 + (X1 - x0) * i / 9; if (lon > 180) lon -= 360; const lat = y0 + (y1 - y0) * j / 9;
+    if (tidAt(lon, lat) !== t) continue; const d = km([lon, lat], c); if (d < bd) { bd = d; best = [lon, lat]; }
+  }
+  return best;
+}
+// city state for this game: fresh games and old saves get it from the data
+function ensureCityState() {
+  if (!S) return;
+  const has = new Set(); CITY.forEach(x => { if (x.cap) has.add(x.c); });
+  Object.keys(S.c).sort().forEach(id => {
+    if (has.has(id) || CITYI['g-' + id] || !TERR[id] || !TERR[id].best || UNPLAYABLE.has(id) || HIDDEN.has(id)) return;
+    const p = genCapPt(id);
+    addCity({ id: 'g-' + id, c: id, he: '', en: '', lat: p[1], lon: p[0], pop: clamp(S.c[id].pop * 0.12, 0.03, 8), cap: 1, port: 0, tid: id, gen: 1 });
+  });
+  const fresh = !S.ct || typeof S.ct !== 'object';
+  if (fresh) S.ct = {};
+  for (const k in S.ct) if (!CITYI[k]) delete S.ct[k];
+  CITY.forEach(x => { if (!S.ct[x.id] || typeof S.ct[x.id] !== 'object') S.ct[x.id] = { o: S.owner[x.tid] || null }; });
+  CBY = null;
+  // wars already running when the game starts (or before cities existed): the occupier holds the nearest cities
+  if (fresh) S.wars.forEach(w => aiCityFlip(w, true));
+  reconcileCities(); citiesDirty = true;
+}
+const cst = x => S.ct[x.id] || (S.ct[x.id] = { o: S.owner[x.tid] || null });
+const cityPt = x => [x.lon, x.lat];
+// where land units stand at a city: the city itself, or the nearest land of its country (coastal cities sit on the shore)
+function cityStand(x) {
+  if (x.sp) return x.sp;
+  let p = cityPt(x);
+  if (tidAt(p[0], p[1]) !== x.tid) {
+    const c = TERR[x.tid].c, it = d3.geoInterpolate(p, c), d = km(p, c);
+    for (let i = 1; i <= 30; i++) { const q = it(Math.min(1, i * 4 / Math.max(4, d))); if (tidAt(q[0], q[1]) === x.tid) { p = q; break; } }
+  }
+  return (x.sp = p);
+}
+const cityName = x => x.he || ('בירת ' + nm(x.c));
+function citiesNear(p, r) {
+  const out = [], dy = Math.ceil(r / 111), dx = Math.min(8, Math.ceil(r / (111 * Math.max(0.15, Math.cos(p[1] * Math.PI / 180)))));
+  const gx = Math.floor(p[0]), gy = Math.floor(p[1]);
+  for (let y = gy - dy; y <= gy + dy; y++) for (let x = gx - dx; x <= gx + dx; x++) {
+    const a = CGRID.get(cgk(((x + 180) % 360 + 360) % 360 - 180, y)); if (!a) continue;
+    for (const c of a) if (Math.abs(c.lat - p[1]) * 111 <= r && km(p, [c.lon, c.lat]) <= r) out.push(c);
+  }
+  return out;
+}
+// cities on a country's land (whoever controls them now)
+function citiesOfT(cid) {
+  if (!CBY) { CBY = {}; for (const x of CITY) { const o = S.owner[x.tid]; if (o) (CBY[o] || (CBY[o] = [])).push(x); } }
+  return CBY[cid] || [];
+}
+function capOf(cid) { const l = citiesOfT(cid); return l.find(x => x.cap && x.c === cid) || l.find(x => x.cap) || l.reduce((a, b) => !a || b.pop > a.pop ? b : a, null); }
+const sideOf = (a, b) => a === b || (isAlly(a, b) && !atWar(a, b));
+// share of a country's city population held by the other side
+function heldShare(terr, side) {
+  let t = 0, h = 0;
+  for (const x of citiesOfT(terr)) { t += x.pop; const o = cst(x).o; if (o && o !== terr && sideOf(o, side)) h += x.pop; }
+  return t ? h / t : 0;
+}
+const capHeldBy = (cid, side) => { const c = capOf(cid); if (!c) return false; const o = cst(c).o; return !!o && o !== cid && sideOf(o, side); };
+// the city's own defenders, besides the units standing in it (in unit strength points)
+function garrison(x, st) {
+  const C = S.c[st.o]; if (!C) return 0;
+  return (1.5 + x.pop * 2.5) * (1 + 0.6 * (st.f || 0)) * (st.o === S.owner[x.tid] ? 1 : 0.5) * (C.q || 1) * (x.cap ? 1.3 : 1);
+}
+const siegeDays = (x, st) => clamp(5 + 3 * Math.sqrt(x.pop) + 4 * (st.f || 0), 5, 40) * (x.cap ? 1.3 : 1);
+const dmgDrag = id => DMGS[id] && S.c[id] ? Math.min(0.05, DMGS[id] / Math.max(0.05, S.c[id].pop) * 0.3) : 0;
+// once a day: damaged cities slowly rebuild, armies standing at cities besiege them
+function cityDay() {
+  if (!S.ct) return;
+  const dm = {};
+  for (const x of CITY) {
+    const st = S.ct[x.id]; if (!st || !st.d) continue;
+    const d0 = st.d; st.d = d0 > 0.5 ? d0 * 0.997 - 0.02 : 0;
+    if (st.d <= 0) { delete st.d; continue; }
+    if (d0 >= 15 && st.d < 15) citiesDirty = true;
+    const o = S.owner[x.tid]; if (o) dm[o] = (dm[o] || 0) + x.pop * st.d / 100;
+  }
+  DMGS = dm;
+  if (!S.units) return;
+  const touch = new Map();
+  for (const u of S.units) {
+    const dom = domOf(u); if (dom === 'sea' || u.dest) continue;
+    for (const x of citiesNear([u.lon, u.lat], dom === 'air' ? 120 : CR_KM)) { let a = touch.get(x); if (!a) touch.set(x, a = []); a.push(u); }
+  }
+  for (const x of CITY) { const st = S.ct[x.id]; if (st && st.s > 0 && !touch.has(x)) { st.s = Math.max(0, st.s - 20); if (!st.s) { delete st.s; delete st.b; citiesDirty = true; } } }
+  touch.forEach((us, x) => siegeStep(x, us));
+}
+// land units at a city: with enough superiority (×1.5 over defenders and garrison) the siege advances; at 100% the city falls
+function siegeStep(x, us) {
+  const st = cst(x), C = st.o; if (!C || !S.c[C] || !S.c[C].alive) return;
+  const Cc = S.c[C], D = { l: 0, s: 0 }, A = { l: 0, s: 0 }, by = {};
+  for (const u of us) {
+    const land = domOf(u) === 'land';
+    if (u.o === C || (isAlly(u.o, C) && !atWar(u.o, C))) { if (land) { const p = uPow(u, 0); D.l += p.l; D.s += p.s; } }
+    else if (atWar(u.o, C)) { const p = uPow(u, Cc.adv); if (land) { A.l += p.l; by[u.o] = (by[u.o] || 0) + p.l; } A.s += p.s; }
+  }
+  const aS = atkStr(A), dS = defStr(D) + garrison(x, st), was = st.s || 0;
+  if (aS <= 0) { if (was) { st.s = Math.max(0, was - 15); if (!st.s) { delete st.s; delete st.b; } citiesDirty = true; } return; }
+  const b = Object.keys(by).sort((p, q) => by[q] - by[p])[0];
+  if (aS >= dS * 1.5) {
+    st.s = was + 100 / siegeDays(x, st) * clamp(aS / (dS * 1.5), 1, 2); st.b = b;
+    if (!was) { citiesDirty = true; siegeStarted(x, st, b); }
+    if (st.s >= 100) captureCity(x, b);
+  } else if (was) { st.s = Math.max(0, was - 2); st.b = b; if (!st.s) { delete st.s; delete st.b; citiesDirty = true; } }
+}
+const cityPopT = x => x.pop >= 1 ? '⁦' + (x.pop >= 10 ? Math.round(x.pop) : x.pop.toFixed(1)) + '⁩ מיליון' : '⁦' + Math.round(x.pop * 1000) + '⁩ אלף';
+function siegeStarted(x, st, b) {
+  const me = S.player; if (!me) return;
+  if (st.o === me) {
+    addNews(cityName(x) + ' במצור! כוחות ' + nm(b) + ' מקיפים את העיר.', 'war');
+    if ((x.cap || x.pop >= 0.25 || citiesOfT(me).length <= 4) && S.day - (st.al == null ? -999 : st.al) > 45 && S.day - (S.p.sal == null ? -999 : S.p.sal) > 7) { st.al = S.day; S.p.sal = S.day; S.pending.push({ type: 'siege', ci: x.id, from: b }); }
+  } else if (b === me) {
+    addNews('כוחותינו פתחו במצור על ' + cityName(x) + ' (' + nm(st.o) + ').', 'war');
+    toast('מצור על ' + cityName(x) + ' · כיבוש בעוד כ-⁦' + Math.ceil(siegeDays(x, st)) + '⁩ ימים');
+  }
+}
+// a city changes hands; quiet = a war between other countries (only the map changes)
+function captureCity(x, by, quiet) {
+  const st = cst(x), from = st.o, terr = S.owner[x.tid] || null, me = S.player, T = S.c[terr];
+  if (terr && by && by !== terr && sideOf(by, terr)) by = terr; // a friend frees our city: it is ours again
+  if (!by || by === from) return;
+  st.o = by; delete st.s; delete st.b; st.d = Math.min(100, (st.d || 0) + (quiet ? 2 : 6)); citiesDirty = true;
+  if (quiet) return;
+  const share = T ? clamp(x.pop / Math.max(0.05, T.pop), 0, 0.6) : 0, nmC = cityName(x);
+  // the land's own country loses the city's economy while it is occupied (most of it comes back on liberation)
+  if (T) { if (by === terr) { if (st.lg) { T.gdp += st.lg * 0.7; delete st.lg; } } else if (from === terr) { const lost = T.gdp * share * 0.5; T.gdp -= lost; st.lg = lost; } }
+  const L = S.c[from];
+  if (L && from !== me) L.approval = clamp(L.approval - (x.cap ? 12 : 1 + share * 20), 5, 95);
+  const w = S.wars.find(v => (v.A.includes(by) && v.B.includes(from)) || (v.B.includes(by) && v.A.includes(from)));
+  // the capital falling shakes the whole war
+  if (w && x.cap && from === terr) { w.f = clamp(w.f + (w.A.includes(by) ? 12 : -12), -100, 100); needMapRecolor = true; }
+  if (w) warLog(w, (by === me ? (terr === me ? 'שחררנו את ' : 'כבשנו את ') : from === me ? 'איבדנו את ' : nm(by) + ' כבשה את ') + nmC);
+  if (me && from === me) {
+    const d = Math.min(14, 1.5 + share * 30) + (x.cap ? 8 : 0); S.p.shock -= d;
+    toast('העיר ' + nmC + ' נפלה לידי ' + nm(by) + ' · העם ' + sgnT(-d), true);
+    addNews('מכה קשה: ' + nmC + (x.cap ? ', עיר הבירה,' : '') + ' נכבשה בידי ' + nm(by) + '.', 'bad');
+    if (x.cap) S.pending.push({ type: 'caplost', ci: x.id, from: by });
+  } else if (me && by === me) {
+    const d = Math.min(5, 0.5 + share * 12) + (x.cap ? 4 : 0); S.p.shock += d;
+    toast((terr === me ? 'שחררנו את ' : 'כבשנו את ') + nmC + ' · העם ' + sgnT(d));
+    addNews((terr === me ? 'שוחררה: ' : 'ניצחון: כוחותינו כבשו את ') + nmC + (x.cap && terr !== me ? ' — עיר הבירה של ' + nm(terr) + '!' : '.'), 'good');
+  } else if (me && terr === me) addNews(nmC + ' עברה לשליטת ' + nm(by) + '.', 'bad');
+  if (w) checkWarEnd(w);
+}
+// a captured city goes back to the country whose land it is once the two are no longer at war
+function reconcileCities() {
+  if (!S || !S.ct) return;
+  for (const x of CITY) {
+    const st = cst(x), terr = S.owner[x.tid] || null, o = st.o;
+    if (o !== terr && (!o || !S.c[o] || !S.c[o].alive || !terr || !atWar(o, terr))) {
+      if (st.lg && terr && S.c[terr]) S.c[terr].gdp += st.lg * 0.7;
+      delete st.lg; st.o = terr; delete st.s; delete st.b; citiesDirty = true;
+    }
+    if (st.b && (!S.c[st.b] || !S.c[st.b].alive || !st.o || !atWar(st.b, st.o))) { delete st.b; delete st.s; citiesDirty = true; }
+  }
+}
+// wars fought without units on the map: the occupier holds cities in proportion to the occupation, nearest to its border first
+function aiCityFlip(w, init) {
+  if (!init && S.player && S.units && (w.a === S.player || w.b === S.player)) return;
+  [[w.a, w.b, w.f, w.A], [w.b, w.a, -w.f, w.B]].forEach(([att, def, f, side]) => {
+    const list = citiesOfT(def); if (!list.length || !S.c[att] || !S.c[att].alive) return;
+    let tot = 0, held = 0;
+    for (const x of list) { tot += x.pop; const o = cst(x).o; if (o !== def && side.includes(o)) held += x.pop; }
+    const want = Math.max(0, f) / 100 * tot * 0.85;
+    if (held < want - 1e-6) {
+      const cand = list.filter(x => cst(x).o === def && (!x.cap || f > 80)).map(x => [x, distToC(att, cityPt(x))]).sort((a, b) => a[1] - b[1]);
+      for (const [x] of cand) { if (held >= want) break; if (held + x.pop > want + tot * 0.06) continue; captureCity(x, att, true); held += x.pop; }
+    } else if (held > want + tot * 0.1) {
+      const back = list.filter(x => { const o = cst(x).o; return o !== def && side.includes(o); }).map(x => [x, distToC(att, cityPt(x))]).sort((a, b) => b[1] - a[1]);
+      for (const [x] of back) { if (held <= want + tot * 0.03) break; captureCity(x, def, true); held -= x.pop; }
+    }
+  });
+}
+// the city most worth taking in an enemy country: big, important and close
+function warCityTarget(E, me, from) {
+  let best = null, bs = 1e18;
+  for (const x of citiesOfT(E)) {
+    const o = cst(x).o; if (!o || sideOf(o, me)) continue;
+    const d = from ? km(from, cityPt(x)) : 0, s = (d + 30) / (Math.pow(x.pop, 0.35) * (x.cap ? 1.6 : 1));
+    if (s < bs) { bs = s; best = x; }
+  }
+  return best;
+}
+// a strike on a city: civilians killed per plane / per missile that gets through (grows with the city's size)
+function cityCiv(x, kind, n, ad) { return n * (kind === 'air' ? 8 + 14 * Math.sqrt(x.pop) : 10 + 16 * Math.sqrt(x.pop)) * (ad ? 0.5 : 1); }
+function cityDmgInc(kind, n, ad) { return clamp(kind === 'air' ? n * 0.5 : n * 0.35, 2, kind === 'air' ? 30 : 35) * (ad ? 0.6 : 1); }
+// damage to a city: its share of the economy suffers
+function cityHit(x, inc) {
+  const st = cst(x), T = S.c[S.owner[x.tid]]; const d0 = st.d || 0;
+  st.d = Math.min(100, d0 + inc); citiesDirty = true;
+  if (T) T.gdp *= 1 - clamp(x.pop / Math.max(0.05, T.pop), 0, 0.6) * (st.d - d0) / 100 * 0.5;
+  return st.d - d0;
+}
+const nearOwnPort = (o, p, r) => citiesNear(p, r).some(x => x.port && S.ct && cst(x).o === o);
+// a nuclear strike hits the capital (or the biggest city when the capital is small)
+function nukeTargetCity(tgt) {
+  const l = citiesOfT(tgt).filter(x => cst(x).o === tgt); if (!l.length) return null;
+  const big = l.reduce((a, b) => b.pop > a.pop ? b : a), cap = l.find(x => x.cap && x.c === tgt);
+  return cap && cap.pop >= big.pop * 0.4 ? cap : big;
+}
+// people killed by a nuclear blast on a city: a large share of a small city, a smaller share (but more people) of a giant one
+function nukeCityDead(T, x) { const P = x.pop; return Math.round(Math.min(T.pop * 0.3, P * clamp(0.22 / (1 + P / 8), 0.06, 0.25) * (0.8 + R() * 0.4), 2.6) * 1e6); }
 
 /* ================= map ================= */
 let svg, gRoot, gLand, gMarks, zoom, pathGen, curK = 1, W = 0, H = 0, selected = null;
@@ -2781,6 +3086,8 @@ function initMap() {
   });
   gScorch = gRoot.append('g').attr('class', 'scorch'); scorchDirty = true;
   gMarks = gRoot.append('g').attr('class', 'marks');
+  // cities: their own screen-space layer under the units (taps: units first, then cities, then the country)
+  gCities = svg.append('g').attr('class', 'cities').node(); cityT0 = null; citiesDirty = true; CEL.clear();
   // units: their own layer on top, not scaled with the map, so icons keep the same size on screen
   gUnits = svg.append('g').attr('class', 'units');
   gRoutes = gUnits.append('g').attr('class', 'routes').node();
@@ -2793,15 +3100,23 @@ function initMap() {
     const t = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-t');
     modeTap(evLonLat(ev), t);
   });
+  d3.select(gCities).on('click', ev => {
+    const g = ev.target.closest && ev.target.closest('[data-ci]'); if (!g) return;
+    ev.stopPropagation();
+    onCityTap(g.getAttribute('data-ci'));
+  });
   d3.select(gIcons).on('click', ev => {
     const g = ev.target.closest && ev.target.closest('[data-k]'); if (!g) return;
     ev.stopPropagation();
     onUnitTap(g.getAttribute('data-k'));
   });
   zoom = d3.zoom().scaleExtent([0.8, 60]).translateExtent([[-W, -H], [W * 2, H * 2]])
-    .on('zoom', ev => { gRoot.attr('transform', ev.transform); curT = ev.transform; if (Math.abs(ev.transform.k - curK) > 0.01) { curK = ev.transform.k; scaleMarks(); if (fanIds && Math.abs(curK / fanK - 1) > 0.25) fanIds = null; } drawUnits(); });
+    .on('start', () => { zooming = true; })
+    .on('zoom', ev => { gRoot.attr('transform', ev.transform); curT = ev.transform; if (Math.abs(ev.transform.k - curK) > 0.01) { curK = ev.transform.k; scaleMarks(); if (fanIds && Math.abs(curK / fanK - 1) > 0.25) fanIds = null; } drawUnits(); cityFollow(); })
+    .on('end', () => { zooming = false; if (!cityT0 || cityT0.x !== curT.x || cityT0.y !== curT.y || cityT0.k !== curT.k) drawCities(); });
   svg.call(zoom).on('dblclick.zoom', null);
   MAP_PROJ = projection;
+  projCities();
   initFx();
   if (!(S && S.player) && W < 900) svg.call(zoom.transform, d3.zoomIdentity.translate(0, H * 0.22 - (topPad + H - botPad) / 2));
 }
@@ -2859,6 +3174,9 @@ function recolor() {
   }
   const mk = S && S.player ? S.player + ':' + warsOf(S.player).map(w => enemyLeaderFor(w, S.player)).join(',') : '';
   if (mk !== drawMarks.k) { drawMarks.k = mk; drawMarks(); }
+  // city colours follow wars and alliances
+  const ck = mk + '|' + (S ? S.wars.length + ':' + Object.keys(S.pacts).length : '');
+  if (ck !== recolor.ck) { recolor.ck = ck; citiesDirty = true; }
   if (scorchDirty) drawScorch();
   needMapRecolor = false; lastRecolor = performance.now();
 }
@@ -2899,7 +3217,7 @@ function onMapTap(t) {
   if (!S) return;
   const o = S.owner[t];
   if (!S.player) { if (o) startPick(o); return; }
-  selected = t; if (selUnit || fanIds) { selUnit = null; fanIds = null; unitsDirty = true; } recolor();
+  selected = t; if (selUnit || fanIds) { selUnit = null; fanIds = null; unitsDirty = true; } if (selCity) { selCity = null; citiesDirty = true; } recolor();
   openTab('country');
 }
 
@@ -3016,6 +3334,7 @@ function drawUnits() {
   // while choosing a destination our own icons let taps through to the map (enemy icons stay tappable as targets)
   gUnits.classed('picking', !!uMode);
   const items = buildItems(), seen = new Set();
+  UBOX = [];
   for (const it of items) {
     const multi = it.us.length > 1;
     const key = multi ? 'c' + it.us.map(u => u.id).sort((a, b) => a - b).join(',') : String(it.us[0].id);
@@ -3023,6 +3342,7 @@ function drawUnits() {
     const off = it.x < -60 || it.y < -60 || it.x > W + 60 || it.y > H + 60;
     let g = UEL.get(key);
     if (off) { if (g) showE(g, false); continue; }
+    UBOX.push(multi ? [it.x - 30, it.y - 22, it.x + 24, it.y + 39] : [it.x - 16, it.y - 15, it.x + 16, it.y + 24]);
     if (!g) { g = mkIcon(key); UEL.set(key, g); }
     showE(g, true);
     // a stack shows infantry (with the total soldiers) when it has any, otherwise its strongest unit
@@ -3134,6 +3454,241 @@ function focusUnit(u, zoomIn) {
   const [vx0, vy0, vx1, vy1] = visibleRect(), m = 36;
   if (zoomIn || s[0] < vx0 + m || s[0] > vx1 - m || s[1] < vy0 + m || s[1] > vy1 - m) zoomToMapPt(p, zoomIn ? Math.max(curK, zoomIn) : curK);
 }
+/* ---- cities layer: dots, stars and names in screen space; redrawn only when the view settles or something changes ---- */
+let gCities = null, citiesDirty = true, lastCityDraw = 0, cityT0 = null, selCity = null, zooming = false, UBOX = [], TWC = null;
+const CEL = new Map();
+function projCities() { if (!MAP_PROJ) return; for (const x of CITY) { const p = MAP_PROJ([x.lon, x.lat]); x.mx = p ? p[0] : NaN; x.my = p ? p[1] : NaN; } citiesDirty = true; }
+// during a pan / pinch the whole layer simply follows the map
+function cityFollow() {
+  if (!gCities || !cityT0) return;
+  const r = curT.k / cityT0.k;
+  gCities.setAttribute('transform', 'translate(' + (curT.x - r * cityT0.x).toFixed(1) + ',' + (curT.y - r * cityT0.y).toFixed(1) + ') scale(' + r.toFixed(4) + ')');
+}
+function textW(t, cap) {
+  if (!TWC) { const cv = document.createElement('canvas'); TWC = { c: cv.getContext('2d'), m: new Map() }; }
+  const k = (cap ? 'b' : 'n') + t; let w = TWC.m.get(k); if (w != null) return w;
+  if (!TWC.c) return t.length * (cap ? 6.6 : 6);
+  TWC.c.font = (cap ? '800 11.5px ' : '700 10.5px ') + '"Segoe UI","Noto Sans Hebrew",Arial,sans-serif';
+  w = TWC.c.measureText(t).width; TWC.m.set(k, w); return w;
+}
+// colour by who controls the city, as seen from the player
+function cityCls(st) {
+  const me = S.player, o = st.o;
+  return !o ? 'no' : !me ? 'ne' : o === me ? 'me' : atWar(o, me) ? 'en' : isAlly(o, me) ? 'al' : 'ne';
+}
+const ovl = (b, list) => { for (const q of list) if (b[0] < q[2] && b[2] > q[0] && b[1] < q[3] && b[3] > q[1]) return true; return false; };
+function drawCities() {
+  if (!gCities || !S || !MAP_PROJ) return;
+  citiesDirty = false; lastCityDraw = performance.now();
+  cityT0 = { x: curT.x, y: curT.y, k: curT.k }; gCities.removeAttribute('transform');
+  if (!S.ct || !CITY.length) { CEL.forEach(g => g.remove()); CEL.clear(); return; }
+  const me = S.player, k = curT.k;
+  // level of detail: world view = capitals of big countries (and ours); zooming in brings smaller cities
+  const minP = k < 1.6 ? 1e9 : k < 2.6 ? 5 : k < 4.5 ? 1.8 : k < 8 ? 0.7 : k < 14 ? 0.3 : k < 24 ? 0.12 : 0;
+  const cand = [];
+  for (const x of CITY) {
+    const sx = curT.x + k * x.mx, sy = curT.y + k * x.my;
+    if (!(sx > -10 && sy > 30 && sx < W + 10 && sy < H - 20)) continue;
+    const st = S.ct[x.id]; if (!st) continue;
+    const terr = S.owner[x.tid], tc = S.c[terr];
+    const mine = !!me && (terr === me || st.o === me), hot = !!me && (st.s > 0 || (!!st.o && st.o !== terr) || (!!terr && atWar(terr, me)));
+    let pr;
+    if (x.id === selCity) pr = 9e6;
+    else if (mine && x.cap && terr === me) pr = 8e6;
+    else if (x.cap && (k >= 1.6 || mine || hot || (tc && tc.pop >= 45))) pr = 4e6 + (hot ? 5e5 : 0) + x.pop * 1000 + (tc ? tc.pop : 0);
+    else if (x.pop >= minP * (mine || hot ? 0.35 : 1)) pr = (mine ? 2e6 : hot ? 1.5e6 : 1e6) + x.pop * 1000;
+    else continue;
+    cand.push({ x, st, sx, sy, pr, imp: x.cap || mine || hot });
+  }
+  cand.sort((a, b) => b.pr - a.pr);
+  // what must not be covered: unit icons and the country names
+  const occ = [], MB = [];
+  if (gMarks) gMarks.selectAll('text').each(function () {
+    const fs = +this.getAttribute('font-size') * k, x = curT.x + k * +this.getAttribute('x'), y = curT.y + k * +this.getAttribute('y'), w = (this.textContent || '').length * fs * 0.62;
+    MB.push([x - w / 2, y - fs * 0.6, x + w / 2, y + fs * 0.6]);
+  });
+  const max = W < 600 ? 90 : 170, labels = k >= 1.2, seen = new Set(); let n = 0;
+  for (const c of cand) {
+    if (n >= max) break;
+    const x = c.x, r = x.cap ? 6.5 : 3.5, force = c.pr >= 8e6;
+    const db = [c.sx - r - 1.5, c.sy - r - 1.5, c.sx + r + 1.5, c.sy + r + 1.5];
+    // important cities may sit partly under a unit icon (units stay on top); others make room for the units
+    if (!force && (ovl(db, occ) || (!c.imp && (ovl(db, UBOX) || ovl(db, MB))))) continue;
+    occ.push(db); n++;
+    const name = cityName(x), tw = textW(name, x.cap) + 4, th = x.cap ? 15 : 13, anc = x.port && k >= 3, ax = anc ? 7 : 0;
+    let lb = null;
+    if (labels) for (const [dx, dy] of [[r + 3 + ax + tw / 2, 0], [-(r + 3 + tw / 2), 0], [0, -(r + 8)], [0, r + 8.5]]) {
+      const b = [c.sx + dx - tw / 2, c.sy + dy - th / 2, c.sx + dx + tw / 2, c.sy + dy + th / 2];
+      if (b[0] < 2 || b[2] > W - 2 || ovl(b, occ) || ovl(b, UBOX) || ovl(b, MB)) continue;
+      lb = [dx, dy]; occ.push(b); break;
+    }
+    const st = c.st, terr = S.owner[x.tid], id = x.id;
+    const cls = 'ci ' + cityCls(st) + (x.cap ? ' cap' : '') + (id === selCity ? ' sel' : '') + ((st.d || 0) >= 15 ? ' dm' : '');
+    let inner = '<circle class="h" r="' + (x.cap ? 14 : 12) + '"/>';
+    if (id === selCity) inner += '<circle class="rs" r="' + (r + 5.5) + '"/>';
+    if (st.s > 0) inner += '<circle class="sg" r="' + (r + 3.5) + '"/>';
+    if (st.o && st.o !== terr) inner += '<circle class="oc" r="' + (r + 2.3) + '"/>';
+    inner += x.cap ? '<use href="#ci-star" x="-7.5" y="-7.5" width="15" height="15"/>' : '<circle class="d" r="3.4"/>';
+    if (anc) inner += '<use class="anc" href="#ci-anc" x="' + (r - 0.5) + '" y="0" width="8" height="8"/>';
+    if (lb) inner += '<text x="' + lb[0].toFixed(1) + '" y="' + lb[1].toFixed(1) + '">' + esc(name) + '</text>';
+    let g = CEL.get(id);
+    if (!g) { g = sEl('g', { 'data-ci': id }); gCities.appendChild(g); CEL.set(id, g); }
+    setA(g, 'class', cls); setA(g, 'transform', 'translate(' + c.sx.toFixed(1) + ',' + c.sy.toFixed(1) + ')');
+    if (g.__in !== inner) { g.innerHTML = inner; g.__in = inner; }
+    seen.add(id);
+  }
+  CEL.forEach((g, id) => { if (!seen.has(id)) { g.remove(); CEL.delete(id); } });
+}
+function onCityTap(id) {
+  const x = CITYI[id]; if (!x || !S || !S.ct) return;
+  // on the start screen a city simply picks its country
+  if (!S.player) { const o = S.owner[x.tid]; if (o) { startPick(o); zoomToTid(mainTid(o) || o, 8); } return; }
+  if (uMode) { cityModeTap(x); return; }
+  openCity(id, 0);
+}
+function openCity(id, k) {
+  const x = CITYI[id]; if (!x) return;
+  selCity = id; selected = null; if (selUnit || fanIds) { selUnit = null; fanIds = null; unitsDirty = true; }
+  recolor(); openTabFresh('city'); drawCities();
+  setTimeout(() => {
+    const s = toScreen(cityPt(x)), [vx0, vy0, vx1, vy1] = visibleRect();
+    if (k > curK || !s || s[0] < vx0 + 30 || s[0] > vx1 - 30 || s[1] < vy0 + 30 || s[1] > vy1 - 30) zoomToMapPt(MAP_PROJ(cityPt(x)), Math.max(curK, k || 0));
+  }, 40);
+}
+// a city tapped while choosing a destination or a target for a unit
+function cityModeTap(x) {
+  const u = unitById(uMode.uid); if (!u) { endMode(); return; }
+  const kind = uMode.kind, st = cst(x), o = st.o, terr = S.owner[x.tid];
+  if (kind === 'strike' || kind === 'missile') {
+    if (!o || o === S.player || terr === S.player) { toast('בחר עיר של מדינה זרה', true); return; }
+    endMode(); unitStrike(u, o, kind === 'strike' ? 'air' : 'mis', x.id); return;
+  }
+  const enemy = !!o && o !== S.player && !isAlly(o, S.player);
+  if (domOf(u) === 'sea') { const p = snapSea(cityPt(x)); if (!p) { toast('אין ים ליד העיר הזו', true); return; } orderTo(u, p, enemy ? 'atk' : 'move'); return; }
+  orderTo(u, cityStand(x), enemy || kind === 'attack' ? 'atk' : 'move', x.id);
+}
+function cityStatus(x, st) {
+  const terr = S.owner[x.tid];
+  if (st.o && terr && st.o !== terr) return { t: 'כבושה בידי ' + nm(st.o), c: st.o === S.player ? 'ok' : terr === S.player ? 'bad' : 'warn' };
+  if (st.s > 0 && st.b) return { t: 'במצור של ' + nm(st.b), c: st.o === S.player ? 'bad' : st.b === S.player ? 'ok' : 'warn' };
+  if ((st.d || 0) >= 5) return { t: 'נפגעה בהפצצות', c: 'warn' };
+  return { t: 'שקטה', c: 'ok' };
+}
+const sortCities = l => l.slice().sort((a, b) => (b.cap - a.cap) || (b.pop - a.pop));
+function cityRows(list, max) {
+  if (!list.length) return '';
+  return '<div class="ulist">' + list.slice(0, max).map(x => {
+    const s = cityStatus(x, cst(x));
+    return '<button data-act="selcity" data-ci="' + esc(x.id) + '">' + (x.cap ? '<span class="cstar">★</span>' : '<span class="cdot"></span>') + '<b>' + esc(cityName(x)) + '</b><small>' + popTxt(x.pop) + ' · <span class="' + s.c + '">' + esc(s.t) + '</span>' + ((cst(x).d || 0) >= 5 ? ' · נזק ' + pct(cst(x).d) : '') + '</small></button>';
+  }).join('') + '</div>' + (list.length > max ? '<p class="sub">ועוד ' + num(list.length - max) + ' ערים — הגדל את המפה כדי לראות אותן.</p>' : '');
+}
+// one city's card: who holds it, its state and what we can do there
+function cityForces(x) {
+  const me = S.player, o = cst(x).o, p = cityPt(x); let my = 0, en = 0, myS = 0, enS = 0;
+  for (const u of S.units || []) { if (domOf(u) !== 'land' || u.dest || km([u.lon, u.lat], p) > CR_KM) continue; if (u.o === me) { my++; myS += uStr(u); } else if (o && (u.o === o ? o !== me : atWar(u.o, me))) { en++; enS += uStr(u); } }
+  return { my, en, myS, enS };
+}
+const fortCost = x => Math.max(0.05, P().gdp * 0.0008) * ((cst(x).f || 0) + 1) * (x.cap ? 1.5 : 1);
+const cadCost = x => Math.max(0.1, P().gdp * 0.0015) * (x.cap ? 1.3 : 1);
+function viewCity() {
+  const x = CITYI[selCity]; if (!x || !S.ct) return '<p class="hint">העיר לא נמצאה.</p>';
+  const st = cst(x), me = S.player, terr = S.owner[x.tid], o = st.o, T = S.c[terr], stt = cityStatus(x, st), F = cityForces(x);
+  let h = '<h2>' + (x.cap ? '<span class="cstar">★</span> ' : '') + esc(cityName(x)) + ' <small>' + esc(terr ? nm(terr) : 'שטח ללא שליטה') + (terr === me ? ' · שלך' : '') + '</small></h2>';
+  h += '<div class="chips">' + (x.cap ? chip('עיר בירה', 'orange') : '') + (x.port ? chip('⚓ נמל', 'blue') : '') + chip(esc(stt.t), stt.c) + (x.gen ? chip('מיקום משוער') : '') + '</div>';
+  const defs = [(st.f ? 'ביצורים ' + num(st.f) + '/3' : ''), (st.a ? 'הגנה אווירית' : '')].filter(Boolean).join(' · ') || 'אין';
+  h += '<div class="grid">' +
+    '<div><small>תושבים (כולל הפרברים)</small>' + popTxt(x.pop) + '</div>' +
+    '<div><small>חלק מאוכלוסיית המדינה</small>' + (T ? pct(Math.min(100, x.pop / Math.max(0.01, T.pop) * 100)) : '—') + '</div>' +
+    '<div><small>בשליטת</small>' + esc(o ? nm(o) : '—') + (o === me ? ' (אתה)' : '') + '</div>' +
+    '<div><small>נזק מהפצצות</small><span class="' + ((st.d || 0) >= 15 ? 'bad' : '') + '">' + pct(st.d || 0) + '</span></div>' +
+    '<div><small>הגנות העיר</small>' + defs + '</div>' +
+    '<div><small>כוח מגן מקומי</small>' + num(garrison(x, st)) + '</div>' +
+    '<div><small>יחידות שלנו בעיר</small>' + num(F.my) + (F.my ? ' <small>(עוצמה ' + num(F.myS) + ')</small>' : '') + '</div>' +
+    '<div><small>יחידות אויב בעיר</small><span class="' + (F.en ? 'bad' : '') + '">' + num(F.en) + '</span>' + (F.en ? ' <small>(עוצמה ' + num(F.enS) + ')</small>' : '') + '</div></div>';
+  if (st.s > 0 && st.b) {
+    const left = Math.max(1, Math.ceil((100 - st.s) / 100 * siegeDays(x, st)));
+    h += '<div class="front"><div class="fl"><small>מצור של ' + esc(nm(st.b)) + '</small><div class="prog ' + (st.b === me ? 'g' : 'r') + '"><div style="width:' + clamp(st.s, 0, 100).toFixed(0) + '%"></div></div>' + pct(st.s) + '</div></div>' +
+      '<p class="sub">' + (st.b === me ? 'אם הכוחות שלנו יישארו חזקים מהמגינים (פי <span class="num">1.5</span>) — העיר תיפול בעוד כ-' + num(left) + ' ימים.' : 'אם לא נחזק את העיר — היא תיפול בעוד כ-' + num(left) + ' ימים.') + '</p>';
+  }
+  if (st.lg && terr === me) h += '<p class="sub">הכיבוש עולה לכלכלה שלנו ' + money(st.lg) + ' בשנה. שחרור העיר יחזיר את רובו.</p>';
+  h += '<div class="btns">';
+  const need = Math.round(1.5 * (F.enS + garrison(x, st)));
+  if (o && o !== me && terr !== me) {
+    const inW = atWar(o, me), sr = strikeRange(o);
+    h += btn('csend', inW ? 'שלח כוחות לכבוש' : 'שלח כוחות (הכרזת מלחמה)', 'danger', ' data-ci="' + esc(x.id) + '"');
+    const acd = cdLeft('air:' + o), mcd = cdLeft('mis:' + o);
+    h += !sr.air ? '<button class="b" disabled>הפצצת העיר<small class="cost">אין מטוסים בטווח</small></button>' : acd ? '<button class="b" disabled>הפצצת העיר' + cdNote(acd) + '</button>' : fbtn('cair', 'הפצצת העיר מהאוויר', cityStrikeFx(o, 'air', x, inW), 'danger', false, ' data-ci="' + esc(x.id) + '"');
+    h += !sr.mis ? '<button class="b" disabled>מטח טילים על העיר<small class="cost">' + (P().mlv ? 'מחוץ לטווח או אין טילים' : 'אין תוכנית טילים') + '</small></button>' : mcd ? '<button class="b" disabled>מטח טילים על העיר' + cdNote(mcd) + '</button>' : fbtn('cmis', 'מטח טילים על העיר', cityStrikeFx(o, 'mis', x, inW), 'danger', false, ' data-ci="' + esc(x.id) + '"');
+    if (P().nukes > 0) h += sr.nuke ? '<button class="b nuke" data-act="cnuke" data-ci="' + esc(x.id) + '">פצצה גרעינית על העיר<small class="cost">כ-' + num(nukeCityEst(x)) + ' הרוגים · העולם ' + sgn(-50) + '</small></button>' : '';
+  } else if (o && o !== me && terr === me) {
+    h += btn('csend', 'שלח כוחות לשחרר את העיר', 'primary', ' data-ci="' + esc(x.id) + '"');
+  } else if (o === me) {
+    h += btn('csend', terr === me ? 'שלח כוחות להגן' : 'שלח תגבורת לעיר', '', ' data-ci="' + esc(x.id) + '"');
+    if (terr === me) {
+      const q = S.p.queue, fq = q.some(v => v.k === 'cfort' && v.ci === x.id), aq = q.some(v => v.k === 'cad' && v.ci === x.id);
+      h += (st.f || 0) >= 3 ? '<button class="b" disabled>ביצורים<small class="cost">ברמה המרבית</small></button>' : fq ? '<button class="b" disabled>ביצורים<small class="cost">בבנייה</small></button>' :
+        fbtn('cfort', 'בנה ביצורים (רמה ' + ((st.f || 0) + 1) + ')', { cost: fortCost(x), note: '2 חודשים · כוח מגן <span class="num" dir="ltr">+60%</span> · מצור איטי יותר' }, '', false, ' data-ci="' + esc(x.id) + '"');
+      h += st.a ? '<button class="b" disabled>הגנה אווירית<small class="cost">כבר מוצבת</small></button>' : aq ? '<button class="b" disabled>הגנה אווירית<small class="cost">בהצבה</small></button>' :
+        fbtn('cad', 'הצב הגנה אווירית', { cost: cadCost(x), note: '4 חודשים · חצי מההרוגים בתקיפות על העיר' }, '', false, ' data-ci="' + esc(x.id) + '"');
+    }
+  }
+  if (terr && terr !== me) h += btn('cgo', 'המדינה: ' + esc(nm(terr)), '', ' data-ci="' + esc(x.id) + '"');
+  h += '</div>';
+  if (o && o !== me && terr !== me) h += '<p class="sub">כדי לכבוש: הכנס לעיר כוחות יבשה חזקים פי <span class="num">1.5</span> לפחות מהמגינים (כוח מקומי ' + num(need) + ' + יחידות אויב שבעיר). אז מתחיל מצור, ואחרי כמה ימים העיר נופלת. תקיפה על העיר הורגת הרבה אזרחים — על מטרות צבאיות (בכרטיס המדינה) הרבה פחות.</p>';
+  return h;
+}
+function cityStrikeFx(o, kind, x, inW) {
+  const E = S.c[o], st = cst(x), n = kind === 'air' ? sortie() : salvo() * (1 - [0, 0.25, 0.5, 0.75][E.adv]);
+  const civ = cityCiv(x, kind, n, st.a);
+  const rep = -clamp(6 + Math.sqrt(civ) / 3, 6, 35) + (inW ? 0 : justified(o) ? -3 : -10);
+  const e = { cost: strikeCost(kind), rep: Math.round(rep), ap: P().gov === 'democracy' ? (inW ? -2 : -3) : -1, rel: { [o]: inW ? -20 : -50 }, civ };
+  e.note = '<span class="bad">כ-' + num(civ) + ' אזרחים ייהרגו</span>' + (inW ? '' : ' · סיכוי למלחמה: ' + pct(Math.min(0.95, retaliateChance(o) + 0.2) * 100));
+  return e;
+}
+const nukeCityEst = x => { const T = S.c[S.owner[x.tid]]; return Math.round(Math.min(T ? T.pop * 0.3 : 1e9, x.pop * clamp(0.22 / (1 + x.pop / 8), 0.06, 0.25), 2.6) * 1e6); };
+function cityStrikeDialog(x, kind, u) {
+  const st = cst(x), o = st.o;
+  if (!o || o === S.player || S.owner[x.tid] === S.player) { toast('אי אפשר לתקוף את העיר הזו', true); return; }
+  const inW = atWar(o, S.player), e = cityStrikeFx(o, kind, x, inW);
+  modal({ title: (kind === 'air' ? 'הפצצת ' : 'מטח טילים על ') + esc(cityName(x)), cls: 'danger', html: '<div class="nukewarn"><p><b>זו תקיפה על עיר מאוכלסת</b> (' + cityPopT(x) + ' תושבים) — לא על מטרות צבאיות.</p><ul class="plain">' +
+    '<li class="red">צפויים כ-' + num(e.civ) + ' אזרחים הרוגים, ופי שלושה פצועים' + (st.a ? ' (יש בעיר הגנה אווירית — פחות נפגעים)' : '') + '.</li>' +
+    '<li>העיר תיהרס חלקית, והכלכלה של ' + esc(nm(S.owner[x.tid])) + ' תיפגע לזמן רב.</li>' +
+    '<li class="red">העולם יגנה: המוניטין שלך ' + sgn(e.rep) + (inW ? '' : '. ' + esc(nm(o)) + ' עלולה להכריז עלינו מלחמה') + '.</li>' +
+    '<li>לצבא שלהם זה כמעט לא מזיק — תקיפה על מטרות צבאיות (מכרטיס המדינה) פוגעת בצבא הרבה יותר, עם מעט נפגעים אזרחיים.</li></ul></div><div class="box">צפוי: ' + fxLine(e) + '</div>',
+    buttons: [{ label: 'תקוף את העיר', cls: 'danger', fn: () => strike(o, kind, u ? u.id : null, x.id) }, { label: 'ביטול', cls: 'primary' }] });
+}
+// send our units to a city: to take it, free it or defend it
+function citySendDialog(x) {
+  if (!x) return;
+  const st = cst(x), me = S.player, own = st.o === me, p = cityStand(x), mode = own ? 'def' : 'atk';
+  const list = unitsOf(me).filter(u => domOf(u) !== 'sea' && km([u.lon, u.lat], cityPt(x)) > CR_KM * 0.6)
+    .map(u => ({ u, r: planMove(u, p, mode) })).filter(v => !v.r.err)
+    .sort((a, b) => (domOf(a.u) === 'land' ? 0 : 1) - (domOf(b.u) === 'land' ? 0 : 1) || a.r.days - b.r.days).slice(0, 8);
+  const F = cityForces(x), need = Math.round(1.5 * (F.enS + garrison(x, st)));
+  const h = '<p>' + (own ? 'אילו יחידות לשלוח להגן על ' : 'אילו יחידות לשלוח אל ') + '<b>' + esc(cityName(x)) + '</b>?</p>' +
+    (own ? '' : '<p class="sub">כדי לכבוש צריך בעיר כוח יבשה של לפחות ' + num(need) + ' (פי <span class="num">1.5</span> מהמגינים). כרגע יש שם ' + num(F.myS) + ' שלנו. מטוסים ומסוקים בסביבה מחזקים את כוחות היבשה.</p>') +
+    (list.length ? '<div class="btns col">' + list.map((v, i) => '<button class="b" data-cu="' + i + '">' + uIc(v.u) + ' ' + esc(uName(v.u)) + ' · ' + esc(uLabel(v.u)) +
+      '<small class="cost">עוצמה ' + num(uStr(v.u)) + ' · ' + (v.r.days < 1 ? 'מגיעה תוך פחות מיום' : 'הגעה בעוד ' + daysTxt(v.r.days)) + (v.r.slow < 1 ? ' · דרך הים' : '') + '</small></button>').join('') + '</div>' : '<p class="sub">אין יחידות שיכולות להגיע לשם עכשיו (כוחות יבשה צריכים דרך ביבשה, או צי שלך ליד היעד).</p>');
+  const go = sel => {
+    const doIt = () => { let n = 0; sel.forEach(v => { if (!S.units.includes(v.u)) return; const r = planMove(v.u, p, mode); if (r.err) return; r.cty = x.id; commitMove(v.u, r, true); v.u.man = S.day + 30; n++; });
+      if (n) toast((n === 1 ? uName(sel[0].u) + ' בדרך ל' : n + ' יחידות בדרך ל') + cityName(x)); save(); renderAll(); };
+    const nw = sel.map(v => v.r.needWar).find(Boolean);
+    if (nw) confirmWar(nw, doIt, 'הכוחות שלנו'); else doIt();
+  };
+  modal({ title: own ? 'הגנה על ' + esc(cityName(x)) : 'יציאה אל ' + esc(cityName(x)), html: h,
+    buttons: (list.length > 1 ? [{ label: 'שלח את כולן', cls: own ? 'primary' : 'danger', fn: () => go(list) }] : []).concat([{ label: 'ביטול' }]), onShow: () => {
+      document.querySelectorAll('[data-cu]').forEach(b => b.onclick = () => { const v = list[+b.dataset.cu]; modalQ.shift(); $('#modal').classList.remove('open'); go([v]); setTimeout(showModal, 30); });
+    } });
+}
+function cityBuild(x, k) {
+  if (!x || cst(x).o !== S.player || S.owner[x.tid] !== S.player) return;
+  const st = cst(x); if (k === 'cfort' ? (st.f || 0) >= 3 : st.a) return;
+  if (S.p.queue.some(v => v.k === k && v.ci === x.id)) return;
+  const cost = k === 'cfort' ? fortCost(x) : cadCost(x); if (!spend(cost)) return;
+  PS().sp.buy += cost; S.p.queue.push({ k, ci: x.id, n: 1, start: S.day, due: S.day + (k === 'cfort' ? 61 : 122) });
+  toast((k === 'cfort' ? 'בניית ביצורים ב' : 'הצבת הגנה אווירית ב') + cityName(x) + ' התחילה · ' + plainT(moneyTxt(cost))); save(); renderAll();
+}
+
 /* ---- choosing a destination / target on the map ---- */
 const MODE_TXT = { move: 'הקש על היעד במפה', attack: 'הקש על המדינה לתקוף', strike: 'הקש על מדינה לתקיפה אווירית', missile: 'הקש על מדינה למטח טילים' };
 function setMode(kind, uid) {
@@ -3164,9 +3719,10 @@ function modeTap(p, tid) {
   }
   orderTo(u, dest, kind === 'attack' ? 'atk' : 'move');
 }
-function orderTo(u, dest, mode) {
+function orderTo(u, dest, mode, cty) {
   const r = planMove(u, dest, mode);
   if (r.err) { toast(r.err, true); return false; }
+  r.cty = cty || null;
   endMode();
   // the player's own order: the defence minister leaves this unit alone for a month
   const go = () => { commitMove(u, r); u.man = S.day + 30; save(); if (u.o === S.player) selectUnit(u.id); };
@@ -3174,7 +3730,8 @@ function orderTo(u, dest, mode) {
   else go();
   return true;
 }
-function unitStrike(u, o, kind) {
+function unitStrike(u, o, kind, ci) {
+  if (ci && CITYI[ci]) { cityStrikeDialog(CITYI[ci], kind, u); return; }
   const inW = atWar(o, S.player);
   if (inW) { strike(o, kind, u.id); return; }
   const e = strikeFx(o, kind, false);
@@ -3499,6 +4056,7 @@ function cardHtml(r) {
   let h = '<div class="rc-h"><b>' + tl + '</b><button class="ic" data-act="rclose" aria-label="סגור">✕</button></div>';
   h += '<div class="rc-s">' + esc(KIND_HE[r.k]) + (mine ? ' על ' + esc(nm(r.at)) : ' של ' + esc(nm(r.by)) + (r.at === S.player ? '' : ' על ' + esc(nm(r.at)))) +
     (r.unit ? ' · ' + esc(r.unit) : '') + (mine && r.k !== 'nuke' && !r.war ? ' · בלי הכרזת מלחמה' : '') + ' · ' + dayHtml(r.d) + '</div>';
+  if (r.k !== 'fac') h += '<div class="rc-l"><b>המטרה:</b> ' + (r.cn ? '<span class="bad">העיר ' + esc(r.cn) + '</span> — אזרחים' + (r.cd >= 0.5 ? ' · נזק לעיר ' + pct(r.cd) : '') : 'בסיסים ומטרות צבאיות') + '</div>';
   h += '<div class="rgrid"><div><small>חיילים הרוגים</small>' + num(C.sk) + '</div><div><small>חיילים פצועים</small>' + num(C.sw) + '</div>' +
     '<div><small>אזרחים הרוגים</small><span class="' + (C.ck >= 1 ? 'bad' : '') + '">' + num(C.ck) + '</span></div><div><small>אזרחים פצועים</small>' + num(C.cw) + '</div></div>';
   const eq = eqTxt(C.eq);
@@ -3552,15 +4110,16 @@ function renderTop() {
   const bh = $('#tabhome'); if (bh) { const v = S.p.proj.length ? String(S.p.proj.length) : ''; if (bh.dataset.badge !== v) bh.dataset.badge = v; }
 }
 function openTab(t) {
-  tab = (tab === t && t !== 'country' && t !== 'unit' && t !== 'ulist' && t !== 'stats' && t !== 'world') ? null : t;
+  tab = (tab === t && t !== 'country' && t !== 'unit' && t !== 'ulist' && t !== 'stats' && t !== 'world' && t !== 'city') ? null : t;
   if (tab !== 'unit' && selUnit) { selUnit = null; unitsDirty = true; }
+  if (tab !== 'city' && selCity) { selCity = null; citiesDirty = true; }
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === (tab === 'world' ? 'news' : tab)));
   $('#sheet').classList.toggle('open', !!tab);
   if (tab) renderSheet();
 }
 function renderSheet() {
   const el = $('#sheet-body'); if (!el) return;
-  const fn = { country: viewCountry, eco: viewEco, home: viewHome, gov: viewGov, mil: viewMil, wars: viewWars, news: viewNews, world: viewWorld, unit: viewUnit, ulist: viewUnitList, stats: viewStats }[tab];
+  const fn = { country: viewCountry, eco: viewEco, home: viewHome, gov: viewGov, mil: viewMil, wars: viewWars, news: viewNews, world: viewWorld, unit: viewUnit, ulist: viewUnitList, stats: viewStats, city: viewCity }[tab];
   const h = fn ? fn() : '';
   if (el.__h !== h) { el.innerHTML = h; el.__h = h; }
 }
@@ -3592,7 +4151,7 @@ function fbtn(act, label, e, cls, dis, extra) {
 }
 const cdNote = d => '<small class="cost">אפשר שוב בעוד ' + daysTxt(d) + '</small>';
 function viewCountry() {
-  if (!selected) { const c = P(); return '<p class="hint">הקש על מדינה במפה כדי לראות אותה ולנהל איתה יחסים.</p><h2><span class="dot me"></span>' + esc(c.he) + ' <small>(המדינה שלך)</small></h2>' + statGrid(c); }
+  if (!selected) { const c = P(); return '<p class="hint">הקש על מדינה במפה כדי לראות אותה ולנהל איתה יחסים.</p><h2><span class="dot me"></span>' + esc(c.he) + ' <small>(המדינה שלך)</small></h2>' + statGrid(c) + myCitiesHtml(); }
   const o = S.owner[selected];
   if (!o) return '<h2>' + esc(nm(selected)) + '</h2><p class="hint">שטח שנוי במחלוקת / לא מיושב. אי אפשר לשלוט בו.</p>';
   const c = S.c[o];
@@ -3601,7 +4160,7 @@ function viewCountry() {
   if (o === S.player) {
     h += '<h2><span class="dot me"></span>' + esc(c.he) + ' <small>(המדינה שלך)</small></h2>' + statGrid(c);
     if (S.p.annexed.length) h += '<p>שטחים שסופחו: ' + S.p.annexed.map(nm).join(', ') + '</p>';
-    return h;
+    return h + myCitiesHtml();
   }
   const r = rel(o, S.player), war = atWar(o, S.player);
   const st = [];
@@ -3618,6 +4177,7 @@ function viewCountry() {
   h += '<h2>' + esc(c.he) + (c.generated ? ' <small>(נתונים משוערים)</small>' : '') + '</h2><div class="chips">' + st.join('') + '</div>';
   h += relBar(r) + '<p class="sub">' + d + ' · יחס כוחות: ' + (power(P()) >= power(c) ? num(power(P()) / power(c), 1) + ' : 1 לטובתך' : '1 : ' + num(power(c) / power(P()), 1) + ' לטובתם') + '</p>' + statGrid(c);
   h += aiNowHtml(c);
+  if (S.ct) { const cl = sortCities(citiesOfT(o)); if (cl.length) h += '<h3>ערים <small>(' + num(cl.length) + ')</small></h3>' + cityRows(cl, 6); }
   if (!war) {
     h += '<h3>דיפלומטיה</h3><div class="btns">';
     const g = giftAmt(), gcd = cdLeft('gift:' + o);
@@ -3639,6 +4199,15 @@ function viewCountry() {
     if (w && enemyLeaderFor(w, S.player) === o) h += unitFront(w, o);
     if (w) h += warActions(w, true, o);
   }
+  return h;
+}
+// our cities (biggest first) with their state, and the cities we took
+function myCitiesHtml() {
+  if (!S.ct) return '';
+  const me = S.player, l = sortCities(citiesOfT(me)), took = sortCities(CITY.filter(x => cst(x).o === me && S.owner[x.tid] !== me));
+  const lost = l.filter(x => cst(x).o !== me).length;
+  let h = '<h3>הערים שלך <small>(' + num(l.length) + (lost ? ' · ' + num(lost) + ' בידי האויב' : '') + ')</small></h3>' + cityRows(l, 12);
+  if (took.length) h += '<h3>ערים שכבשנו <small>(' + num(took.length) + ')</small></h3>' + cityRows(took, 8);
   return h;
 }
 const btn = (act, label, cls, extra) => '<button class="b ' + (cls || '') + '" data-act="' + act + '"' + (extra || '') + '>' + label + '</button>';
@@ -3689,6 +4258,7 @@ function strikeSection(o, w) {
   else h += fbtn('missile', 'מטח טילים · ' + salvo() + ' טילים', strikeFx(o, 'mis', inW), inW ? '' : 'danger', false, ' data-o="' + o + '"');
   if (me.nukes > 0) h += sr.nuke ? '<button class="b nuke" data-act="nuke" data-o="' + o + '">תקיפה גרעינית<small class="cost">העולם ' + sgn(-50) + ' · העם ' + sgn(-20) + '</small></button>' : '<button class="b" disabled>תקיפה גרעינית<small class="cost">אין אמצעי שיגור בטווח</small></button>';
   h += '</div>';
+  h += '<p class="sub">התקיפות כאן מכוונות לבסיסים ולמטרות צבאיות. לתקיפת עיר — הקש על העיר במפה (הרבה יותר הרוגים אזרחיים ופגיעה קשה במוניטין).</p>';
   if (!inW) h += '<p class="sub">תקיפה בלי מלחמה פוגעת בצבא ובכלכלה שלהם, אבל העולם כועס, בעלות בריתם מתרגזות, אולי יוטלו עליך סנקציות — ו' + esc(nm(o)) + ' עלולה להכריז עליך מלחמה.' + (justified(o) ? ' <b>הם תקפו אותך / מבודדים בעולם — הנזק למוניטין קטן יותר.</b>' : '') + '</p>';
   return h;
 }
@@ -3896,7 +4466,7 @@ function viewMil() {
     h += '<h3>בדרך אליך</h3><div class="front">';
     p.queue.slice().sort((a, b) => a.due - b.due).forEach(q => {
       const tot = q.due - q.start, done = clamp((S.day - q.start) / tot, 0, 1);
-      const what = q.k === 'mobarrive' ? 'מילואים בדרך' : q.k === 'mlv' ? 'שדרוג טילים' : q.k === 'adv' ? 'שדרוג הגנה אווירית' : q.k === 'troops' ? num(q.n * 1000) + ' חיילים' : q.n + ' ' + BUY[q.k].unit;
+      const what = q.k === 'mobarrive' ? 'מילואים בדרך' : q.k === 'mlv' ? 'שדרוג טילים' : q.k === 'adv' ? 'שדרוג הגנה אווירית' : q.k === 'cfort' || q.k === 'cad' ? (q.k === 'cfort' ? 'ביצורים ב' : 'הגנה אווירית ב') + esc(CITYI[q.ci] ? cityName(CITYI[q.ci]) : '') : q.k === 'troops' ? num(q.n * 1000) + ' חיילים' : q.n + ' ' + BUY[q.k].unit;
       h += '<div class="fl"><small>' + what + '</small><div class="prog"><div style="width:' + (done * 100).toFixed(1) + '%"></div></div><small class="nw">' + daysTxt(q.due - S.day) + '</small></div>';
     });
     h += '</div>';
@@ -3913,11 +4483,14 @@ const upgCost = k => Math.max(0.3, P().gdp * 0.002) * ((P()[k] || 0) + 1) * (k =
 /* ---- units: panel of one unit, and lists ---- */
 const uIc = (u, en) => '<svg class="uic' + (en ? ' en' : '') + '"><use href="#ui-' + uIcon(u) + '"/></svg>';
 function uWhere(u) {
+  if (domOf(u) === 'sea' && !u.at && S.ct) { const pt = citiesNear([u.lon, u.lat], 150).find(x => x.port && cst(x).o === u.o); if (pt) return 'בנמל ' + cityName(pt); }
   if (domOf(u) === 'sea' && !u.at) { const p = [u.lon, u.lat]; const near = alive().filter(c => { const t = mainTid(c); return t && km(TERR[t].c, p) < 2500; }).map(c => [c, distToC(c, p)]).filter(x => x[1] < 500).sort((a, b) => a[1] - b[1])[0]; return near ? 'בים, מול ' + nm(near[0]) : 'בים הפתוח'; }
   return u.at ? nm(u.at) : (domOf(u) === 'air' ? 'מעל הים' : 'שטח ללא שליטה');
 }
 function uStateTxt(u) {
-  if (u.dest) { const d = etaDays(u), t = d < 1 ? 'מגיעה תוך פחות מיום' : 'עוד ' + daysTxt(d); const to = domOf(u) === 'sea' ? 'ליעד בים' : (ownerAt(u.dest[0], u.dest[1]) ? 'ל' + esc(nm(ownerAt(u.dest[0], u.dest[1]))) : 'ליעד'); return (u.mode === 'ret' ? 'חוזרת הביתה' : 'בתנועה ' + to) + ' · ' + t + (u.slow < 1 ? ' (דרך הים, לאט יותר)' : ''); }
+  if (u.dest) { const d = etaDays(u), t = d < 1 ? 'מגיעה תוך פחות מיום' : 'עוד ' + daysTxt(d); const to = domOf(u) === 'sea' ? 'ליעד בים' : (ownerAt(u.dest[0], u.dest[1]) ? 'ל' + esc(nm(ownerAt(u.dest[0], u.dest[1]))) : 'ליעד'); return (u.mode === 'ret' ? 'חוזרת הביתה' : 'בתנועה ' + (u.cty && CITYI[u.cty] ? 'אל ' + esc(cityName(CITYI[u.cty])) : to)) + ' · ' + t + (u.slow < 1 ? ' (דרך הים, לאט יותר)' : ''); }
+  const cx = u.cty && CITYI[u.cty] && S.ct ? CITYI[u.cty] : null;
+  if (cx && km([u.lon, u.lat], cityPt(cx)) <= CR_KM) { const st = cst(cx); if (st.s > 0 && st.b === u.o) return '<span class="bad">במצור</span> על ' + esc(cityName(cx)) + ' · ' + pct(st.s); }
   if (uFighting(u)) return '<span class="bad">בלחימה</span> — ' + esc(domOf(u) === 'sea' ? 'חוסמת את החוף ומגנה על כוחות' : uWhere(u));
   return atHome(u) ? 'בבסיס' : 'ממתינה ב' + esc(uWhere(u));
 }
@@ -3974,6 +4547,13 @@ function unitFront(w, en) {
   h += 'יחידות שלנו בתוך ' + esc(nm(en)) + ': <b>' + num(mineIn.length) + '</b>' + (mineIn.length ? ' (עוצמה ' + num(mineIn.reduce((s, u) => s + uStr(u), 0)) + ')' : '');
   h += '<br>יחידות אויב בשטחנו: <b class="' + (theirsIn.length ? 'bad' : '') + '">' + num(theirsIn.length) + '</b>';
   if (w.ru && (w.ru.aE || w.ru.aP)) h += '<br>יחס כוחות בשטח: ' + (w.ru.aE ? 'אצלם ' + pct(w.ru.rE * 100) + ' לטובתנו' : '') + (w.ru.aP ? (w.ru.aE ? ' · ' : '') + 'אצלנו ' + pct((1 - w.ru.rP) * 100) + ' לטובתנו' : '');
+  if (S.ct) {
+    const tk = citiesOfT(en).filter(x => sideOf(cst(x).o, S.player) && cst(x).o !== en), ls = citiesOfT(S.player).filter(x => cst(x).o !== S.player);
+    const sg = citiesOfT(en).filter(x => cst(x).s > 0 && cst(x).b === S.player);
+    h += '<br>ערים שכבשנו: <b>' + num(tk.length) + '</b>' + (tk.length ? ' (' + pct(heldShare(en, S.player) * 100) + ' מהאוכלוסייה' + (capHeldBy(en, S.player) ? ', כולל הבירה!' : '') + ')' : '') +
+      (sg.length ? ' · במצור: ' + sg.slice(0, 3).map(x => esc(cityName(x)) + ' ' + pct(cst(x).s)).join(', ') : '') +
+      (ls.length ? '<br><span class="bad">ערים שלנו בידי האויב: ' + ls.slice(0, 4).map(x => esc(cityName(x))).join(', ') + (ls.length > 4 ? ' ועוד' : '') + '</span>' : '');
+  }
   if (!landIn) h += '<br><span class="warn">אין לנו כוחות יבשה בתוך ' + esc(nm(en)) + ' — אי אפשר לכבוש שטח, רק לתקוף מהאוויר ובטילים. הקש על יחידת חי״ר או שריון ← "תקוף מדינה".</span>';
   return h + '</div>';
 }
@@ -4153,7 +4733,7 @@ function processPending() {
     return;
   }
   if (p.type === 'nukealert') {
-    modal({ title: '☢ פיצוץ גרעיני', cls: 'danger', html: '<p><b>' + esc(nm(p.att)) + '</b> שיגרה נשק גרעיני על <b>' + esc(nm(p.tgt)) + '</b>. ' + (p.dead ? num(p.dead) + ' אזרחים נהרגו, ועוד רבים נפצעו.' : 'מיליונים נפגעו.') + ' העולם בהלם.</p>' +
+    modal({ title: '☢ פיצוץ גרעיני', cls: 'danger', html: '<p><b>' + esc(nm(p.att)) + '</b> שיגרה נשק גרעיני על <b>' + (p.cn ? esc(p.cn) + '</b> (' + esc(nm(p.tgt)) + ')' : esc(nm(p.tgt)) + '</b>') + '. ' + (p.dead ? num(p.dead) + ' אזרחים נהרגו, ועוד רבים נפצעו.' : 'מיליונים נפגעו.') + ' העולם בהלם.</p>' +
       (p.tgt === S.player ? '<p class="warnbox">אנחנו המטרה! הכלכלה והצבא נפגעו קשות.</p>' : '<p class="sub">רוב העולם יטיל סנקציות על התוקפת. זה רגע טוב לחשוב על בריתות.</p>'), buttons: [{ label: 'המשך', cls: 'primary', fn: after }] });
     return;
   }
@@ -4179,6 +4759,18 @@ function processPending() {
     modal({ title: 'פליטים מ' + esc(C.he), html: '<p>המלחמה ב' + esc(C.he) + ' גירשה מאות אלפים מבתיהם. חלקם מבקשים מקלט אצלנו.</p><p class="sub">קליטה עולה כסף ומרגיזה חלק מהציבור, אבל העולם יעריך את זה.</p>',
       buttons: [{ label: fxBtn('קלוט פליטים', eYes), cls: 'good', fn: () => { if (spend(cost)) { fxToast('קלטנו פליטים', eYes); addNews('קלטנו פליטים מ' + C.he + '.', 'good'); } after(); } },
         { label: fxBtn('סגור את הגבול', eNo), fn: () => { fxToast('הגבול נסגר', eNo, true); after(); } }] });
+    return;
+  }
+  if (p.type === 'siege' || p.type === 'caplost') {
+    const x = CITYI[p.ci]; if (!x) return processPending();
+    const st = cst(x);
+    if (p.type === 'siege' && (st.o !== S.player || !(st.s > 0))) return processPending();
+    const dm = minOn('def');
+    const html = p.type === 'siege'
+      ? '<p>כוחות של <b>' + esc(nm(p.from)) + '</b> מקיפים את <b>' + esc(cityName(x)) + '</b> (' + cityPopT(x) + ' תושבים). אם הם יישארו שם חזקים מהמגינים — העיר תיפול בעוד כ-' + num(Math.max(1, Math.ceil((100 - st.s) / 100 * siegeDays(x, st)))) + ' ימים.</p><ul class="plain"><li>שלח לעיר כוחות יבשה — בכרטיס העיר ← "שלח כוחות להגן".</li><li>תקוף את הכוחות שמסביב מהאוויר.</li>' + (dm ? '<li><b>' + esc(mTitle('def', dm)) + ' כבר שולח כוחות להגנה.</b></li>' : '') + '</ul>'
+      : '<p class="warnbox">עיר הבירה <b>' + esc(cityName(x)) + '</b> נכבשה בידי ' + esc(nm(p.from)) + '!</p><p>העם בהלם, הכלכלה נפגעה, והאויב קרוב יותר לניצחון. אפשר לשחרר אותה בכוחות יבשה — או לבקש שלום.</p>';
+    modal({ title: p.type === 'siege' ? 'מצור על ' + esc(cityName(x)) + '!' : 'הבירה נפלה!', cls: 'danger', html,
+      buttons: [{ label: 'הראה לי', cls: 'primary', fn: () => { setSpeed(0); openCity(x.id, 7); after(); } }, { label: 'המשך', fn: after }] });
     return;
   }
   if (!w) return processPending();
@@ -4314,6 +4906,15 @@ const ACT = {
   rclose: () => hideCard(),
   rshow: d => { const r = PS().log[+d.i]; if (r) showCard(r); },
   wst: d => { const id = +d.w; if (wstOpen.has(id)) wstOpen.delete(id); else wstOpen.add(id); renderSheet(); },
+  /* cities */
+  selcity: d => openCity(d.ci, 0),
+  csend: d => citySendDialog(CITYI[d.ci]),
+  cair: d => CITYI[d.ci] && cityStrikeDialog(CITYI[d.ci], 'air'),
+  cmis: d => CITYI[d.ci] && cityStrikeDialog(CITYI[d.ci], 'mis'),
+  cnuke: d => { const x = CITYI[d.ci]; if (x) confirmNuke(cst(x).o, x.id); },
+  cfort: d => cityBuild(CITYI[d.ci], 'cfort'),
+  cad: d => cityBuild(CITYI[d.ci], 'cad'),
+  cgo: d => { const x = CITYI[d.ci]; const t = x && mainTid(S.owner[x.tid]); if (!t) return; selCity = null; citiesDirty = true; selected = t; recolor(); openTabFresh('country'); },
   fxmode: d => { setFxMode(d.v); document.querySelectorAll('[data-act=fxmode]').forEach(b => b.classList.toggle('on', b.dataset.v === FXMODE)); toast({ full: 'אנימציות מלאות', low: 'אנימציות מופחתות', off: 'בלי אנימציות' }[FXMODE]); }
 };
 // where to stand to defend the homeland: the part of our land closest to the main enemy
@@ -4336,7 +4937,7 @@ function attackDialog(u) {
   const h = '<p>לאן לשלוח את <b>' + esc(uName(u)) + '</b>?</p>' + (list.length ? '<div class="btns col">' + list.map((x, i) => '<button class="b' + (x.r.err ? '' : ' danger') + '" data-at="' + i + '"' + (x.r.err ? ' disabled' : '') + '>' + esc(nm(x.o)) +
     '<small class="cost">' + (x.r.err ? esc(x.r.err) : (x.r.days < 1 ? 'מגיעה תוך פחות מיום' : 'הגעה בעוד ' + daysTxt(x.r.days)) + (x.r.slow < 1 ? ' · דרך הים' : '')) + '</small></button>').join('') + '</div>' : '<p class="sub">אתה לא במלחמה עם אף מדינה. אפשר לבחור מדינה על המפה — אם היא לא במלחמה איתך, תתבקש להכריז מלחמה.</p>') +
     '<p class="sub">' + (domOf(u) === 'sea' ? 'צי ליד חוף האויב חוסם אותו, מחליש את הצי שלו ומאפשר לכוחות יבשה לחצות את הים.' : domOf(u) === 'air' ? 'כנף אוויר מעל האויב מחזקת את כוחות היבשה שלנו שם (פי 2 לכל היותר). בלי כוחות יבשה — רק תקיפות.' : 'כוחות יבשה בתוך מדינת האויב כובשים שטח. ארטילריה, מטוסים וצי מחזקים אותם.') + '</p>';
-  modal({ title: 'תקוף מדינה', html: h, buttons: [{ label: 'בחר על המפה', cls: 'primary', fn: () => setMode('attack', u.id) }, { label: 'ביטול' }], onShow: () => {
+  modal({ title: 'תקוף מדינה', html: h + (domOf(u) === 'land' ? '<p class="sub">כדי לכבוש עיר מסוימת: "בחר על המפה" ואז הקש על העיר.</p>' : ''), buttons: [{ label: 'בחר על המפה', cls: 'primary', fn: () => setMode('attack', u.id) }, { label: 'ביטול' }], onShow: () => {
     document.querySelectorAll('[data-at]').forEach(b => b.onclick = () => {
       const x = list[+b.dataset.at]; modalQ.shift(); $('#modal').classList.remove('open');
       orderTo(u, x.p, 'atk'); setTimeout(showModal, 30);
@@ -4453,9 +5054,12 @@ function confirmWar(o, after, what) {
 }
 // air strike or missile salvo, during a war or as a stand-alone attack
 const sancTxt = n => n === 1 ? 'מדינה אחת הטילה עלינו סנקציות' : n + ' מדינות הטילו עלינו סנקציות';
-function strike(o, kind, uid) {
+function strike(o, kind, uid, ci) {
   if (!o || !S.c[o] || !S.c[o].alive || o === S.player) return;
   const me = P(), E = S.c[o], sr = strikeRange(o);
+  // a strike on one city (civilians) instead of on military targets
+  const cx = ci && CITYI[ci] && S.ct ? CITYI[ci] : null, cS = cx ? cst(cx) : null;
+  if (cx && (cS.o !== o || S.owner[cx.tid] === S.player)) { toast('אי אפשר לתקוף את העיר הזו', true); return; }
   // a strike by one specific air wing / missile battery on the map: its own range and its own planes
   const su = uid != null ? unitById(uid) : null;
   if (su) {
@@ -4476,42 +5080,43 @@ function strike(o, kind, uid) {
   const dens = densF(o);
   if (kind === 'air') {
     used = su ? Math.min(sortie(), fl(su.m.air)) : sortie();
-    frac = clamp(used * me.q / (E.inv.air * 0.5 + E.inv.tanks * 0.03 + 40) * 0.1, 0.004, 0.1) * (1 - 0.15 * E.adv);
-    lost = Math.round(used * [0.003, 0.01, 0.025, 0.05][E.adv] * (0.5 + R()));
+    frac = clamp(used * me.q / (E.inv.air * 0.5 + E.inv.tanks * 0.03 + 40) * 0.1, 0.004, 0.1) * (1 - 0.15 * E.adv) * (cx ? 0.3 : 1);
+    lost = Math.round(used * [0.003, 0.01, 0.025, 0.05][E.adv] * (0.5 + R()) * (cx && cS.a ? 1.6 : 1));
     me.inv.air = Math.max(0, me.inv.air - lost);
     if (su) su.m.air = Math.max(0, (su.m.air || 0) - lost);
     hurtInv(E, frac, ['air', 'heli', 'tanks', 'art', 'msl']); hurtInv(E, frac * 0.4, ['ships', 'afv']); hurtInv(E, frac * 0.15, ['troops']);
     E.gdp *= 1 - frac * 0.06;
-    // precision bombs on military targets: few civilians, more in crowded countries
-    civ = used * 0.25 * dens * (0.4 + R() * 0.8);
+    // precision bombs on military targets: few civilians, more in crowded countries; bombing a city kills many
+    civ = cx ? cityCiv(cx, 'air', used, cS.a) * (0.7 + R() * 0.6) : used * 0.25 * dens * (0.4 + R() * 0.8);
   } else {
     used = su ? Math.min(salvo(), fl(su.m.msl)) : salvo(); me.inv.msl = Math.max(0, me.inv.msl - used);
     if (su) su.m.msl = Math.max(0, (su.m.msl || 0) - used);
     const hits = used * (1 - [0, 0.25, 0.5, 0.75][E.adv]);
-    frac = clamp(hits / (hits + 300) * 0.2, 0.002, 0.06);
+    frac = clamp(hits / (hits + 300) * 0.2, 0.002, 0.06) * (cx ? 0.3 : 1);
     hurtInv(E, frac, ['air', 'art', 'msl', 'ships']); hurtInv(E, frac * 0.5, ['tanks']); hurtInv(E, frac * 0.2, ['troops']);
     E.gdp *= 1 - frac * 0.12;
-    // ballistic missiles are less precise: more civilians per hit
-    civ = hits * 0.7 * dens * (0.4 + R() * 0.8);
+    // ballistic missiles are less precise: more civilians per hit (far more on a city)
+    civ = cx ? cityCiv(cx, 'mis', hits, cS.a) * (0.7 + R() * 0.6) : hits * 0.7 * dens * (0.4 + R() * 0.8);
   }
+  const cdInc = cx ? cityHit(cx, cityDmgInc(kind, kind === 'air' ? used : used * (1 - [0, 0.25, 0.5, 0.75][E.adv]), cS.a)) : 0;
   const loss = lossFrom(E, before);
   civCas(loss, Math.round(civ), 2.5 + R());
   E.pop = Math.max(0.01, E.pop - loss.ck / 1e6);
   const own = newCas(); own.sp = cost;
   if (kind === 'air') { if (lost) { own.eq.air = lost; own.sk = Math.round(lost * 0.5); own.sw = Math.round(lost * 0.3); } } else own.mu = used;
   // civilians we kill cost us in the world's eyes
-  const repCiv = -Math.min(8, Math.sqrt(loss.ck) / 8);
-  const what = (kind === 'air' ? 'תקיפה אווירית' : 'מטח טילים') + (su ? ' (' + uName(su) + ')' : '');
-  const lp = launchPt(S.player, kind, o, su), tp_ = targetPt(o, lp);
+  const repCiv = cx ? -clamp(6 + Math.sqrt(loss.ck) / 3, 6, 35) : -Math.min(8, Math.sqrt(loss.ck) / 8);
+  const what = (kind === 'air' ? 'תקיפה אווירית' : 'מטח טילים') + (cx ? ' על העיר ' + cityName(cx) : '') + (su ? ' (' + uName(su) + ')' : '');
+  const lp = launchPt(S.player, kind, o, su), tp_ = cx ? cityPt(cx) : targetPt(o, lp);
   let fx, sancN = 0, retal = false;
   if (w) {
     const eff = clamp(power(me) / (power(E) + power(me) + 1) * 2, 0.15, 1.5) * Math.sqrt(proj(S.player, o));
-    const amt = kind === 'air' ? eff : 0.75;
+    const amt = (kind === 'air' ? eff : 0.75) * (cx ? 0.3 : 1);
     // strikes only help take ground where our ground forces are already fighting
     const ground = !(w.a === S.player || w.b === S.player) || forcesIn(S.player, o, E.adv).l > 0;
     if (ground) { if (w.A.includes(S.player)) w.f += amt; else w.f -= amt; w.f = clamp(w.f, -100, 100); }
-    if (kind === 'mis') alive().forEach(id => { if (id !== S.player && id !== o && isAlly(id, o)) addRel(id, S.player, -3); });
-    fx = applyFx(repCiv <= -0.5 ? { rep: repCiv } : {});
+    if (kind === 'mis' || cx) alive().forEach(id => { if (id !== S.player && id !== o && (isAlly(id, o) || (cx && S.c[id].gov === 'democracy'))) addRel(id, S.player, cx ? -4 : -3); });
+    fx = applyFx(cx ? { rep: repCiv, ap: me.gov === 'democracy' ? -2 : -1, rel: { [o]: -20 } } : repCiv <= -0.5 ? { rep: repCiv } : {});
   } else {
     // a stand-alone attack: the target, its friends and the world react
     alive().forEach(id => {
@@ -4524,11 +5129,11 @@ function strike(o, kind, uid) {
       if (rel(id, S.player) < -30 && R() < 0.3) { S.sanc[id + '>' + S.player] = 1; sancN++; }
     });
     S.p.lastStrike = { o, day: S.day };
-    fx = applyFx({ ap: preview.ap, rep: preview.rep + repCiv, rel: preview.rel });
-    retal = R() < retaliateChance(o);
+    fx = cx ? applyFx({ ap: me.gov === 'democracy' ? -3 : -1, rep: (justified(o) ? -3 : -10) + repCiv, rel: { [o]: -50 } }) : applyFx({ ap: preview.ap, rep: preview.rep + repCiv, rel: preview.rel });
+    retal = R() < Math.min(0.95, retaliateChance(o) + (cx ? 0.2 : 0));
   }
-  const r = strikeRecord({ k: kind, by: S.player, at: o, cas: loss, own, fx, unit: su ? uName(su) : null, war: !!w, used, lost, sanc: sancN });
-  addNews(what + (w ? '' : ' (בלי הכרזת מלחמה)') + ' ב' + E.he + ': ' + nT(killed(loss)) + ' הרוגים' + (eqTxt(loss.eq, 3) ? ', הושמדו ' + eqTxt(loss.eq, 3) : '') + (lost ? '. איבדנו ' + lost + ' מטוסים' : '') + '.' + (sancN ? ' ' + sancTxt(sancN) + '.' : ''), 'war');
+  const r = strikeRecord({ k: kind, by: S.player, at: o, cas: loss, own, fx, unit: su ? uName(su) : null, war: !!w, used, lost, sanc: sancN, ci: cx ? cx.id : null, cn: cx ? cityName(cx) : null, cd: cdInc });
+  addNews(what + (w ? '' : ' (בלי הכרזת מלחמה)') + (cx ? ' (' + E.he + ')' : ' ב' + E.he) + ': ' + nT(killed(loss)) + ' הרוגים' + (eqTxt(loss.eq, 3) ? ', הושמדו ' + eqTxt(loss.eq, 3) : '') + (lost ? '. איבדנו ' + lost + ' מטוסים' : '') + '.' + (sancN ? ' ' + sancTxt(sancN) + '.' : ''), 'war');
   if (sancN) toast(sancTxt(sancN), true);
   if (retal) {
     const nw = declareWar(o, S.player, { provoked: true, joinAtt: true, noRally: true });
@@ -4539,13 +5144,14 @@ function strike(o, kind, uid) {
   needMapRecolor = true;
   save(); renderAll();
 }
-function confirmNuke(o) {
-  if (!o || !S.c[o] || !S.c[o].alive || P().nukes <= 0) return;
+function confirmNuke(o, ci) {
+  if (!o || !S.c[o] || !S.c[o].alive || P().nukes <= 0 || o === S.player) return;
+  const cx = ci && CITYI[ci] ? CITYI[ci] : S.ct ? nukeTargetCity(o) : null;
   if (!strikeRange(o).nuke) { toast('אין אמצעי שיגור בטווח', true); return; }
   const w = S.wars.find(x => (x.A.includes(o) && x.B.includes(S.player)) || (x.B.includes(o) && x.A.includes(S.player)));
   const ret = alive().filter(id => id !== S.player && S.c[id].nukes > 0 && (id === o || isAlly(id, o)));
-  const h = '<div class="nukewarn"><p><b>אתה עומד לשגר נשק גרעיני על ' + nm(o) + (w ? '' : ' — בלי שאנחנו במלחמה איתה') + '.</b></p><ul class="plain">' +
-    '<li>מיליוני אזרחים ייפגעו.</li><li>כל העולם יפנה נגדך: יחסים יקרסו וסנקציות יוטלו כמעט מכל מדינה. המוניטין שלך ' + sgn(-50) + '.</li>' +
+  const h = '<div class="nukewarn"><p><b>אתה עומד לשגר נשק גרעיני על ' + (cx ? esc(cityName(cx)) + ' (' + nm(o) + ')' : nm(o)) + (w ? '' : ' — בלי שאנחנו במלחמה איתה') + '.</b></p><ul class="plain">' +
+    (cx ? '<li class="red">בעיר ' + cityPopT(cx) + ' תושבים. צפויים כ-' + num(nukeCityEst(cx)) + ' הרוגים, ועוד יותר פצועים. העיר תיחרב לשנים.</li>' : '<li>מיליוני אזרחים ייפגעו.</li>') + '<li>כל העולם יפנה נגדך: יחסים יקרסו וסנקציות יוטלו כמעט מכל מדינה. המוניטין שלך ' + sgn(-50) + '.</li>' +
     (ret.length ? '<li class="red">מדינות גרעיניות שעלולות להשיב: ' + ret.slice(0, 6).map(nm).join(', ') + '. תגובה גרעינית עלולה להחריב את המדינה שלך.</li>' : '<li>לאויב ולבעלות בריתו אין נשק גרעיני — אבל העולם לא ישכח.</li>') +
     (w ? '' : '<li class="red">' + nm(o) + ' ובעלות בריתה כמעט בוודאות יכריזו עלינו מלחמה.</li>') +
     '<li>העם שלך יהיה בהלם — תמיכה תצנח.</li></ul><label class="chk"><input type="checkbox" id="nukeok"> אני מבין את ההשלכות</label></div>';
@@ -4554,7 +5160,7 @@ function confirmNuke(o) {
       if (!$('#nukeok') || !$('#nukeok').checked) { toast('סמן קודם שאתה מבין את ההשלכות', true); return; }
       modalQ.shift(); $('#modal').classList.remove('open');
       if (!S.c[o].alive || P().nukes <= 0) return;
-      P().nukes--; const nr = nukeImpact(S.player, o, false);
+      P().nukes--; const nr = nukeImpact(S.player, o, false, cx ? cx.id : null);
       nr.fx = applyFx({ rep: -50 });
       if (w && S.wars.includes(w)) { if (w.A.includes(S.player)) w.f += 35; else w.f -= 35; w.f = clamp(w.f, -100, 100); checkWarEnd(w); }
       else if (!w && S.c[o].alive && R() < 0.9) declareWar(o, S.player, { provoked: true, joinAtt: true, noRally: true });
@@ -4570,6 +5176,8 @@ function peaceW(w) {
   const pr = power(P()) / (power(E) + 1);
   let W = fp * 1.2 + age * 0.8 + clamp((pr - 1) * 10, -15, 25) + rel(en, S.player) / 5 + (100 - E.approval) / 10 + (S.p.rep - 50) / 5 + (R() - 0.5) * 20;
   if (fp < 0) W += fp * 0.5;
+  // holding their capital makes them much readier to give in (and losing ours, much less)
+  if (S.ct) { if (capHeldBy(en, S.player)) W += 20; if (capHeldBy(S.player, en)) W -= 20; }
   return W;
 }
 function peaceDialog(wid) {
@@ -4615,6 +5223,10 @@ function showHelp() {
     '<li><b>ים:</b> כוחות יבשה הולכים רק ביבשה, לשכנות. כדי לחצות ים (למשל לאי) — קודם שלח צי שלך לאזור, ואז כוחות היבשה יעברו (לאט יותר).</li>' +
     '<li><b>פקודות נוספות:</b> "תקוף מדינה" שולח את היחידה לתוך מדינת אויב. "הגן על הבית" — לגבול מול האויב. "חזור הביתה", "פצל לשתיים" ו"אחד" יחידות שעומדות באותו מקום. כנף אוויר יכולה גם לבצע תקיפה אווירית.</li>' +
     '<li><b>מלחמה:</b> כדי לכבוש שטח צריך להכניס כוחות יבשה (חי״ר ושריון) לתוך מדינת האויב. ארטילריה, מטוסים ומסוקים מחזקים אותם, וצי ליד החוף חוסם ומגן על הכוחות שחוצים את הים. בלי כוחות יבשה בפנים — אפשר רק לתקוף מהאוויר ובטילים. כבשת 100% — המדינה מסופחת. אבדות מורידות חיילים, טנקים ומטוסים מהיחידות שנלחמות.</li>' +
+    '<li><b>ערים:</b> על המפה יש ערים אמיתיות — ★ = עיר בירה, נקודה = עיר, ⚓ = נמל. כשהמפה רחוקה רואים רק בירות; ככל שמגדילים מופיעות עוד ערים. הצבע אומר מי שולט בעיר: צהוב — אתה, אדום — אויב, כחול — בעלת ברית. טבעת מקווקוות = עיר כבושה, טבעת כתומה מהבהבת = מצור. הקש על עיר כדי לראות אותה ולפעול.</li>' +
+    '<li><b>לכבוש עיר:</b> שלח לעיר כוחות יבשה (בכרטיס העיר ← "שלח כוחות", או "הזז" ואז הקש על העיר). כשהכוחות שלך שם חזקים פי <span class="num">1.5</span> מהמגינים — מתחיל מצור, ואחרי כמה ימים העיר נופלת. ערים שנכבשו מגדילות את אחוז השטח הכבוש (לפי כמה אנשים גרים בהן). כיבוש הבירה מקרב מאוד את הכניעה של האויב. האויב יכול לכבוש בחזרה — וגם לצור על הערים שלך (תקבל התראה).</li>' +
+    '<li><b>תקיפה על עיר:</b> הורגת הרבה יותר אזרחים מתקיפה על מטרות צבאיות, ופוגעת קשה במוניטין. עיר שנפגעה מאטה את הכלכלה עד שהיא משתקמת (לאט). בערים שלך אפשר לבנות ביצורים (קשה יותר לכבוש) והגנה אווירית (פחות נפגעים). עיר שנכבשה מורידה את הכלכלה ואת אהבת העם.</li>' +
+    '<li><b>נמלים:</b> צי שעוגן ליד נמל שלך מקבל תיקונים וספינות חדשות.</li>' +
     '<li><b>האויב:</b> יחידות האויב בסמלים אדומים. הן מגינות, ולפעמים פולשות למדינה שלך — השאר כוח בבית! כשהמפה רחוקה, יחידות באותה מדינה מתאחדות לסמל אחד עם מספר; הקש עליו או הגדל את המפה כדי לראות כל יחידה. ⚔ = קרב בין מדינות אחרות.</li>' +
     '<li><b>שלום:</b> בלשונית מלחמות. ככל שאתה מנצח יותר, תוכל לדרוש יותר.</li>' +
     '<li><b>אבדות וסטטיסטיקות:</b> אחרי כל תקיפה (שלך או עליך) קופץ כרטיס "תוצאות התקיפה": הרוגים ופצועים — חיילים ואזרחים — ציוד שהושמד, עלות, ומה זה עשה לעם ולעולם. בלשונית מלחמות יש לכל מלחמה גרפים ויומן קרבות, ובתפריט ☰ ← "סטטיסטיקות" — כל המספרים שלך ושל העולם.</li>' +
@@ -4685,7 +5297,7 @@ function setSpeed(v) {
 }
 let sliderT0 = null;
 let lastT = 0, acc = 0, lastUi = 0, lastSheet = 0, lastSave = 0, uiBusy = 0;
-const LIVE_TABS = { eco: 1, home: 1, gov: 1, mil: 1, wars: 1, country: 1, news: 1, world: 1, unit: 1, ulist: 1, stats: 1 };
+const LIVE_TABS = { eco: 1, home: 1, gov: 1, mil: 1, wars: 1, country: 1, news: 1, world: 1, unit: 1, ulist: 1, stats: 1, city: 1 };
 function frame(t) {
   requestAnimationFrame(frame);
   const dt = lastT ? Math.min(0.25, (t - lastT) / 1000) : 0; lastT = t;
@@ -4710,6 +5322,8 @@ function frame(t) {
     const moving = S.speed > 0 && !modalOpen() && S.units.some(u => u.dest || u.px !== u.lon || u.py !== u.lat);
     if (unitsDirty || (ticked && t - lastUnitsDraw > 100) || (moving && t - lastUnitsDraw > 33) || (hitUntil > t - 150 && t - lastUnitsDraw > 60)) drawUnits();
   }
+  // the cities layer: only when something changed and the map is not moving
+  if (citiesDirty && gCities && !zooming && t - lastCityDraw > 700) drawCities();
   fxFrame(t, dt);
   if (t - lastSave > 5000) { lastSave = t; save(); }
 }
@@ -4725,6 +5339,7 @@ function buildStartRel() {
 function boot() {
   try { initGeo(); } catch (e) { $('#loading').textContent = 'שגיאה בטעינת המפה'; return; }
   initRaster();
+  try { initCities(); } catch (e) { CITY = []; CITYI = {}; }
   buildStartRel();
   const resumed = load();
   if (!resumed) newGame(null);
@@ -4777,12 +5392,15 @@ function boot() {
     selectTid: t => { selected = t; recolor(); openTab('country'); }, zoomToTid, processPending, wipe, openTab,
     GOV: { minOf, candsFor, hireMin, fireMin, G, govAp, govSal,
       autoAll: (pol) => { MIN_ORDER.forEach(r => { if (!minOf(r)) { const l = candsFor(r).slice().sort((a, b) => b.sk - a.sk); hireMin(r, l[0]); } const m = minOf(r); m.auto = true; if (pol && pol[r]) Object.assign(m.pol, pol[r]); }); } },
+    C: { get CITY() { return CITY; }, CITYI, drawCities, cityDay, captureCity, openCity, reconcileCities, aiCityFlip, citiesOfT, heldShare, nukeCityEst, cityStand, get selCity() { return selCity; } },
     EVS: { EV, EVI, eventsDay, evCtx, evChoose, evDialog, worldCoup, rebel, ranks, worldSnap },
     STATS: () => ({ ev: S.ev && S.ev.n, dec: S.ev && S.ev.dn, wc: S.wc || {}, log: S.p && S.p.gov ? S.p.gov.log.length : 0 }),
     U: { unitById, unitsOf, planMove, orderTo, commitMove, selectUnit, setMode, modeTap, syncAllUnits, buildItems, uStr, distToC, nearIn, tidAt, ownerAt, isSeaAt, snapSea, toScreen, drawUnits, zoomToMapPt, tp, mapProj: p => MAP_PROJ(p),
       get curK() { return curK; }, get uMode() { return uMode; }, get selUnit() { return selUnit; } } };
 }
 window.addEventListener('DOMContentLoaded', () => {
-  loadScript('countries-data.js').catch(() => loadScript('countries-data.sample.js')).catch(() => { window.COUNTRY_DATA = {}; }).then(boot);
+  // cities: the full file, else the small sample, else only a capital generated for each country
+  const cities = () => loadScript('cities.js').catch(() => loadScript('cities.sample.js')).catch(() => { window.CITIES = []; });
+  loadScript('countries-data.js').catch(() => loadScript('countries-data.sample.js')).catch(() => { window.COUNTRY_DATA = {}; }).then(cities).then(boot);
 });
 })();
