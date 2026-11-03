@@ -136,9 +136,40 @@ let OWN = {}; const ADJ = new Map(), DIST = new Map(), BASE = new Map(); let STA
 function rebuildOwn() {
   OWN = {};
   for (const t in S.owner) { const o = S.owner[t]; if (o) (OWN[o] = OWN[o] || []).push(t); }
-  ADJ.clear(); DIST.clear(); CBY = null;
+  ADJ.clear(); DIST.clear(); CBY = null; CLT = null;
 }
 const tidsOf = c => OWN[c] || [];
+// land ceded in a peace treaty: S.cl[cityId] = the country that now owns that city and the land around it
+// (its part of the map is the city's Voronoi cell inside the old country's shape)
+const landOf = x => (S.cl && S.cl[x.id]) || S.owner[x.tid] || null;
+var CLT = null; // tid -> all cities on it, only for territories that have ceded land
+function clIdx() {
+  if (CLT) return CLT; CLT = {};
+  if (S && S.cl) for (const id in S.cl) { const x = CITYI[id]; if (x && !CLT[x.tid]) CLT[x.tid] = CITY.filter(y => y.tid === x.tid && isFinite(y.mx)); }
+  // a city's land reaches at most CL_KM from it (so one city never takes most of a big country); mr = that radius on the map
+  for (const t in CLT) CLT[t].forEach(x => { const q = MAP_PROJ && MAP_PROJ([x.lon, Math.min(89, x.lat + 1)]); x.mr = q ? Math.hypot(q[0] - x.mx, q[1] - x.my) * CL_KM / 111.2 : 1e9; });
+  return CLT;
+}
+const CL_KM = 500;
+// who owns this point of territory t (the nearest city on the map decides inside a split country)
+function ptOwner(t, lon, lat) {
+  const o = S.owner[t] || null; if (!o || !S.cl) return o;
+  const l = clIdx()[t]; if (!l || !l.length || !MAP_PROJ) return o;
+  const p = MAP_PROJ([lon, lat]); if (!p) return o;
+  let best = null, bd = 1e18;
+  for (const x of l) { const dx = x.mx - p[0], dy = x.my - p[1], d = dx * dx + dy * dy; if (d < bd) { bd = d; best = x; } }
+  return best && bd <= best.mr * best.mr ? landOf(best) : o;
+}
+// drop entries that no longer mean anything (the land's owner got it back, the city is gone); follow annexations
+function clNorm() {
+  if (!S || !S.cl || typeof S.cl !== 'object') { if (S) S.cl = {}; return; }
+  for (const id in S.cl) {
+    const x = CITYI[id]; let o = S.cl[id], n = 0;
+    while (o && S.c[o] && !S.c[o].alive && S.c[o].annexedBy && n++ < 9) o = S.c[o].annexedBy;
+    if (!x || !o || !S.c[o] || !S.c[o].alive || o === S.owner[x.tid]) delete S.cl[id]; else S.cl[id] = o;
+  }
+  CLT = null; CBY = null;
+}
 const alive = () => Object.keys(S.c).filter(id => S.c[id].alive);
 const P = () => S.c[S.player];
 const nm = id => (S.c[id] && S.c[id].he) || HE_EXTRA[id] || (TERR[id] && TERR[id].name) || id;
@@ -695,6 +726,8 @@ function annex(win, lose) {
   L.tids0 = tidsOf(lose).slice(); L.annexDay = S.day;
   tidsOf(lose).slice().forEach(t => S.owner[t] = win);
   L.alive = false; L.annexedBy = win;
+  // land the loser had received in earlier treaties goes with it
+  if (S.cl) { for (const id in S.cl) if (S.cl[id] === lose) S.cl[id] = win; clNorm(); }
   S.wars.forEach(w => { if ((w.a === lose || w.b === lose) && S.player && inWar(w, S.player)) archiveWar(w, inWar(w, win) && (w.A.includes(win) === w.A.includes(S.player)) ? 'won' : 'lost'); });
   W.pop += L.pop * 0.85; W.gdp += L.gdp * 0.5; W.nukes += Math.floor(L.nukes * 0.5); W.inv.troops += L.inv.troops * 0.05;
   S.wars.filter(w => w.a === lose || w.b === lose).forEach(w => S.wars = S.wars.filter(x => x !== w));
@@ -704,7 +737,7 @@ function annex(win, lose) {
   S.pending = S.pending.filter(p => !p.wid || S.wars.some(w => w.id === p.wid));
   rebuildOwn();
   // every city the loser held (on its own land or captured elsewhere) goes to the winner or back to its land's owner
-  if (S.ct) { CITY.forEach(x => { const st = cst(x); if (st.o === lose) { st.o = S.owner[x.tid] === win ? win : (S.owner[x.tid] || null); delete st.s; delete st.b; delete st.lg; } }); reconcileCities(); }
+  if (S.ct) { CITY.forEach(x => { const st = cst(x); if (st.o === lose) { st.o = landOf(x) === win ? win : (landOf(x) || null); delete st.s; delete st.b; delete st.lg; } }); reconcileCities(); }
   alive().forEach(c => { if (c !== win) addRel(c, win, S.c[c].gov === 'democracy' ? -15 : -8); });
   if (lose === S.player) {
     gameOver('annexed', nm(win) + ' כבשה את ' + L.he + ' כולה וסיפחה אותה. המדינה שלך כבר לא קיימת.');
@@ -718,12 +751,48 @@ function annex(win, lose) {
   }
   needMapRecolor = true;
 }
-function cede(win, lose, share) {
-  const W = S.c[win], L = S.c[lose]; share = clamp(share, 0.02, 0.5);
+// which of the loser's cities go to the winner: first those the winner holds, then the nearest to the winner,
+// the capital only for a very large share — until their population is about the share agreed
+function pickCede(win, lose, share) {
+  if (!S.ct || !CITY.length) return [];
+  const list = citiesOfT(lose); if (!list.length) return [];
+  const tot = list.reduce((a, x) => a + x.pop, 0), want = clamp(share, 0.02, 0.5) * tot, out = []; let got = 0;
+  const held = list.filter(x => cst(x).o === win).map(x => [x, distToC(win, cityPt(x))]).sort((a, b) => a[1] - b[1]).map(r => r[0]);
+  const add = x => { out.push(x); got += x.pop; };
+  for (const x of held) { if (got >= want * 0.9) break; if (out.length && got + x.pop > want + tot * 0.08) continue; add(x); }
+  const capOk = x => !(x.cap && x.c === lose) || share >= 0.5;
+  const rest = list.filter(x => !out.includes(x) && capOk(x)).map(x => ({ x, d: distToC(win, cityPt(x)) }));
+  while (got < want * 0.9 && rest.length) {
+    // nearest to the winner's land or to a city already handed over (so the new land is one piece)
+    let bi = -1, bd = 1e18;
+    rest.forEach((r, i) => { let d = r.d; for (const y of out) { const k = km(cityPt(r.x), cityPt(y)); if (k < d) d = k; } r.e = d; if (d < bd) { bd = d; bi = i; } });
+    const r = rest.splice(bi, 1)[0];
+    if (out.length && got + r.x.pop > want + tot * 0.08) continue;
+    add(r.x);
+  }
+  return out;
+}
+// the real share of the loser's people that those cities are (what the dialogs show and the deal moves)
+const cedeShare = (lose, l, dflt) => { const tot = citiesOfT(lose).reduce((a, x) => a + x.pop, 0); return l.length && tot > 0 ? clamp(l.reduce((a, x) => a + x.pop, 0) / tot, 0.02, 0.5) : dflt; };
+const cedeNames = l => { const n = l.slice().sort((a, b) => b.pop - a.pop).map(cityName); return n.slice(0, 6).join(', ') + (n.length > 6 ? ' ועוד ' + (n.length - 6) : ''); };
+// the winner gets the land for good: those cities (and the land around them on the map) are now part of its country
+function cede(win, lose, share, cities) {
+  const W = S.c[win], L = S.c[lose];
+  const l = cities || pickCede(win, lose, share);
+  if (l.length) {
+    const tot = citiesOfT(lose).reduce((a, x) => a + x.pop, 0);
+    share = tot > 0 ? l.reduce((a, x) => a + x.pop, 0) / tot : share;
+    if (!S.cl || typeof S.cl !== 'object') S.cl = {};
+    l.forEach(x => { const st = cst(x); delete st.lg; delete st.s; delete st.b; st.o = win; if (S.owner[x.tid] === win) delete S.cl[x.id]; else S.cl[x.id] = win; });
+    CBY = null; CLT = null; citiesDirty = true; needMapRecolor = true;
+    if (S.units) S.units.forEach(u => { if (u.tid && u.at === lose) u.at = ptOwner(u.tid, u.lon, u.lat); });
+  }
+  share = clamp(share, 0.02, 0.5);
   W.pop += L.pop * share; W.gdp += L.gdp * share * 0.6;
   L.pop *= 1 - share; L.gdp *= 1 - share; hurtInv(L, share * 0.5, ['troops']); hurtInv(L, share * 0.3, ['tanks', 'afv', 'art', 'air', 'heli', 'ships', 'subs', 'msl']);
   if (win === S.player) { S.p.shock += 3; S.p.unrest += 2; }
   if (lose === S.player) S.p.shock -= 8;
+  return l;
 }
 
 /* ================= economy (daily) ================= */
@@ -947,8 +1016,8 @@ function aiWars() {
     // a side that is being crushed gives up sooner
     if (Math.abs(f) >= (lop ? 30 : 50) && R() < (lop ? 0.35 : 0.12)) {
       const win = f > 0 ? w.a : w.b, lose = f > 0 ? w.b : w.a;
-      cede(win, lose, Math.abs(f) / 200);
-      addNews(nm(lose) + ' נכנעה ל' + nm(win) + ' וויתרה על חלק משטחה בהסכם שלום.', 'world'); endWar(w);
+      const cl = cede(win, lose, Math.abs(f) / 200);
+      addNews(nm(lose) + ' נכנעה ל' + nm(win) + ' וויתרה על חלק משטחה בהסכם שלום' + (cl.length ? ': ' + cedeNames(cl) + ' עברו ל' + nm(win) : '') + '.', 'world'); endWar(w);
     } else if (age > 18 && Math.abs(f) < 30 && R() < 0.012) {
       w.pause = 183; addNews('הפסקת אש בין ' + nm(w.a) + ' ל' + nm(w.b) + ' בתיווך בינלאומי.', 'world');
     } else if (age > 30 && Math.abs(f) < 50 && R() < 0.03) {
@@ -1301,7 +1370,7 @@ function minDef(m) {
       // (one unit stays behind in a city we took while enemy troops are around, so it is not lost again at once)
       const kept = new Set();
       if (S.ct) mine.filter(u => free(u) && domOf(u) === 'land' && u.at === E).sort((a, b) => uStr(a) - uStr(b)).forEach(u => {
-        const held = citiesNear([u.lon, u.lat], CR_KM).find(x => cst(x).o === me && S.owner[x.tid] === E);
+        const held = citiesNear([u.lon, u.lat], CR_KM).find(x => cst(x).o === me && landOf(x) === E);
         if (!held || kept.has(held.id)) return;
         if (S.units.some(e => e.o === E && domOf(e) === 'land' && km([e.lon, e.lat], cityPt(held)) < 250)) { kept.add(held.id); u.gar = held.id; }
       });
@@ -2281,6 +2350,7 @@ function load() {
     if (!S.ev || typeof S.ev !== 'object') S.ev = { nx: S.day + 5, cd: {}, ld: S.day, n: 0, dn: 0 };
     if (!S.wh) worldSnap();
     ensureCityState(); // older saves: cities start from the data
+    clNorm(); // older saves: no ceded land
     return true;
   } catch (e) { return false; }
 }
@@ -2340,7 +2410,7 @@ function tidAt(lon, lat) {
   }
   return geoTidAt([lon, lat]);
 }
-const ownerAt = (lon, lat) => { const t = tidAt(lon, lat); return t ? (S.owner[t] || null) : null; };
+const ownerAt = (lon, lat) => { const t = tidAt(lon, lat); return t ? ptOwner(t, lon, lat) : null; };
 const isSeaAt = p => RAS ? RAS[rasOff(p[0], p[1]) + 3] < 60 : !geoTidAt(p);
 // nearest sea point (for ships), searching outward on the raster
 function snapSea(p) {
@@ -2524,7 +2594,7 @@ function newUnit(o, t, p, m) {
   S.units.push(u); return u;
 }
 // remember which territory a unit stands on; its owner (u.at) follows annexations automatically
-function placeAt(u) { u.tid = UT[u.t].dom === 'sea' ? null : tidAt(u.lon, u.lat); u.at = u.tid ? (S.owner[u.tid] || null) : null; }
+function placeAt(u) { u.tid = UT[u.t].dom === 'sea' ? null : tidAt(u.lon, u.lat); u.at = u.tid ? ptOwner(u.tid, u.lon, u.lat) : null; }
 const uName = u => UT[u.t].he + ' ' + u.n;
 // home base for a new unit of this kind
 function basePt(cid, dom) {
@@ -2736,7 +2806,7 @@ function unitsMove() {
   const arrived = [];
   for (const u of S.units) {
     u.px = u.lon; u.py = u.lat;
-    if (!u.dest) { if (u.tid !== undefined) u.at = u.tid ? (S.owner[u.tid] || null) : null; else placeAt(u); continue; }
+    if (!u.dest) { if (u.tid !== undefined) u.at = u.tid ? ptOwner(u.tid, u.lon, u.lat) : null; else placeAt(u); continue; }
     let left = UT[u.t].spd * (u.slow || 1);
     if (u.via && domOf(u) !== 'sea') u.via = null;
     while (left > 0 && u.via && u.via.length) {
@@ -2949,7 +3019,7 @@ function aiUnits() {
     fighters.forEach(u => { if (u.ai === 'atk' && u.at === S.player && !u.dest && uStr(u) < (u.s0 || 0) * 0.45) { sendHome(u, true); u.ai = null; addNews('כוחות ' + nm(E) + ' נסוגים מהשטח שלנו.', 'good'); } });
     const intruders = S.units.filter(u => u.o === S.player && domOf(u) === 'land' && u.at === E);
     // first the invaders who took (or besiege) one of their cities
-    const atCity = S.ct ? intruders.filter(u => citiesNear([u.lon, u.lat], CR_KM).some(x => S.owner[x.tid] === E)) : [];
+    const atCity = S.ct ? intruders.filter(u => citiesNear([u.lon, u.lat], CR_KM).some(x => landOf(x) === E)) : [];
     if (intruders.length && S.day % 9 === 0) fighters.forEach(u => {
       if (domOf(u) !== 'land' || u.at !== E || u.dest || u.ai === 'atk' || R() > 0.5) return;
       const tg = pick(atCity.length && R() < 0.75 ? atCity : intruders), p = tidAt(tg.lon, tg.lat) && ownerAt(tg.lon, tg.lat) === E ? [tg.lon, tg.lat] : nearIn(E, [tg.lon, tg.lat]);
@@ -3087,13 +3157,13 @@ function ensureCityState() {
   const fresh = !S.ct || typeof S.ct !== 'object';
   if (fresh) S.ct = {};
   for (const k in S.ct) if (!CITYI[k]) delete S.ct[k];
-  CITY.forEach(x => { if (!S.ct[x.id] || typeof S.ct[x.id] !== 'object') S.ct[x.id] = { o: S.owner[x.tid] || null }; });
+  CITY.forEach(x => { if (!S.ct[x.id] || typeof S.ct[x.id] !== 'object') S.ct[x.id] = { o: landOf(x) || null }; });
   CBY = null;
   // wars already running when the game starts (or before cities existed): the occupier holds the nearest cities
   if (fresh) S.wars.forEach(w => aiCityFlip(w, true));
   reconcileCities(); citiesDirty = true;
 }
-const cst = x => S.ct[x.id] || (S.ct[x.id] = { o: S.owner[x.tid] || null });
+const cst = x => S.ct[x.id] || (S.ct[x.id] = { o: landOf(x) || null });
 const cityPt = x => [x.lon, x.lat];
 // where land units stand at a city: the city itself, or the nearest land of its country (coastal cities sit on the shore)
 function cityStand(x) {
@@ -3117,7 +3187,7 @@ function citiesNear(p, r) {
 }
 // cities on a country's land (whoever controls them now)
 function citiesOfT(cid) {
-  if (!CBY) { CBY = {}; for (const x of CITY) { const o = S.owner[x.tid]; if (o) (CBY[o] || (CBY[o] = [])).push(x); } }
+  if (!CBY) { CBY = {}; for (const x of CITY) { const o = landOf(x); if (o) (CBY[o] || (CBY[o] = [])).push(x); } }
   return CBY[cid] || [];
 }
 function capOf(cid) { const l = citiesOfT(cid); return l.find(x => x.cap && x.c === cid) || l.find(x => x.cap) || l.reduce((a, b) => !a || b.pop > a.pop ? b : a, null); }
@@ -3132,7 +3202,7 @@ const capHeldBy = (cid, side) => { const c = capOf(cid); if (!c) return false; c
 // the city's own defenders, besides the units standing in it (in unit strength points)
 function garrison(x, st) {
   const C = S.c[st.o]; if (!C) return 0;
-  return (1.5 + x.pop * 2.5) * (1 + 0.6 * (st.f || 0)) * (st.o === S.owner[x.tid] ? 1 : 0.5) * (C.q || 1) * (x.cap ? 1.3 : 1);
+  return (1.5 + x.pop * 2.5) * (1 + 0.6 * (st.f || 0)) * (st.o === landOf(x) ? 1 : 0.5) * (C.q || 1) * (x.cap ? 1.3 : 1);
 }
 const siegeDays = (x, st) => clamp(5 + 3 * Math.sqrt(x.pop) + 4 * (st.f || 0), 5, 40) * (x.cap ? 1.3 : 1);
 // siege progress a day (%): a tiny garrison against a huge army falls within a day or two
@@ -3158,7 +3228,7 @@ function cityDay() {
     const d0 = st.d; st.d = d0 > 0.5 ? d0 * 0.997 - 0.02 : 0;
     if (st.d <= 0) { delete st.d; continue; }
     if (d0 >= 15 && st.d < 15) citiesDirty = true;
-    const o = S.owner[x.tid]; if (o) dm[o] = (dm[o] || 0) + x.pop * st.d / 100;
+    const o = landOf(x); if (o) dm[o] = (dm[o] || 0) + x.pop * st.d / 100;
   }
   DMGS = dm;
   if (!S.units) return;
@@ -3202,7 +3272,7 @@ function siegeStarted(x, st, b) {
 }
 // a city changes hands; quiet = a war between other countries (only the map changes)
 function captureCity(x, by, quiet) {
-  const st = cst(x), from = st.o, terr = S.owner[x.tid] || null, me = S.player, T = S.c[terr];
+  const st = cst(x), from = st.o, terr = landOf(x) || null, me = S.player, T = S.c[terr];
   if (terr && by && by !== terr && sideOf(by, terr)) by = terr; // a friend frees our city: it is ours again
   if (!by || by === from) return;
   st.o = by; delete st.s; delete st.b; st.d = Math.min(100, (st.d || 0) + (quiet ? 2 : 6)); citiesDirty = true;
@@ -3232,7 +3302,7 @@ function captureCity(x, by, quiet) {
 function reconcileCities() {
   if (!S || !S.ct) return;
   for (const x of CITY) {
-    const st = cst(x), terr = S.owner[x.tid] || null, o = st.o;
+    const st = cst(x), terr = landOf(x) || null, o = st.o;
     if (o !== terr && (!o || !S.c[o] || !S.c[o].alive || !terr || !atWar(o, terr))) {
       if (st.lg && terr && S.c[terr]) S.c[terr].gdp += st.lg * 0.7;
       delete st.lg; st.o = terr; delete st.s; delete st.b; citiesDirty = true;
@@ -3272,7 +3342,7 @@ function cityCiv(x, kind, n, ad) { return n * (kind === 'air' ? 8 + 14 * Math.sq
 function cityDmgInc(kind, n, ad) { return clamp(kind === 'air' ? n * 0.5 : n * 0.35, 2, kind === 'air' ? 30 : 35) * (ad ? 0.6 : 1); }
 // damage to a city: its share of the economy suffers
 function cityHit(x, inc) {
-  const st = cst(x), T = S.c[S.owner[x.tid]]; const d0 = st.d || 0;
+  const st = cst(x), T = S.c[landOf(x)]; const d0 = st.d || 0;
   st.d = Math.min(100, d0 + inc); citiesDirty = true;
   if (T) T.gdp *= 1 - clamp(x.pop / Math.max(0.05, T.pop), 0, 0.6) * (st.d - d0) / 100 * 0.5;
   return st.d - d0;
@@ -3307,6 +3377,17 @@ function initMap() {
     const t = f.properties.tid;
     const el = gLand.append('path').attr('d', pathGen(f)).attr('data-t', t).node();
     (pathByTid[t] = pathByTid[t] || []).push(el);
+  });
+  gCeded = gRoot.append('g').attr('class', 'ceded').node(); drawCeded.k = null;
+  d3.select(gCeded).on('click', ev => {
+    if (uMode) return; const el = ev.target.closest && ev.target.closest('[data-cw]'); if (!el) return;
+    ev.stopPropagation();
+    const o = el.getAttribute('data-cw'), x = CITYI[el.getAttribute('data-ci')], from = x && S.owner[x.tid];
+    if (!S.player) { if (o) startPick(o); return; }
+    const t = mainTid(o); if (!t) return;
+    try { keepSelVisible.p = evLonLat(ev); keepSelVisible.t = t; } catch (e) { keepSelVisible.p = null; }
+    toast('שטח שנמסר ל' + nm(o) + ' בהסכם שלום' + (from && S.c[from] ? ' (לשעבר של ' + nm(from) + ')' : ''));
+    onMapTap(t);
   });
   gScorch = gRoot.append('g').attr('class', 'scorch'); scorchDirty = true;
   gMarks = gRoot.append('g').attr('class', 'marks');
@@ -3377,8 +3458,8 @@ function relColor(r) {
   if (r >= 0) return d3.interpolateRgb('#3a4250', '#2a5a72')(r / 100);
   return d3.interpolateRgb('#3a4250', '#6a2f36')(-r / 100);
 }
-function colorFor(t) {
-  const o = S && S.owner[t];
+function colorFor(t) { return colorOf(S && S.owner[t]); }
+function colorOf(o) {
   if (!o) return COL.none;
   if (!S.player) return (selected && S.owner[selected] === o) ? COL.me : relColor(0) ;
   if (o === S.player) return COL.me;
@@ -3396,6 +3477,7 @@ function recolor() {
     // only touch the DOM when something actually changed (keeps the phone smooth while time runs)
     pathByTid[t].forEach(el => { if (el.__c !== col) { el.setAttribute('fill', col); el.__c = col; } if (el.__s !== !!isSel) { el.classList.toggle('sel', !!isSel); el.__s = !!isSel; } });
   }
+  drawCeded(selOwner);
   const mk = S && S.player ? S.player + ':' + warsOf(S.player).map(w => enemyLeaderFor(w, S.player)).join(',') : '';
   if (mk !== drawMarks.k) { drawMarks.k = mk; drawMarks(); }
   // city colours follow wars and alliances
@@ -3403,6 +3485,64 @@ function recolor() {
   if (ck !== recolor.ck) { recolor.ck = ck; citiesDirty = true; }
   if (scorchDirty) drawScorch();
   needMapRecolor = false; lastRecolor = performance.now();
+}
+// a circle as a polygon, and a convex polygon clipped by another convex one (Sutherland–Hodgman)
+function circPoly(cx, cy, r) { const out = []; for (let i = 0; i < 48; i++) { const a = i / 48 * Math.PI * 2; out.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); } return out; }
+function clipConvex(sub, clip) {
+  let out = sub.slice(); if (out.length > 1 && out[0][0] === out[out.length - 1][0] && out[0][1] === out[out.length - 1][1]) out.pop();
+  const n = clip.length; let ar = 0; for (let i = 0; i < n; i++) { const a = clip[i], b = clip[(i + 1) % n]; ar += a[0] * b[1] - b[0] * a[1]; }
+  const sg = ar >= 0 ? 1 : -1;
+  for (let i = 0; i < n && out.length; i++) {
+    const a = clip[i], b = clip[(i + 1) % n], inp = out; out = [];
+    const side = p => sg * ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])) >= 0;
+    const cut = (p, q) => { const x1 = p[0], y1 = p[1], x2 = q[0], y2 = q[1], x3 = a[0], y3 = a[1], x4 = b[0], y4 = b[1];
+      const d = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4); if (!d) return p; const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / d; return [x1 + t * (x2 - x1), y1 + t * (y2 - y1)]; };
+    for (let j = 0; j < inp.length; j++) {
+      const p = inp[j], q = inp[(j + 1) % inp.length], pi = side(p), qi = side(q);
+      if (pi) { out.push(p); if (!qi) out.push(cut(p, q)); } else if (qi) out.push(cut(p, q));
+    }
+  }
+  return out;
+}
+// land ceded in peace treaties: the old country's shape is split into the cells of its cities (Voronoi on the map),
+// and the cells of the cities handed over are painted in the new owner's colour. Rebuilt only when the land changes.
+let gCeded = null;
+function drawCeded(selOwner) {
+  if (!gCeded || !S) return;
+  const cl = S.cl || {}, key = Object.keys(cl).sort().map(k => k + '>' + cl[k]).join(';');
+  if (key !== drawCeded.k) {
+    drawCeded.k = key; gCeded.innerHTML = '';
+    if (key && pathGen && d3.Delaunay) {
+      const byT = clIdx(), ns = 'http://www.w3.org/2000/svg';
+      const defs = document.createElementNS(ns, 'defs'); gCeded.appendChild(defs);
+      for (const t in byT) {
+        const l = byT[t], els = pathByTid[t]; if (!l.length || !els) continue;
+        const cp = document.createElementNS(ns, 'clipPath'); cp.setAttribute('id', 'cdc-' + t);
+        els.forEach(e => { const q = document.createElementNS(ns, 'path'); q.setAttribute('d', e.getAttribute('d')); cp.appendChild(q); });
+        defs.appendChild(cp);
+        let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+        els.forEach(e => { try { const b = e.getBBox(); x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.width); y1 = Math.max(y1, b.y + b.height); } catch (er) { /* not rendered */ } });
+        if (!(x1 > x0)) { x0 = -W; y0 = -H; x1 = W * 2; y1 = H * 2; }
+        const vor = d3.Delaunay.from(l, x => x.mx, x => x.my).voronoi([x0 - 5, y0 - 5, x1 + 5, y1 + 5]);
+        const g = document.createElementNS(ns, 'g'); g.setAttribute('clip-path', 'url(#cdc-' + t + ')');
+        l.forEach((x, i) => {
+          const o = landOf(x); if (o === S.owner[t]) return;
+          let poly = vor.cellPolygon(i); if (!poly) return;
+          poly = clipConvex(poly, circPoly(x.mx, x.my, x.mr)); if (poly.length < 3) return;
+          const q = document.createElementNS(ns, 'path');
+          q.setAttribute('d', 'M' + poly.map(p => p[0].toFixed(2) + ',' + p[1].toFixed(2)).join('L') + 'Z');
+          q.setAttribute('data-cw', o); q.setAttribute('data-ci', x.id); q.__w = o;
+          g.appendChild(q);
+        });
+        gCeded.appendChild(g);
+      }
+    }
+  }
+  gCeded.querySelectorAll('[data-cw]').forEach(el => {
+    const col = colorOf(el.__w), sel = !!selOwner && el.__w === selOwner;
+    if (el.__c !== col) { el.setAttribute('fill', col); el.__c = col; }
+    if (el.__s !== sel) { el.classList.toggle('sel', sel); el.__s = sel; }
+  });
 }
 function drawMarks() {
   if (!gMarks || !MAP_PROJ) return;
@@ -3714,7 +3854,7 @@ function focusUnit(u, zoomIn) {
 /* ---- cities layer: dots, stars and names in screen space; redrawn only when the view settles or something changes ---- */
 let gCities = null, citiesDirty = true, lastCityDraw = 0, cityT0 = null, selCity = null, zooming = false, UBOX = [], TWC = null;
 const CEL = new Map();
-function projCities() { if (!MAP_PROJ) return; for (const x of CITY) { const p = MAP_PROJ([x.lon, x.lat]); x.mx = p ? p[0] : NaN; x.my = p ? p[1] : NaN; } citiesDirty = true; }
+function projCities() { if (!MAP_PROJ) return; CLT = null; for (const x of CITY) { const p = MAP_PROJ([x.lon, x.lat]); x.mx = p ? p[0] : NaN; x.my = p ? p[1] : NaN; } citiesDirty = true; }
 // during a pan / pinch the whole layer simply follows the map
 function cityFollow() {
   if (!gCities || !cityT0) return;
@@ -3747,7 +3887,7 @@ function drawCities() {
     const sx = curT.x + k * x.mx, sy = curT.y + k * x.my;
     if (!(sx > -10 && sy > 30 && sx < W + 10 && sy < H - 20)) continue;
     const st = S.ct[x.id]; if (!st) continue;
-    const terr = S.owner[x.tid], tc = S.c[terr];
+    const terr = landOf(x), tc = S.c[terr];
     const mine = !!me && (terr === me || st.o === me), hot = !!me && (st.s > 0 || (!!st.o && st.o !== terr) || (!!terr && atWar(terr, me)));
     let pr;
     if (x.id === selCity) pr = 9e6;
@@ -3779,7 +3919,7 @@ function drawCities() {
       if (b[0] < 2 || b[2] > W - 2 || ovl(b, occ) || ovl(b, UBOX) || ovl(b, MB)) continue;
       lb = [dx, dy]; occ.push(b); break;
     }
-    const st = c.st, terr = S.owner[x.tid], id = x.id;
+    const st = c.st, terr = landOf(x), id = x.id;
     const cls = 'ci ' + cityCls(st) + (x.cap ? ' cap' : '') + (id === selCity ? ' sel' : '') + ((st.d || 0) >= 15 ? ' dm' : '');
     let inner = '<circle class="h" r="' + (x.cap ? 14 : 12) + '"/>';
     if (id === selCity) inner += '<circle class="rs" r="' + (r + 5.5) + '"/>';
@@ -3799,7 +3939,7 @@ function drawCities() {
 function onCityTap(id) {
   const x = CITYI[id]; if (!x || !S || !S.ct) return;
   // on the start screen a city simply picks its country
-  if (!S.player) { const o = S.owner[x.tid]; if (o) { startPick(o); zoomToTid(mainTid(o) || o, 8); } return; }
+  if (!S.player) { const o = landOf(x); if (o) { startPick(o); zoomToTid(mainTid(o) || o, 8); } return; }
   if (uMode) { cityModeTap(x); return; }
   openCity(id, 0);
 }
@@ -3815,7 +3955,7 @@ function openCity(id, k) {
 // a city tapped while choosing a destination or a target for a unit
 function cityModeTap(x) {
   const u = unitById(uMode.uid); if (!u) { endMode(); return; }
-  const kind = uMode.kind, st = cst(x), o = st.o, terr = S.owner[x.tid];
+  const kind = uMode.kind, st = cst(x), o = st.o, terr = landOf(x);
   if (kind === 'strike' || kind === 'missile') {
     if (!o || o === S.player || terr === S.player) { toast('בחר עיר של מדינה זרה', true); return; }
     endMode(); unitStrike(u, o, kind === 'strike' ? 'air' : 'mis', x.id); return;
@@ -3825,7 +3965,7 @@ function cityModeTap(x) {
   orderTo(u, cityStand(x), enemy || kind === 'attack' ? 'atk' : 'move', x.id);
 }
 function cityStatus(x, st) {
-  const terr = S.owner[x.tid];
+  const terr = landOf(x);
   if (st.o && terr && st.o !== terr) return { t: 'כבושה בידי ' + nm(st.o), c: st.o === S.player ? 'ok' : terr === S.player ? 'bad' : 'warn' };
   if (st.s > 0 && st.b) return { t: 'במצור של ' + nm(st.b), c: st.o === S.player ? 'bad' : st.b === S.player ? 'ok' : 'warn' };
   if ((st.d || 0) >= 5) return { t: 'נפגעה בהפצצות', c: 'warn' };
@@ -3849,7 +3989,7 @@ const fortCost = x => Math.max(0.05, P().gdp * 0.0008) * ((cst(x).f || 0) + 1) *
 const cadCost = x => Math.max(0.1, P().gdp * 0.0015) * (x.cap ? 1.3 : 1);
 function viewCity() {
   const x = CITYI[selCity]; if (!x || !S.ct) return '<p class="hint">העיר לא נמצאה.</p>';
-  const st = cst(x), me = S.player, terr = S.owner[x.tid], o = st.o, T = S.c[terr], stt = cityStatus(x, st), F = cityForces(x);
+  const st = cst(x), me = S.player, terr = landOf(x), o = st.o, T = S.c[terr], stt = cityStatus(x, st), F = cityForces(x);
   let h = '<h2>' + (x.cap ? '<span class="cstar">★</span> ' : '') + esc(cityName(x)) + ' <small>' + esc(terr ? nm(terr) : 'שטח ללא שליטה') + (terr === me ? ' · שלך' : '') + '</small></h2>';
   h += '<div class="chips">' + (x.cap ? chip('עיר בירה', 'orange') : '') + (x.port ? chip('⚓ נמל', 'blue') : '') + chip(esc(stt.t), stt.c) + (x.gen ? chip('מיקום משוער') : '') + '</div>';
   const defs = [(st.f ? 'ביצורים ' + num(st.f) + '/3' : ''), (st.a ? 'הגנה אווירית' : '')].filter(Boolean).join(' · ') || 'אין';
@@ -3904,14 +4044,14 @@ function cityStrikeFx(o, kind, x, inW) {
   e.note = '<span class="bad">כ-' + num(civ) + ' אזרחים ייהרגו</span>' + (inW ? '' : ' · סיכוי למלחמה: ' + pct(Math.min(0.95, retaliateChance(o) + 0.2) * 100));
   return e;
 }
-const nukeCityEst = x => { const T = S.c[S.owner[x.tid]]; return Math.round(Math.min(T ? T.pop * 0.3 : 1e9, x.pop * clamp(0.22 / (1 + x.pop / 8), 0.06, 0.25), 2.6) * 1e6); };
+const nukeCityEst = x => { const T = S.c[landOf(x)]; return Math.round(Math.min(T ? T.pop * 0.3 : 1e9, x.pop * clamp(0.22 / (1 + x.pop / 8), 0.06, 0.25), 2.6) * 1e6); };
 function cityStrikeDialog(x, kind, u) {
   const st = cst(x), o = st.o;
-  if (!o || o === S.player || S.owner[x.tid] === S.player) { toast('אי אפשר לתקוף את העיר הזו', true); return; }
+  if (!o || o === S.player || landOf(x) === S.player) { toast('אי אפשר לתקוף את העיר הזו', true); return; }
   const inW = atWar(o, S.player), e = cityStrikeFx(o, kind, x, inW);
   modal({ title: (kind === 'air' ? 'הפצצת ' : 'מטח טילים על ') + esc(cityName(x)), cls: 'danger', html: '<div class="nukewarn"><p><b>זו תקיפה על עיר מאוכלסת</b> (' + cityPopT(x) + ' תושבים) — לא על מטרות צבאיות.</p><ul class="plain">' +
     '<li class="red">צפויים כ-' + num(e.civ) + ' אזרחים הרוגים, ופי שלושה פצועים' + (st.a ? ' (יש בעיר הגנה אווירית — פחות נפגעים)' : '') + '.</li>' +
-    '<li>העיר תיהרס חלקית, והכלכלה של ' + esc(nm(S.owner[x.tid])) + ' תיפגע לזמן רב.</li>' +
+    '<li>העיר תיהרס חלקית, והכלכלה של ' + esc(nm(landOf(x))) + ' תיפגע לזמן רב.</li>' +
     '<li class="red">העולם יגנה: המוניטין שלך ' + sgn(e.rep) + (inW ? '' : '. ' + esc(nm(o)) + ' עלולה להכריז עלינו מלחמה') + '.</li>' +
     '<li>לצבא שלהם זה כמעט לא מזיק — תקיפה על מטרות צבאיות (מכרטיס המדינה) פוגעת בצבא הרבה יותר, עם מעט נפגעים אזרחיים.</li></ul></div><div class="box">צפוי: ' + fxLine(e) + '</div>',
     buttons: [{ label: 'תקוף את העיר', cls: 'danger', fn: () => strike(o, kind, u ? u.id : null, x.id) }, { label: 'ביטול', cls: 'primary' }] });
@@ -3940,7 +4080,7 @@ function citySendDialog(x) {
     } });
 }
 function cityBuild(x, k) {
-  if (!x || cst(x).o !== S.player || S.owner[x.tid] !== S.player) return;
+  if (!x || cst(x).o !== S.player || landOf(x) !== S.player) return;
   const st = cst(x); if (k === 'cfort' ? (st.f || 0) >= 3 : st.a) return;
   if (S.p.queue.some(v => v.k === k && v.ci === x.id)) return;
   const cost = k === 'cfort' ? fortCost(x) : cadCost(x); if (!spend(cost)) return;
@@ -4483,7 +4623,7 @@ function viewCountry() {
 // our cities (biggest first) with their state, and the cities we took
 function myCitiesHtml() {
   if (!S.ct) return '';
-  const me = S.player, l = sortCities(citiesOfT(me)), took = sortCities(CITY.filter(x => cst(x).o === me && S.owner[x.tid] !== me));
+  const me = S.player, l = sortCities(citiesOfT(me)), took = sortCities(CITY.filter(x => cst(x).o === me && landOf(x) !== me));
   const lost = l.filter(x => cst(x).o !== me).length;
   let h = '<h3>הערים שלך <small>(' + num(l.length) + (lost ? ' · ' + num(lost) + ' בידי האויב' : '') + ')</small></h3>' + cityRows(l, 12);
   if (took.length) h += '<h3>ערים שכבשנו <small>(' + num(took.length) + ')</small></h3>' + cityRows(took, 8);
@@ -5121,15 +5261,17 @@ function processPending() {
       buttons: [{ label: fxBtn('הצטרף למלחמה', eJoin), cls: 'danger', fn: () => { if (S.wars.includes(w) && !inWar(w, S.player)) { w.B.push(S.player); fxToast('הצטרפנו למלחמה', eJoin); addNews('הצטרפנו למלחמה לצד ' + nm(p.ally) + ' נגד ' + nm(en) + '.', 'war'); } after(); } },
         { label: fxBtn('הישאר בחוץ', eNo), fn: () => { setPact(p.ally, S.player, 'alliance', false); fxToast('הפרנו את הברית', eNo, true); addNews('סירבנו לסייע ל' + nm(p.ally) + '. אמינותנו נפגעה.', 'bad'); after(); } }] });
   } else if (p.type === 'peace') {
-    const terms = p.kind === 'white' ? 'שלום ללא תנאים (כל צד נשאר בגבולותיו).' : p.kind === 'repar' ? 'הם ישלמו לנו פיצויים של ' + money(S.c[p.from].gdp * 0.04) + '.' : 'הם יוותרו לנו על ' + pct(p.share * 100) + ' משטחם ומאוכלוסייתם.';
+    const cl = p.kind === 'terr' ? pickCede(S.player, p.from, p.share) : [];
+    const terms = p.kind === 'white' ? 'שלום ללא תנאים (כל צד נשאר בגבולותיו).' : p.kind === 'repar' ? 'הם ישלמו לנו פיצויים של ' + money(S.c[p.from].gdp * 0.04) + '.' : 'הם יוותרו לנו על ' + pct(cedeShare(p.from, cl, p.share) * 100) + ' משטחם ומאוכלוסייתם.' + (cl.length ? '</p><p>נקבל את: <b>' + esc(cedeNames(cl)) + '</b>' : '');
     modal({ title: 'הצעת שלום מ' + nm(p.from), html: '<p>' + terms + '</p>',
-      buttons: [{ label: fxBtn('קבל', { ap: 3, rep: 5 }), cls: 'good', fn: () => { applyPeace(w, p.kind, S.player, p.from, p.share); after(); } }, { label: 'דחה', fn: after }] });
+      buttons: [{ label: fxBtn('קבל', { ap: 3, rep: p.kind === 'terr' ? 2 : 5 }), cls: 'good', fn: () => { applyPeace(w, p.kind, S.player, p.from, p.share, cl); after(); } }, { label: 'דחה', fn: after }] });
   } else if (p.type === 'demand') {
-    modal({ title: 'דרישה מ' + nm(p.from), html: '<p>' + nm(p.from) + ' מוכנה לסיים את המלחמה אם נוותר על ' + pct(p.share * 100) + ' משטחנו ומאוכלוסייתנו.</p><p class="sub">אם נסרב — הלחימה תימשך.</p>',
-      buttons: [{ label: fxBtn('קבל את התנאים', { ap: -5, rep: 3 }), cls: 'danger', fn: () => { applyPeace(w, 'terr', p.from, S.player, p.share); after(); } }, { label: 'נמשיך להילחם', fn: after }] });
+    const cl = pickCede(p.from, S.player, p.share);
+    modal({ title: 'דרישה מ' + nm(p.from), html: '<p>' + nm(p.from) + ' מוכנה לסיים את המלחמה אם נוותר על ' + pct(cedeShare(S.player, cl, p.share) * 100) + ' משטחנו ומאוכלוסייתנו.</p>' + (cl.length ? '<p>נמסור להם את: <b>' + esc(cedeNames(cl)) + '</b></p>' : '') + '<p class="sub">אם נסרב — הלחימה תימשך.</p>',
+      buttons: [{ label: fxBtn('קבל את התנאים', { ap: -5, rep: 3 }), cls: 'danger', fn: () => { applyPeace(w, 'terr', p.from, S.player, p.share, cl); after(); } }, { label: 'נמשיך להילחם', fn: after }] });
   } else processPending();
 }
-function applyPeace(w, kind, win, lose, share) {
+function applyPeace(w, kind, win, lose, share, cities) {
   if (!S.wars.includes(w)) return;
   const pl = involvesPlayer(w);
   if (kind === 'repar') {
@@ -5137,8 +5279,12 @@ function applyPeace(w, kind, win, lose, share) {
     if (win === S.player) S.p.treasury += amt; if (lose === S.player) S.p.treasury -= amt;
     addNews(nm(lose) + ' הסכימה לשלם פיצויים ל' + nm(win) + '. המלחמה הסתיימה.', win === S.player ? 'good' : 'bad');
   } else if (kind === 'terr') {
-    cede(win, lose, share);
-    addNews(nm(lose) + ' ויתרה על ' + Math.round(share * 100) + '% משטחה ל' + nm(win) + '. נחתם הסכם שלום.', win === S.player ? 'good' : 'bad');
+    const tot = citiesOfT(lose).reduce((a, x) => a + x.pop, 0);
+    const cl = cede(win, lose, share, cities && cities.filter(x => landOf(x) === lose));
+    if (cl.length && tot > 0) share = clamp(cl.reduce((a, x) => a + x.pop, 0) / tot, 0.02, 0.5);
+    const cn = cl.length ? cedeNames(cl) : '';
+    addNews(nm(lose) + ' ויתרה על ' + Math.round(share * 100) + '% משטחה ל' + nm(win) + (cn ? ' (' + cn + ')' : '') + '. נחתם הסכם שלום.', win === S.player ? 'good' : 'bad');
+    if (cn && (win === S.player || lose === S.player)) setTimeout(() => toast(win === S.player ? 'קיבלנו את: ' + cn : 'מסרנו ל' + nm(win) + ' את: ' + cn, lose === S.player), 0);
   } else if (kind === 'annex') {
     endWar(w, win === S.player ? 'won' : 'lost'); annex(win, lose); return;
   } else if (kind === 'cease') {
@@ -5146,7 +5292,8 @@ function applyPeace(w, kind, win, lose, share) {
     addNews('הוסכם על הפסקת אש של חצי שנה עם ' + nm(enemyLeaderFor(w, S.player)) + '.', 'good'); return;
   } else addNews('נחתם הסכם שלום עם ' + nm(enemyLeaderFor(w, S.player)) + '. החיילים חוזרים הביתה.', 'good');
   // peace is good for the people and for the world's view of us
-  if (pl) fxToast('הסכם שלום', { ap: 3, rep: kind === 'terr' && win === S.player ? 2 : 5 });
+  if (pl && kind === 'terr' && lose === S.player) { S.p.shock += 8; fxToast('הסכם שלום', { ap: -5, rep: 3 }, true); }
+  else if (pl) fxToast('הסכם שלום', { ap: 3, rep: kind === 'terr' && win === S.player ? 2 : 5 });
   endWar(w, kind === 'white' ? 'peace' : win === S.player ? 'won' : lose === S.player ? 'lost' : 'peace');
 }
 
@@ -5262,7 +5409,7 @@ const ACT = {
   cnuke: d => { const x = CITYI[d.ci]; if (x) confirmNuke(cst(x).o, x.id); },
   cfort: d => cityBuild(CITYI[d.ci], 'cfort'),
   cad: d => cityBuild(CITYI[d.ci], 'cad'),
-  cgo: d => { const x = CITYI[d.ci]; const t = x && mainTid(S.owner[x.tid]); if (!t) return; selCity = null; citiesDirty = true; selected = t; recolor(); openTabFresh('country'); },
+  cgo: d => { const x = CITYI[d.ci]; const t = x && mainTid(landOf(x)); if (!t) return; selCity = null; citiesDirty = true; selected = t; recolor(); openTabFresh('country'); },
   fxmode: d => { setFxMode(d.v); document.querySelectorAll('[data-act=fxmode]').forEach(b => b.classList.toggle('on', b.dataset.v === FXMODE)); toast({ full: 'אנימציות מלאות', low: 'אנימציות מופחתות', off: 'בלי אנימציות' }[FXMODE]); }
 };
 // where to stand to defend the homeland: the part of our land closest to the main enemy
@@ -5532,7 +5679,10 @@ function peaceDialog(wid) {
   const w = S.wars.find(x => x.id === wid); if (!w) return;
   const en = enemyLeaderFor(w, S.player), fp = mySideFront(w, S.player);
   const opts = [['cease', 'הפסקת אש (6 חודשים)', true], ['white', 'שלום ללא תנאים', true], ['repar', 'דרוש פיצויים<small class="cost">' + money(S.c[en].gdp * 0.04) + '</small>', true],
-    ['terr', 'דרוש שטחים (' + Math.round(Math.max(0, fp) / 2) + '% מהם)', fp >= 15], ['annex', 'דרוש כניעה מלאה וסיפוח', fp >= 70]];
+    ['terr', '', fp >= 15], ['annex', 'דרוש כניעה מלאה וסיפוח', fp >= 70]];
+  const tcl = fp >= 15 ? pickCede(S.player, en, Math.max(0, fp) / 200) : [];
+  opts[3][1] = 'דרוש שטחים (' + Math.round(cedeShare(en, tcl, clamp(Math.max(0, fp) / 200, 0.02, 0.5)) * 100) + '% מהם)';
+  if (tcl.length) opts[3][1] += '<small class="cost">נקבל את: ' + esc(cedeNames(tcl)) + '</small>';
   let h = '<p>מה להציע ל' + nm(en) + '? כרגע אנחנו ' + (fp >= 0 ? 'מחזיקים ' + Math.round(fp) + '% משטחם.' : 'מאבדים — הם מחזיקים ' + Math.round(-fp) + '% משטחנו.') + '</p><p class="sub">ככל שאתה מנצח יותר — הם יסכימו לתנאים קשים יותר. שלום: העם ' + sgn(3) + ' · העולם ' + sgn(5) + '.</p><div class="btns col">';
   opts.forEach(([k, l, ok]) => { h += '<button class="b" data-pk="' + k + '"' + (ok ? '' : ' disabled') + '>' + l + '</button>'; });
   h += '</div>';
@@ -5541,7 +5691,7 @@ function peaceDialog(wid) {
       const k = b.dataset.pk; modalQ.shift(); $('#modal').classList.remove('open');
       const W = peaceW(w);
       const need = { cease: 0, white: 10, repar: 35, terr: 40, annex: 60 }[k];
-      if (W > need || (k === 'annex' && fp >= 90)) { applyPeace(w, k, S.player, en, Math.max(0, fp) / 200); toast(nm(en) + ' הסכימה!'); }
+      if (W > need || (k === 'annex' && fp >= 90)) { applyPeace(w, k, S.player, en, Math.max(0, fp) / 200, k === 'terr' ? tcl : null); toast(nm(en) + ' הסכימה!'); }
       else { toast(nm(en) + ' דחתה את ההצעה', true); addNews(nm(en) + ' דחתה את הצעת ה' + (k === 'cease' ? 'הפסקת אש' : 'שלום') + ' שלנו.', 'bad'); }
       save(); renderAll(); setTimeout(showModal, 30);
     });
@@ -5775,7 +5925,7 @@ function boot() {
     selectTid: t => { selected = t; recolor(); openTab('country'); }, zoomToTid, processPending, wipe, openTab,
     GOV: { minOf, candsFor, hireMin, fireMin, G, govAp, govSal, envOf, setEnvelopes, noMoney,
       autoAll: (pol) => { MIN_ORDER.forEach(r => { if (!minOf(r)) { const l = candsFor(r).slice().sort((a, b) => b.sk - a.sk); hireMin(r, l[0]); } const m = minOf(r); m.auto = true; if (pol && pol[r]) Object.assign(m.pol, pol[r]); }); } },
-    C: { get CITY() { return CITY; }, CITYI, drawCities, cityDay, captureCity, openCity, reconcileCities, aiCityFlip, citiesOfT, heldShare, nukeCityEst, cityStand, get selCity() { return selCity; } },
+    C: { get CITY() { return CITY; }, CITYI, pickCede, cede, applyPeace, landOf, ptOwner, peaceDialog, drawCities, cityDay, captureCity, openCity, reconcileCities, aiCityFlip, citiesOfT, heldShare, nukeCityEst, cityStand, get selCity() { return selCity; } },
     EVS: { EV, EVI, eventsDay, evCtx, evChoose, evDialog, worldCoup, rebel, ranks, worldSnap },
     STATS: () => ({ ev: S.ev && S.ev.n, dec: S.ev && S.ev.dn, wc: S.wc || {}, log: S.p && S.p.gov ? S.p.gov.log.length : 0 }),
     U: { unitById, unitsOf, planMove, orderTo, commitMove, selectUnit, setMode, modeTap, syncAllUnits, buildItems, uStr, distToC, nearIn, tidAt, ownerAt, isSeaAt, snapSea, toScreen, drawUnits, zoomToMapPt, tp, mapProj: p => MAP_PROJ(p),
