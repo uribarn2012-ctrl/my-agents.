@@ -10,7 +10,7 @@
 :root{
   --bg:#0b0f14; --ocean:#0c1a27; --panel:#121a24; --panel2:#18222e; --line:#263241;
   --txt:#e6edf3; --mut:#8b98a5; --gold:#f5b301; --red:#e5383b; --blue:#2f7bff; --teal:#1fa38a; --orange:#d9822b; --green:#2fbf71;
-  --topH:84px; --barH:60px;
+  --topH:92px; --barH:60px;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font-family:"Segoe UI","Noto Sans Hebrew","Arial Hebrew",Arial,sans-serif;font-size:15px;overflow:hidden;overscroll-behavior:none}
@@ -32,14 +32,20 @@ button{font:inherit;color:inherit}
 /* top bar */
 #top{position:fixed;top:0;left:0;right:0;z-index:20;background:linear-gradient(#0b0f14f2,#0b0f14d9);border-bottom:1px solid var(--line);padding:env(safe-area-inset-top) 8px 4px;display:none;backdrop-filter:blur(6px)}
 .playing #top{display:block}
-#top .r1{display:flex;align-items:center;gap:8px;height:36px}
-#top .r1 b{font-size:16px;color:var(--gold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#top .r1 #t-date{margin-inline-start:auto;color:var(--txt);font-weight:600;white-space:nowrap}
-.ic{background:var(--panel2);border:1px solid var(--line);border-radius:10px;min-width:36px;height:32px;padding:0 8px;cursor:pointer;font-weight:700}
-#top .r2{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
-#top .cell{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:2px 4px;text-align:center;min-width:0}
-#top .cell small{display:block;font-size:10.5px;color:var(--mut);line-height:1.3}
-#top .cell .v{font-weight:700;font-size:14px;white-space:nowrap}
+#top .r1{display:flex;align-items:center;gap:6px;height:42px}
+#top .who{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.15}
+#top .who b{font-size:15px;color:var(--gold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#top #t-date{font-size:12.5px;color:var(--txt);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ic{background:var(--panel2);border:1px solid var(--line);border-radius:10px;min-width:34px;height:32px;padding:0 8px;cursor:pointer;font-weight:700;flex:none}
+#speed{display:flex;flex:none;border:1px solid #33465c;border-radius:10px;overflow:hidden;direction:ltr}
+#speed button{width:31px;height:32px;border:0;border-inline-start:1px solid #263241;background:#17212c;cursor:pointer;font-weight:700;font-size:12.5px;padding:0;color:var(--mut)}
+#speed button:first-child{border:0}
+#speed button.on{background:var(--gold);color:#1a1300}
+#speed button[data-v="0"].on{background:#e5383b;color:#fff}
+#top .r2{display:grid;grid-template-columns:repeat(6,1fr);gap:3px;margin-top:2px}
+#top .cell{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:2px 2px;text-align:center;min-width:0}
+#top .cell small{display:block;font-size:10.5px;color:var(--mut);line-height:1.3;white-space:nowrap;overflow:hidden}
+#top .cell .v{font-weight:700;font-size:13.5px;white-space:nowrap;overflow:hidden}
 .v.bad,.bad{color:var(--red)} .v.warn,.warn{color:var(--orange)} .v.ok,.ok{color:var(--green)}
 
 /* bottom bar */
@@ -49,8 +55,6 @@ button{font:inherit;color:inherit}
 .tabs button{flex:1;min-width:0;height:46px;border:1px solid var(--line);background:var(--panel);border-radius:10px;font-size:12.5px;padding:0;letter-spacing:-.2px;cursor:pointer;position:relative;white-space:nowrap}
 .tabs button.on{background:#223147;border-color:#3b5577;color:#fff}
 .tabs button[data-badge]:not([data-badge=""])::after{content:attr(data-badge);position:absolute;top:-6px;left:-4px;background:var(--red);color:#fff;border-radius:9px;font-size:11px;min-width:18px;height:18px;line-height:18px;text-align:center}
-#endturn{height:46px;padding:0 10px;border:0;border-radius:10px;background:var(--gold);color:#1a1300;font-weight:800;font-size:15px;cursor:pointer;white-space:nowrap;box-shadow:0 0 0 2px #f5b30133}
-#endturn:disabled{opacity:.6}
 
 /* sheet */
 #sheet{position:fixed;left:0;right:0;bottom:calc(var(--barH) + env(safe-area-inset-bottom));z-index:25;max-height:56vh;background:var(--panel);border-top:1px solid var(--line);border-radius:16px 16px 0 0;transform:translateY(110%);transition:transform .25s ease;display:flex;flex-direction:column;box-shadow:0 -8px 24px #0008}
@@ -102,6 +106,7 @@ button{font:inherit;color:inherit}
 .card{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:8px 10px;margin:8px 0}.card.war{border-color:#6a2a30}.card h3{margin:2px 0 4px!important}
 ul.news{list-style:none;padding:0;margin:6px 0}ul.news li{padding:7px 10px;border-inline-start:3px solid #3a4656;margin:4px 0;background:var(--panel2);border-radius:6px;font-size:14px;line-height:1.45}
 ul.news li.nd{background:none;border:0;color:var(--gold);font-weight:700;padding:8px 0 2px}
+ul.news li.month{border-color:var(--gold);background:#2a2410}
 ul.news li.good{border-color:var(--green)}ul.news li.bad{border-color:var(--orange)}ul.news li.war{border-color:var(--red)}ul.news li.dip{border-color:var(--blue)}ul.news li.world{border-color:#6b7a8c}
 ul.plain{padding-inline-start:18px;margin:6px 0;line-height:1.6}ul.plain li{margin:3px 0}ul.plain li.red,.red{color:#ff9d9d}
 ul.help li{margin:6px 0}
@@ -142,8 +147,12 @@ ul.help li{margin:6px 0}
 #m-foot{display:flex;gap:8px;padding:12px 14px}
 .nukewarn{background:#2a0d10;border:1px solid #7a2229;border-radius:10px;padding:8px 10px}
 .chk{display:flex;gap:8px;align-items:center;margin:8px 0;font-weight:700}.chk input{width:22px;height:22px;accent-color:var(--red)}
-.toast{position:fixed;top:calc(var(--topH) + 8px);left:50%;transform:translate(-50%,-20px);z-index:70;background:#1d2a3a;border:1px solid #3b5577;padding:10px 14px;border-radius:12px;opacity:0;pointer-events:none;transition:all .2s;max-width:92vw;text-align:center;font-weight:600}
-.toast.show{opacity:1;transform:translate(-50%,0)}.toast.bad{border-color:#a3323b;background:#3a1418}
+#toasts{position:fixed;top:calc(var(--topH) + 8px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:70;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;width:max-content;max-width:92vw}
+.toast{background:#1d2a3af2;border:1px solid #3b5577;padding:9px 14px;border-radius:12px;opacity:0;transform:translateY(-12px);transition:opacity .2s,transform .2s;text-align:center;font-weight:600;font-size:14px;line-height:1.4;box-shadow:0 6px 18px #0009}
+.toast.show{opacity:1;transform:none}.toast.bad{border-color:#a3323b;background:#3a1418f2}
+.card .fl{display:flex;align-items:center;gap:8px;margin-top:6px}.card .fl small{color:var(--mut);white-space:nowrap}
+.btns.buy .b{flex:1 1 150px}
+#m-foot{flex-wrap:wrap}#m-foot .b{flex:1 1 120px}
 
 @media (min-width:900px){
   #sheet{left:auto;right:12px;top:calc(var(--topH) + 10px);bottom:calc(var(--barH) + 10px);width:410px;max-height:none;border-radius:14px;border:1px solid var(--line);transform:translateX(120%)}
@@ -162,13 +171,16 @@ ul.help li{margin:6px 0}
   <header id="top">
     <div class="r1">
       <button class="ic" data-act="menu" aria-label="תפריט">☰</button>
-      <b id="t-name"></b>
-      <span id="t-date"></span>
+      <div class="who"><b id="t-name"></b><span id="t-date"></span></div>
+      <div id="speed" role="group" aria-label="מהירות הזמן">
+        <button data-act="speed" data-v="0" aria-label="עצור">⏸</button><button data-act="speed" data-v="1">×1</button><button data-act="speed" data-v="2">×2</button><button data-act="speed" data-v="4">×4</button><button data-act="speed" data-v="8">×8</button>
+      </div>
       <button class="ic" data-act="help" aria-label="איך משחקים">?</button>
     </div>
     <div class="r2">
       <div class="cell"><small>קופה</small><div class="v" id="t-money"></div></div>
-      <div class="cell"><small>העם</small><div class="v" id="t-ap"></div></div>
+      <div class="cell"><small>אהבת העם</small><div class="v" id="t-ap"></div></div>
+      <div class="cell"><small>מוניטין</small><div class="v" id="t-rep"></div></div>
       <div class="cell"><small>צבא</small><div class="v" id="t-army"></div></div>
       <div class="cell"><small>גרעין</small><div class="v" id="t-nuke"></div></div>
       <div class="cell"><small>ניקוד</small><div class="v" id="t-score"></div></div>
@@ -198,11 +210,11 @@ ul.help li{margin:6px 0}
     <div class="tabs">
       <button data-act="tab" data-tab="country">מדינה</button>
       <button data-act="tab" data-tab="eco">כלכלה</button>
+      <button data-act="tab" data-tab="home" id="tabhome">בית</button>
       <button data-act="tab" data-tab="mil">צבא</button>
       <button data-act="tab" data-tab="wars" id="tabwars">מלחמות</button>
       <button data-act="tab" data-tab="news">חדשות</button>
     </div>
-    <button id="endturn" data-act="endturn">סיים תור</button>
   </nav>
 </div>
 
@@ -214,7 +226,7 @@ ul.help li{margin:6px 0}
 <div id="startTitle"><h1>עולם 2026</h1><p>בחר מדינה לנהל — הקש על המפה או חפש ברשימה</p></div>
 
 <div id="modal" class="modal"><div class="mbox"><h2 id="m-title"></h2><div id="m-body"></div><div id="m-foot"></div></div></div>
-<div id="toast" class="toast"></div>
+<div id="toasts" aria-live="polite"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
