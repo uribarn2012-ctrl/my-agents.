@@ -206,7 +206,7 @@ function invTarget(c, k) {
 
 function newGame(playerId) {
   S = { v: VERSION, day: 0, turn: 0, speed: 1, player: playerId, c: {}, owner: {}, rd: {}, pacts: {}, sanc: {}, wars: [], news: [], pending: [],
-    recession: 0, wid: 1, over: null, won: {}, p: null, worldGdp0: 0 };
+    recession: 0, wid: 1, over: null, won: {}, p: null, worldGdp0: 0, units: [], uid: 0, uc: {} };
   BASE.clear();
   const depOwner = {};
   for (const o in DEPS) DEPS[o].forEach(t => depOwner[t] = o);
@@ -255,6 +255,7 @@ function setupPlayer(id) {
   c.bought = {};
   S.p.mStart = { tr: S.p.treasury, ap: c.approval, rep: S.p.rep };
   addNews('ממשלה חדשה נכנסה לתפקיד ב' + c.he + '. העם מצפה לשינוי.', 'good');
+  initUnits();
 }
 
 /* ================= relations / pacts ================= */
@@ -413,9 +414,9 @@ function declareWar(att, def, opt) {
   needMapRecolor = true;
   if (!opt.provoked) noteGrievance(att, def);
   if (def === S.player && S.p && !opt.silent) {
-    // rally around the flag: an attacked nation unites behind its leader
-    S.p.shock += 6;
-    S.pending.push({ type: 'attacked', wid: w.id, from: att });
+    // rally around the flag: an attacked nation unites behind its leader — but not when we struck first
+    if (!opt.noRally) S.p.shock += 6;
+    S.pending.push({ type: 'attacked', wid: w.id, from: att, noRally: !!opt.noRally });
   }
   const breakNap = hasPact(att, def, 'nap');
   ['nap', 'trade', 'alliance'].forEach(t => setPact(att, def, t, false));
@@ -471,6 +472,8 @@ function battle(w) {
     }
     return;
   }
+  // the player's own wars are fought by the units on the map
+  if (S.player && S.units && (w.a === S.player || w.b === S.player)) return unitBattle(w);
   const eff = (side, leader, enemy) => { let e = 0; for (const m of side) { const c = S.c[m]; if (c && c.alive) e += power(c) * commit(m, w) * allyProj(m, leader, enemy); } return e; };
   let eA = eff(w.A, w.a, w.b) + aidFor(w.a, w.b, w) * 0.5, eB = eff(w.B, w.b, w.a) + aidFor(w.b, w.a, w);
   let lmA = 1, lmB = 1;
@@ -836,7 +839,9 @@ function dayTick() {
   if (!S || S.over) return;
   playerEconomy();
   aiEconomy();
+  if (S.units && !S.over) syncAllUnits();
   S.wars.slice().forEach(w => { if (S.wars.includes(w) && !S.over) battle(w); });
+  if (!S.over) unitsDay();
   if (!S.over) approvalStep();
   if (!S.over) deliveries();
   S.day++;
@@ -935,16 +940,644 @@ function nukeImpact(att, tgt, ai) {
 /* ================= save / load ================= */
 let WIPED = false;
 function save() { if (!S || !S.player || WIPED) return; try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { /* storage unavailable */ } }
-let OLD_SAVE_FOUND = false;
+let OLD_SAVE_FOUND = false, UNITS_MIGRATED = false;
 function load() {
   // saves from the old turn-based version can't be continued: drop them and start fresh
   try { OLD_SAVE_KEYS.forEach(k => { if (localStorage.getItem(k)) { OLD_SAVE_FOUND = true; localStorage.removeItem(k); } }); } catch (e) { /* ignore */ }
   try { const s = localStorage.getItem(SAVE_KEY); if (!s) return false; const o = JSON.parse(s);
     if (!o || o.v !== VERSION || !o.player || !o.c || !o.c[o.player] || !o.c[o.player].inv || !o.p || o.day == null) { OLD_SAVE_FOUND = true; localStorage.removeItem(SAVE_KEY); return false; }
-    S = o; BASE.clear(); rebuildOwn(); return true;
+    S = o; BASE.clear(); rebuildOwn();
+    // saves from before units existed: build the units from the inventory
+    if (!Array.isArray(S.units)) { initUnits(); UNITS_MIGRATED = true; }
+    return true;
   } catch (e) { return false; }
 }
 function wipe() { WIPED = true; try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ } }
+
+/* ================= land raster: sea or land, and which territory, at any point ================= */
+const RW = 1440, RH = 720; // 0.25° per pixel
+let RAS = null; const TLIST = [null], TIDX = {};
+function initRaster() {
+  TIDS.forEach(t => { TIDX[t] = TLIST.length; TLIST.push(t); });
+  try {
+    const cv = document.createElement('canvas'); cv.width = RW; cv.height = RH;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    const pr = d3.geoEquirectangular().scale(RW / (2 * Math.PI)).translate([RW / 2, RH / 2]).precision(0.3);
+    const pg = d3.geoPath(pr, ctx);
+    FEATS.forEach(f => {
+      const i = TIDX[f.properties.tid]; if (!i || !f.geometry) return;
+      // id in red+green, a checksum in blue: blended border pixels fail the checksum
+      ctx.fillStyle = 'rgb(' + (i & 255) + ',' + ((i >> 8) & 255) + ',' + ((i * 97 + 13) & 255) + ')';
+      ctx.beginPath(); pg(f); ctx.fill();
+    });
+    RAS = ctx.getImageData(0, 0, RW, RH).data;
+  } catch (e) { RAS = null; }
+}
+function rasOff(lon, lat) {
+  let x = Math.floor((lon + 180) / 360 * RW), y = Math.floor((90 - lat) / 180 * RH);
+  x = ((x % RW) + RW) % RW; y = clamp(y, 0, RH - 1);
+  return (y * RW + x) * 4;
+}
+function rasTid(o) {
+  if (RAS[o + 3] < 90) return null;
+  const i = RAS[o] | (RAS[o + 1] << 8);
+  return (((i * 97 + 13) & 255) === RAS[o + 2] && TLIST[i]) ? TLIST[i] : undefined;
+}
+let FB = null; // feature bounds for the slow, exact fallback
+function geoTidAt(p) {
+  if (!FB) FB = FEATS.map(f => ({ f, b: d3.geoBounds(f) }));
+  for (const { f, b } of FB) {
+    const [[x0, y0], [x1, y1]] = b;
+    if (p[1] < y0 || p[1] > y1) continue;
+    if (x0 <= x1 ? (p[0] < x0 || p[0] > x1) : (p[0] < x0 && p[0] > x1)) continue;
+    if (d3.geoContains(f, p)) return f.properties.tid;
+  }
+  return null;
+}
+// territory id at a point (null = sea)
+function tidAt(lon, lat) {
+  if (!RAS) return geoTidAt([lon, lat]);
+  // trust the raster only well inside one territory (or open sea); near any border use the exact shapes
+  const t = rasTid(rasOff(lon, lat));
+  if (t !== undefined) {
+    let same = true;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
+      if (rasTid(rasOff(lon + dx * 0.25, lat + dy * 0.25)) !== t) { same = false; break; }
+    }
+    if (same) return t;
+  }
+  return geoTidAt([lon, lat]);
+}
+const ownerAt = (lon, lat) => { const t = tidAt(lon, lat); return t ? (S.owner[t] || null) : null; };
+const isSeaAt = p => RAS ? RAS[rasOff(p[0], p[1]) + 3] < 60 : !geoTidAt(p);
+// nearest sea point (for ships), searching outward on the raster
+function snapSea(p) {
+  if (isSeaAt(p) || !RAS) return p;
+  const cx = Math.floor((p[0] + 180) / 360 * RW), cy = Math.floor((90 - p[1]) / 180 * RH);
+  for (let r = 1; r <= 60; r++) {
+    let best = null, bd = 1e9;
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      const y = cy + dy; if (y < 0 || y >= RH) continue;
+      const x = ((cx + dx) % RW + RW) % RW;
+      if (RAS[(y * RW + x) * 4 + 3] < 60) { const d = dx * dx + dy * dy; if (d < bd) { bd = d; best = [x, y]; } }
+    }
+    if (best) {
+      // one more pixel out to sea so the ship doesn't sit on the coastline
+      const q = [(best[0] + 0.5) / RW * 360 - 180, 90 - (best[1] + 0.5) / RH * 180];
+      const ang = Math.atan2(best[1] - cy, best[0] - cx), q2 = [q[0] + Math.cos(ang) * 0.3, q[1] - Math.sin(ang) * 0.3];
+      return isSeaAt(q2) ? q2 : q;
+    }
+  }
+  return null;
+}
+const km = (a, b) => d3.geoDistance(a, b) * 6371;
+/* ---- sea routes: ships sail around continents instead of across them ---- */
+const GW = 720, GH = 360; // 0.5 degree cells
+let SEA = null;
+function seaGrid() {
+  if (SEA || !RAS) return SEA;
+  SEA = new Uint8Array(GW * GH);
+  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+    let sea = 0;
+    for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) if (RAS[((y * 2 + j) * RW + x * 2 + i) * 4 + 3] < 60) sea = 1;
+    SEA[y * GW + x] = sea;
+  }
+  // canals and narrow straits the coarse grid would close: Suez, Panama, Bosporus + Dardanelles, Gibraltar, Oresund
+  [[[32.3, 31.4], [32.5, 29.8]], [[-79.9, 9.4], [-79.5, 8.8]], [[29.0, 41.3], [26.3, 40.0]], [[-5.8, 35.95], [-5.3, 35.95]], [[12.7, 56.1], [12.6, 55.5]]].forEach(([a, b]) => {
+    for (let f = 0; f <= 1.0001; f += 0.02) SEA[gCell([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f])] = 1;
+  });
+  return SEA;
+}
+function gCell(p) { const x = ((Math.floor((p[0] + 180) * 2) % GW) + GW) % GW, y = clamp(Math.floor((90 - p[1]) * 2), 0, GH - 1); return y * GW + x; }
+const gPt = c => [(c % GW) / 2 - 180 + 0.25, 90 - Math.floor(c / GW) / 2 - 0.25];
+function gNearSea(c) {
+  if (SEA[c]) return c;
+  const cx = c % GW, cy = Math.floor(c / GW);
+  for (let r = 1; r < 12; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue; const y = cy + dy; if (y < 0 || y >= GH) continue;
+    const n = y * GW + ((cx + dx) % GW + GW) % GW; if (SEA[n]) return n;
+  }
+  return -1;
+}
+// open water all the way between two points?
+function seaLine(a, b) {
+  const d = km(a, b), n = Math.max(2, Math.ceil(d / 25)), it = d3.geoInterpolate(a, b);
+  for (let i = 1; i < n; i++) if (!SEA[gCell(it(i / n))]) return false;
+  return true;
+}
+// waypoints (ending at b) for a ship, or null when there is no way by sea
+function seaRoute(a, b) {
+  if (!seaGrid()) return [b];
+  if (seaLine(a, b)) return [b];
+  const s = gNearSea(gCell(a)), t = gNearSea(gCell(b)); if (s < 0 || t < 0) return null;
+  const N = GW * GH, g = new Float32Array(N).fill(Infinity), from = new Int32Array(N).fill(-1), done = new Uint8Array(N);
+  const tx = t % GW, ty = Math.floor(t / GW);
+  const cosY = y => Math.max(0.05, Math.cos((90 - y / 2 - 0.25) * Math.PI / 180));
+  const h = c => { const x = c % GW, y = Math.floor(c / GW); let dx = Math.abs(x - tx); dx = Math.min(dx, GW - dx); return Math.hypot(dx * cosY((y + ty) / 2), y - ty); };
+  const hf = [], hc = [];
+  const push = (f, c) => { let i = hf.length; hf.push(f); hc.push(c); while (i > 0) { const q = (i - 1) >> 1; if (hf[q] <= f) break; hf[i] = hf[q]; hc[i] = hc[q]; i = q; } hf[i] = f; hc[i] = c; };
+  const pop = () => {
+    const top = hc[0], lf = hf.pop(), lc = hc.pop();
+    if (hf.length) {
+      let i = 0; const n = hf.length;
+      for (;;) { let m = -1, mf = lf; const l = 2 * i + 1, r = l + 1; if (l < n && hf[l] < mf) { m = l; mf = hf[l]; } if (r < n && hf[r] < mf) { m = r; mf = hf[r]; } if (m < 0) break; hf[i] = hf[m]; hc[i] = hc[m]; i = m; }
+      hf[i] = lf; hc[i] = lc;
+    }
+    return top;
+  };
+  g[s] = 0; push(h(s), s); let found = false;
+  while (hf.length) {
+    const c = pop(); if (done[c]) continue; done[c] = 1;
+    if (c === t) { found = true; break; }
+    const x = c % GW, y = Math.floor(c / GW), cy = cosY(y);
+    for (let dy = -1; dy <= 1; dy++) {
+      const ny = y + dy; if (ny < 0 || ny >= GH) continue;
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const n = ny * GW + ((x + dx) % GW + GW) % GW; if (!SEA[n] || done[n]) continue;
+        const ng = g[c] + Math.hypot(dx * cy, dy); if (ng < g[n]) { g[n] = ng; from[n] = c; push(ng + h(n), n); }
+      }
+    }
+  }
+  if (!found) return null;
+  const cells = []; for (let c = t; c !== -1; c = from[c]) cells.push(c); cells.reverse();
+  // pull the string tight: keep only the turns that are needed
+  const pts = [a].concat(cells.map(gPt), [b]), out = [];
+  let i = 0;
+  while (i < pts.length - 1) {
+    let j = pts.length - 1;
+    while (j > i + 1 && !seaLine(pts[i], pts[j])) j--;
+    out.push(pts[j]); i = j;
+  }
+  return out;
+}
+const routeKm = (p, via, dest) => { let d = 0, q = p; for (const w of (via || [])) { d += km(q, w); q = w; } return d + km(q, dest); };
+// sample points of a territory: inside, on the border, and in the sea just off the coast
+const TPC = {};
+function tp(tid) {
+  if (TPC[tid]) return TPC[tid];
+  const T = TERR[tid], res = { in: [], edge: [], sea: [] };
+  TPC[tid] = res;
+  if (!T || !T.best) { res.in.push(T ? T.c : [0, 0]); return res; }
+  const poly = T.best, inv = d3.geoArea(poly) > 2 * Math.PI;
+  const inside = p => d3.geoContains(poly, p) !== inv;
+  const b = d3.geoBounds(poly); let [x0, y0] = b[0], [x1, y1] = b[1]; if (x1 < x0) x1 += 360;
+  for (let i = 0; i < 600 && res.in.length < 40; i++) {
+    let lon = x0 + R() * (x1 - x0); const lat = y0 + R() * (y1 - y0); if (lon > 180) lon -= 360;
+    if (inside([lon, lat])) res.in.push([lon, lat]);
+  }
+  if (!res.in.length) res.in.push(T.c);
+  const ring = poly.coordinates[0], step = Math.max(1, Math.floor(ring.length / 70));
+  for (let i = 0; i < ring.length; i += step) res.edge.push(ring[i]);
+  const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]];
+  for (let i = 0; i < ring.length; i += step) {
+    const v = ring[i];
+    outer: for (const off of [0.45, 0.9]) for (const [dx, dy] of DIRS) {
+      const p = [v[0] + dx * off, v[1] + dy * off];
+      if (isSeaAt(p) && isSeaAt([p[0] + dx * 0.3, p[1] + dy * 0.3]) && !tidAt(p[0], p[1])) { res.sea.push(p); break outer; }
+    }
+  }
+  return res;
+}
+const mainTid = cid => (TERR[cid] && S.owner[cid] === cid) ? cid : tidsOf(cid).slice().sort((a, b) => TERR[b].area - TERR[a].area)[0];
+function inPts(cid) { const t = mainTid(cid); return t ? tp(t).in : []; }
+// distance (km) from a point to the nearest part of a country
+function distToC(cid, p) {
+  let m = 1e9;
+  for (const t of tidsOf(cid)) { const q = tp(t); for (const a of q.edge) { const d = km(a, p); if (d < m) m = d; } for (const a of q.in) { const d = km(a, p); if (d < m) m = d; } }
+  return m;
+}
+function nearIn(cid, p) {
+  let best = null, bd = 1e9;
+  for (const t of tidsOf(cid)) for (const a of tp(t).in) { const d = km(a, p); if (d < bd) { bd = d; best = a; } }
+  return best;
+}
+// spread n points far from each other (farthest-point sampling)
+function spread(pts, n) {
+  if (!pts.length) return [];
+  const out = [pts[Math.floor(R() * pts.length)]];
+  while (out.length < n) {
+    let best = null, bd = -1;
+    for (const p of pts) { let d = 1e9; for (const q of out) d = Math.min(d, km(p, q)); if (d > bd) { bd = d; best = p; } }
+    if (bd < 1) { out.push(out[out.length % out.length]); continue; }
+    out.push(best);
+  }
+  return out;
+}
+
+/* ================= military units on the map ================= */
+// every unit carries a share of the country's real inventory (c.inv); the sum of all units always equals c.inv
+const UT = {
+  inf: { he: 'קורפוס חי״ר', dom: 'land', spd: 30, ic: 'inf' },
+  arm: { he: 'אוגדת שריון', dom: 'land', spd: 40, ic: 'arm' },
+  art: { he: 'חטיבת ארטילריה', dom: 'land', spd: 30, ic: 'art' },
+  msl: { he: 'סוללת טילים', dom: 'land', spd: 35, ic: 'msl' },
+  air: { he: 'כנף אוויר', dom: 'air', spd: 2500, ic: 'air', range: AIR_RANGE },
+  heli: { he: 'להק מסוקים', dom: 'air', spd: 700, ic: 'heli', range: 700 },
+  fleet: { he: 'צי', dom: 'sea', spd: 500, ic: 'fleet' },
+  sub: { he: 'שייטת צוללות', dom: 'sea', spd: 420, ic: 'sub' }
+};
+const KEY_UT = { troops: 'inf', tanks: 'arm', afv: 'arm', art: 'art', msl: 'msl', air: 'air', heli: 'heli', ships: 'fleet', carriers: 'fleet', subs: 'sub' };
+const MINNEW = { troops: 2, tanks: 5, afv: 10, art: 5, air: 4, heli: 4, ships: 1, carriers: 1, subs: 1, msl: 10 };
+const LAND_K = { troops: 1, tanks: 1, afv: 1, art: 1, msl: 1 }, AIR_K = { air: 1, heli: 1 };
+const domOf = u => UT[u.t].dom;
+const unitById = id => S.units.find(u => u.id === id) || null;
+const unitsOf = o => S.units.filter(u => u.o === o);
+const hasUnits = o => S.units.some(u => u.o === o);
+function newUnit(o, t, p, m) {
+  S.uc = S.uc || {}; const ck = o + ':' + t; S.uc[ck] = (S.uc[ck] || 0) + 1;
+  const u = { id: S.uid = (S.uid || 0) + 1, o, t, n: S.uc[ck], m: m || {}, lon: p[0], lat: p[1], px: p[0], py: p[1], hb: [p[0], p[1]], dest: null, mode: null, slow: 1, at: null };
+  placeAt(u);
+  S.units.push(u); return u;
+}
+// remember which territory a unit stands on; its owner (u.at) follows annexations automatically
+function placeAt(u) { u.tid = UT[u.t].dom === 'sea' ? null : tidAt(u.lon, u.lat); u.at = u.tid ? (S.owner[u.tid] || null) : null; }
+const uName = u => UT[u.t].he + ' ' + u.n;
+// home base for a new unit of this kind
+function basePt(cid, dom) {
+  const t = mainTid(cid); if (!t) return [0, 0];
+  const q = tp(t);
+  if (dom === 'sea') return q.sea.length ? pick(q.sea) : (snapSea(TERR[t].c) || TERR[t].c);
+  return pick(q.in);
+}
+// split a country's inventory into a sensible number of units and station them at home
+function genUnits(cid) {
+  const c = S.c[cid]; if (!c || !c.alive) return;
+  const I = c.inv, groups = [];
+  const g = (t, n, keys) => { n = Math.max(1, n); for (let i = 0; i < n; i++) { const m = {}; keys.forEach(k => { if ((I[k] || 0) > 0) m[k] = I[k] / n; }); if (Object.keys(m).length) groups.push({ t, m }); } };
+  const small = power(c) < 80;
+  if (small) {
+    // small armies: a handful of mixed units
+    if (I.troops > 0 || I.afv > 0 || I.art > 0) g('inf', I.troops > 60 ? 2 : 1, I.tanks >= 20 ? ['troops', 'afv', 'art'] : ['troops', 'afv', 'art', 'tanks']);
+    if (I.tanks >= 20) g('arm', 1, ['tanks']);
+    if (I.air >= 1 || I.heli >= 1) g('air', 1, ['air', 'heli']);
+    if (I.ships >= 1 || I.subs >= 1 || I.carriers >= 1) g('fleet', 1, ['ships', 'subs', 'carriers']);
+    if (I.msl >= 1) g('msl', 1, ['msl']);
+  } else {
+    g('inf', clamp(Math.ceil(I.troops / 150), 1, 5), ['troops']);
+    if (I.tanks + I.afv > 0) g('arm', clamp(Math.ceil(I.tanks / 800), 1, 3), ['tanks', 'afv']);
+    if (I.art > 0) g('art', clamp(Math.ceil(I.art / 2500), 1, 2), ['art']);
+    if (I.air > 0) g('air', clamp(Math.ceil(I.air / 300), 1, 3), ['air']);
+    if (I.heli > 0) g('heli', 1, ['heli']);
+    if (I.ships + I.carriers > 0) g('fleet', clamp(Math.ceil(I.ships / 60), 1, 3), ['ships', 'carriers']);
+    if (I.subs > 0) g('sub', 1, ['subs']);
+    if (I.msl > 0) g('msl', 1, ['msl']);
+  }
+  // carriers can't be split in fractions across fleets: give whole carriers to the first fleets
+  const fl = groups.filter(x => x.m.carriers != null);
+  if (fl.length > 1) { let left = I.carriers; fl.forEach((x, i) => { const n = i === fl.length - 1 ? left : Math.min(left, Math.ceil(I.carriers / fl.length)); x.m.carriers = n; left -= n; if (!n) delete x.m.carriers; }); }
+  const t = mainTid(cid); if (!t) return;
+  const q = tp(t);
+  const landG = groups.filter(x => UT[x.t].dom !== 'sea'), seaG = groups.filter(x => UT[x.t].dom === 'sea');
+  const lp = spread(q.in, landG.length), sp = q.sea.length ? spread(q.sea, seaG.length) : [];
+  landG.forEach((x, i) => newUnit(cid, x.t, lp[i] || q.in[0], x.m));
+  seaG.forEach((x, i) => newUnit(cid, x.t, sp[i] || snapSea(TERR[t].c) || TERR[t].c, x.m));
+}
+// unit power: ground force, support (artillery, air, missiles: they multiply ground forces) and naval force
+function uPow(u, foeAdv) {
+  const m = u.m, q = (S.c[u.o] && S.c[u.o].q) || 1, a = foeAdv || 0;
+  return {
+    l: ((m.troops || 0) * W8.troops + (m.tanks || 0) * W8.tanks + (m.afv || 0) * W8.afv) * q,
+    s: ((m.art || 0) * W8.art + (m.msl || 0) * W8.msl * 0.5 + (m.air || 0) * W8.air * (1 - 0.2 * a) + (m.heli || 0) * W8.heli * (1 - 0.12 * a)) * q,
+    n: ((m.ships || 0) * W8.ships + (m.subs || 0) * W8.subs + (m.carriers || 0) * W8.carriers) * q
+  };
+}
+const uStr = u => { const p = uPow(u, 0); return p.l + p.s + p.n; };
+const uEmpty = u => Object.keys(u.m).every(k => (u.m[k] || 0) < 0.5);
+// keep the units equal to the inventory: losses come off proportionally, new equipment goes to units at home
+function atHome(u) {
+  if (u.dest) return false;
+  return domOf(u) === 'sea' ? km([u.lon, u.lat], u.hb) < 400 : u.at === u.o;
+}
+function depotFor(cid, us, k, d) {
+  const home = us.filter(atHome);
+  return home.find(u => u.t === KEY_UT[k] && u.m[k] > 0) || home.find(u => u.m[k] > 0) ||
+    (d >= MINNEW[k] ? null : (us.find(u => u.m[k] > 0) || home.find(u => (domOf(u) === 'land') === !!LAND_K[k] && (domOf(u) === 'air') === !!AIR_K[k]) || us[0] || null));
+}
+function syncUnits(cid) {
+  const c = S.c[cid]; if (!c) return;
+  let us = unitsOf(cid);
+  for (const k of INV_KEYS) {
+    let sum = 0; for (const u of us) sum += u.m[k] || 0;
+    const inv = Math.max(0, c.inv[k] || 0), d = inv - sum;
+    if (Math.abs(d) < 1e-7) continue;
+    if (d < 0) { const f = sum > 0 ? inv / sum : 0; for (const u of us) if (u.m[k]) u.m[k] *= f; }
+    else if (d < MINNEW[k] && sum > 0) {
+      // small daily replacements reach every unit that has this kind of equipment, front-line units included
+      const f = inv / sum; for (const u of us) if (u.m[k]) u.m[k] *= f;
+    } else {
+      let dep = depotFor(cid, us, k, d);
+      if (!dep) {
+        const t = KEY_UT[k], dom = UT[t].dom;
+        if (cid === S.player && d >= MINNEW[k] * 2) { const ty = UT[t].he; setTimeout(() => toast('יחידה חדשה הוקמה: ' + ty), 0); }
+        dep = newUnit(cid, t, basePt(cid, dom)); us.push(dep);
+      }
+      dep.m[k] = (dep.m[k] || 0) + d;
+    }
+  }
+  // remove empty units: whatever is left goes to a sister unit (or off the books)
+  us.filter(uEmpty).forEach(u => {
+    if (us.length <= 1) return;
+    const rest = us.filter(x => x !== u && !uEmpty(x));
+    if (!rest.length) return;
+    for (const k in u.m) {
+      const v = u.m[k] || 0; if (!v) continue;
+      const to = rest.find(x => x.t === u.t && x.m[k] > 0) || rest.find(x => x.m[k] > 0);
+      if (to) to.m[k] += v; else c.inv[k] = Math.max(0, (c.inv[k] || 0) - v);
+    }
+    S.units = S.units.filter(x => x !== u); us = us.filter(x => x !== u);
+    if (selUnit === u.id) { selUnit = null; if (tab === 'unit') openTab(null); }
+    if (cid === S.player) addNews(uName(u) + ' הושמדה / פורקה.', 'bad');
+  });
+  for (const u of us) for (const k in u.m) if (!(u.m[k] > 1e-9)) delete u.m[k];
+}
+// which countries get units on the map: the player and the countries fighting the player nearby
+function neededOwners() {
+  const s = new Set(); if (!S.player || !S.c[S.player] || !S.c[S.player].alive) return s;
+  s.add(S.player);
+  const near = [];
+  warsOf(S.player).forEach(w => {
+    const foes = w.A.includes(S.player) ? w.B : w.A, lead = w.a === S.player || w.b === S.player;
+    if (lead) s.add(enemyLeaderFor(w, S.player));
+    foes.forEach(f => { if (!s.has(f) && S.c[f] && S.c[f].alive && (adjacent(f, S.player) || dist(f, S.player) < 1200)) near.push(f); });
+  });
+  near.sort((a, b) => dist(a, S.player) - dist(b, S.player)).slice(0, 3).forEach(f => s.add(f));
+  return s;
+}
+function refreshOwners() {
+  const need = neededOwners();
+  const had = new Set(S.units.map(u => u.o));
+  S.units = S.units.filter(u => need.has(u.o) && S.c[u.o] && S.c[u.o].alive);
+  need.forEach(o => { if (!had.has(o)) { genUnits(o); if (o !== S.player) deployExisting(o); } });
+  if (selUnit && !unitById(selUnit)) { selUnit = null; if (tab === 'unit') openTab(null); }
+}
+function syncAllUnits() {
+  if (!S || !S.player || !S.units) return;
+  refreshOwners();
+  new Set(S.units.map(u => u.o)).forEach(syncUnits);
+  unitsDirty = true;
+}
+// a war that was already running when units appeared: put part of the occupier's army on the front
+function deployFront(att, cid, share) {
+  const land = unitsOf(att).filter(u => domOf(u) === 'land').sort((a, b) => uStr(b) - uStr(a));
+  const tot = land.reduce((s, u) => s + uStr(u), 0); let sent = 0;
+  const pts = []; tidsOf(cid).forEach(t => tp(t).in.forEach(p => pts.push(p)));
+  pts.sort((a, b) => distToC(att, a) - distToC(att, b));
+  const front = pts.slice(0, Math.max(3, Math.ceil(pts.length / 3)));
+  for (const u of land) {
+    if (sent >= tot * share) break; const p = front[Math.floor(R() * front.length)]; if (!p) break;
+    u.lon = u.px = p[0]; u.lat = u.py = p[1]; placeAt(u); sent += uStr(u);
+    if (att !== S.player) { u.ai = 'atk'; u.s0 = uStr(u); }
+  }
+}
+function deployExisting(o) {
+  warsOf(S.player).forEach(w => {
+    if (!(w.a === S.player || w.b === S.player) || enemyLeaderFor(w, S.player) !== o) return;
+    const fp = mySideFront(w, S.player);
+    if (fp > 3 && !unitsOf(S.player).some(u => u.at === o)) deployFront(S.player, o, 0.75);
+    if (fp < -3) deployFront(o, S.player, 0.5);
+  });
+}
+function initUnits() {
+  S.units = []; S.uid = 0; S.uc = {};
+  genUnits(S.player);
+  refreshOwners();
+}
+/* ---- reach & movement ---- */
+const passable = n => n === S.player || isAlly(n, S.player) || atWar(n, S.player);
+function landReach(from, to) {
+  if (!from || !to) return false;
+  if (from === to) return true;
+  const seen = new Set([from]); let fr = [from];
+  for (let d = 0; d < 6 && fr.length; d++) {
+    const nx = [];
+    for (const c of fr) for (const n of neighborsOf(c)) { if (seen.has(n)) continue; if (n === to) return true; seen.add(n); if (passable(n)) nx.push(n); }
+    fr = nx;
+  }
+  return false;
+}
+const FLEET_AREA = 700;
+const friendlyFleetNear = (p, r) => S.units.find(u => u.o === S.player && domOf(u) === 'sea' && (u.m.ships || 0) + (u.m.carriers || 0) >= 1 && km([u.lon, u.lat], p) <= r) || null;
+function airOk(p, range) {
+  if (distToC(S.player, p) <= range) return true;
+  if (S.units.some(u => u.o === S.player && (u.m.carriers || 0) >= 1 && km([u.lon, u.lat], p) <= range)) return true;
+  return alive().some(a => { if (!isAlly(a, S.player)) return false; const t = mainTid(a); return t && km(TERR[t].c, p) < range + 1500 && distToC(a, p) <= range; });
+}
+// check a move order; returns { dest, days, slow, needWar } or { err }
+function planMove(u, p, mode) {
+  const ty = UT[u.t]; let dest = [p[0], p[1]], slow = 1, ferry = null, via = null;
+  let destTid = tidAt(dest[0], dest[1]), destC = destTid ? (S.owner[destTid] || null) : null;
+  if (ty.dom === 'sea') {
+    if (destTid || !isSeaAt(dest)) { dest = snapSea(dest); if (!dest) return { err: 'אין ים קרוב לנקודה הזו' }; }
+    destC = null;
+    const rt = seaRoute([u.lon, u.lat], dest); if (!rt) return { err: 'אין דרך בים לשם — הים הזה סגור' };
+    via = rt.slice(0, -1);
+  } else if (ty.dom === 'land') {
+    if (!destTid) return { err: 'כוחות יבשה לא עוצרים בים — בחר נקודה ביבשה' };
+    const from = u.at || S.player;
+    if (mode !== 'ret' && !landReach(from, destC || from)) {
+      ferry = friendlyFleetNear(dest, FLEET_AREA);
+      if (!ferry) return { err: 'אין דרך ביבשה לשם. כדי לחצות ים צריך צי שלך באזור (עד ' + FLEET_AREA + ' ק״מ מהיעד)' };
+    } else if (mode === 'ret' && !landReach(from, S.player)) slow = 0.7;
+  } else if (!airOk(dest, ty.range)) return { err: 'מחוץ לטווח: עד ' + ty.range.toLocaleString('en-US') + ' ק״מ מבסיס שלך, של בעלת ברית או מנושאת מטוסים' };
+  const needWar = destC && destC !== S.player && !isAlly(destC, S.player) && !atWar(destC, S.player) ? destC : null;
+  const d = via && via.length ? routeKm([u.lon, u.lat], via, dest) : km([u.lon, u.lat], dest);
+  if (ferry) {
+    // march to the fleet, board (2 days) and cross at transport speed: slower than a land march of the same distance
+    const fp = [ferry.lon, ferry.lat], days = km([u.lon, u.lat], fp) / ty.spd + km(fp, dest) / 150 + 2;
+    slow = clamp(d / Math.max(1, days * ty.spd), 0.05, 0.9);
+  }
+  return { dest, via: via && via.length ? via : null, slow, needWar, km: d, days: Math.max(ty.spd >= 2000 ? 0.5 : 1, Math.ceil(d / (ty.spd * slow))), mode: mode || 'move' };
+}
+function commitMove(u, r, quiet) {
+  if (!S.units.includes(u)) return;
+  u.dest = r.dest; u.via = r.via || null; u.slow = r.slow; u.mode = r.mode;
+  if (u.o === S.player && !quiet) toast(uName(u) + ' בדרך · ' + (r.days < 1 ? 'מגיעה תוך פחות מיום' : 'עוד ' + daysTxt(r.days).replace(/<[^>]+>/g, '')));
+  unitsDirty = true;
+}
+const etaDays = u => u.dest ? routeKm([u.lon, u.lat], u.via, u.dest) / (UT[u.t].spd * (u.slow || 1)) : 0;
+function unitsMove() {
+  const arrived = [];
+  for (const u of S.units) {
+    u.px = u.lon; u.py = u.lat;
+    if (!u.dest) { if (u.tid !== undefined) u.at = u.tid ? (S.owner[u.tid] || null) : null; else placeAt(u); continue; }
+    let left = UT[u.t].spd * (u.slow || 1);
+    if (u.via && domOf(u) !== 'sea') u.via = null;
+    while (left > 0 && u.via && u.via.length) {
+      const w = u.via[0], dw = km([u.lon, u.lat], w);
+      if (dw <= left) { u.lon = w[0]; u.lat = w[1]; left -= dw; u.via.shift(); }
+      else { const q = d3.geoInterpolate([u.lon, u.lat], w)(left / dw); u.lon = q[0]; u.lat = q[1]; left = 0; }
+    }
+    if (u.via && !u.via.length) u.via = null;
+    if (left <= 0) { placeAt(u); continue; }
+    const d = km([u.lon, u.lat], u.dest);
+    if (d <= left) {
+      u.lon = u.dest[0]; u.lat = u.dest[1]; u.dest = null; u.via = null; u.slow = 1; u.mode = null;
+      if (u.o === S.player) arrived.push(u);
+    } else { const q = d3.geoInterpolate([u.lon, u.lat], u.dest)(left / d); u.lon = q[0]; u.lat = q[1]; }
+    placeAt(u);
+  }
+  if (arrived.length) {
+    const where = arrived[0].at ? ' ל' + nm(arrived[0].at) : ' ליעד';
+    toast(arrived.length === 1 ? uName(arrived[0]) + ' הגיעה' + where : arrived.length + ' יחידות הגיעו ליעד');
+  }
+}
+function sendHome(u, quiet) {
+  const r = planMove(u, u.hb, 'ret');
+  if (r.err) { r.dest = u.hb; r.slow = 0.7; r.days = Math.ceil(km([u.lon, u.lat], u.hb) / (UT[u.t].spd * 0.7)); }
+  commitMove(u, r, quiet);
+}
+/* ---- combat helpers ---- */
+function forcesIn(owner, cid, foeAdv) {
+  let l = 0, s = 0; const list = [];
+  for (const u of S.units) { if (u.o !== owner || u.at !== cid || domOf(u) === 'sea') continue; const p = uPow(u, foeAdv); l += p.l; s += p.s; list.push(u); }
+  return { l, s, list };
+}
+function navyNear(owner, cid, r) {
+  let n = 0; const list = [];
+  for (const u of S.units) { if (u.o !== owner || domOf(u) !== 'sea') continue; if (distToC(cid, [u.lon, u.lat]) <= r) { n += uPow(u, 0).n; list.push(u); } }
+  return { n, list };
+}
+const atkStr = f => f.l > 0 ? f.l + Math.min(f.s, f.l * 2) : 0;
+const defStr = f => f.l + Math.min(f.s, f.l * 2 + 5);
+// losses come off the units that are actually fighting (and off the inventory with them)
+function hurtUnit(u, k, foeAdv) {
+  const c = S.c[u.o]; if (!c) return 0;
+  let dead = 0;
+  for (const key in u.m) {
+    const f = key === 'msl' ? k * 0.25 : LAND_K[key] ? k : AIR_K[key] ? k * 0.5 * (1 + 0.5 * (foeAdv || 0)) : k * 0.25;
+    const lost = (u.m[key] || 0) * clamp(f, 0, 0.5);
+    u.m[key] -= lost; c.inv[key] = Math.max(0, (c.inv[key] || 0) - lost);
+    if (key === 'troops') dead += lost;
+  }
+  if (u.o === S.player) S.p.cas += dead;
+  return dead;
+}
+// the player's war, fought by the units on the map
+function unitBattle(w) {
+  const me = S.player, E = enemyLeaderFor(w, me), pA = w.A.includes(me);
+  const Ec = S.c[E], M = P(); if (!Ec || !Ec.alive) return;
+  const mine = pA ? w.A : w.B, theirs = pA ? w.B : w.A;
+  const fp = mySideFront(w, me);
+  // allies without units on the map still help, as in the old abstract model
+  let allyMe = aidFor(me, E, w) * 0.5, allyEn = aidFor(E, me, w);
+  mine.forEach(m => { if (m !== me && S.c[m] && S.c[m].alive && !hasUnits(m)) allyMe += power(S.c[m]) * commit(m, w) * allyProj(m, me, E); });
+  theirs.forEach(m => { if (m !== E && S.c[m] && S.c[m].alive && !hasUnits(m)) allyEn += power(S.c[m]) * commit(m, w) * allyProj(m, E, me); });
+  allyMe *= 0.6; allyEn *= 0.6;
+  // theatre 1: the enemy's land
+  const myInE = forcesIn(me, E, Ec.adv), enInE = forcesIn(E, E, M.adv);
+  const sea = !adjacent(me, E);
+  const myNav = navyNear(me, E, 600), enNav = navyNear(E, E, 600);
+  // navy off their coast: fire support and blockade, in proportion to the size of the landing force
+  const navShare = myNav.n / (myNav.n + enNav.n + 1), navW = Math.min(1, myNav.n / (0.15 * Math.max(1, myInE.l)));
+  let aE = atkStr(myInE);
+  if (aE > 0) {
+    aE += allyMe;
+    aE *= 1 + 0.6 * navShare * navW;
+    if (sea && myNav.n <= 0) aE *= 0.5; // cut off across the sea without a fleet
+  }
+  let dE = hasUnits(E) ? defStr(enInE) : power(Ec) * 0.6;
+  dE += allyEn;
+  if (sea) dE *= (1 + 0.2 * enNav.n / (myNav.n + enNav.n + 1)) * (1 - 0.25 * clamp((navShare - 0.5) * 2, 0, 1) * navW);
+  // theatre 2: our land
+  const enInMe = forcesIn(E, me, M.adv), myInMe = forcesIn(me, me, Ec.adv);
+  let aP = atkStr(enInMe); if (aP > 0) aP += allyEn * 0.5;
+  let dP = defStr(myInMe) + allyMe;
+  let lm = 1;
+  if (w.stance === 'attack') { aE *= 1.2; lm = 1.5; } else { aE *= 0.85; dP *= 1.15; lm = 0.7; }
+  dE *= 1.3 + Math.max(0, fp) / 250; dP *= 1.3 + Math.max(0, -fp) / 250;
+  aE *= 1 - Math.max(0, -fp) / 200; aP *= 1 - Math.max(0, fp) / 200;
+  const rE = aE > 0 ? aE / (aE + dE + 1e-9) : 0, rP = aP > 0 ? aP / (aP + dP + 1e-9) : 0;
+  const actE = fp > 0 || aE > 0, actP = fp < 0 || aP > 0;
+  w.ru = { aE: Math.round(aE), dE: Math.round(dE), aP: Math.round(aP), dP: Math.round(dP), rE, rP };
+  let shift = 0;
+  if (actE || actP) {
+    const K = 32 / DPM;
+    shift = (actE ? (rE - 0.5) * K : 0) - (actP ? (rP - 0.5) * K : 0) + (R() - 0.5) * 0.55;
+    const occ = fp >= 0 ? Ec : M;
+    shift *= clamp(Math.sqrt(15 / Math.max(0.5, occ ? occ.pop : 15)), 0.3, 0.75);
+    if (shift * fp > 0) shift *= 1 - 0.5 * Math.abs(fp) / 100;
+    if (sea) shift *= 0.55;
+  }
+  let nf = clamp(fp + shift, -100, 100);
+  if (fp >= 0 && nf < 0 && !(aP > 0 && rP > 0.5)) nf = 0;
+  if (fp <= 0 && nf > 0 && !(aE > 0 && rE > 0.5)) nf = 0;
+  const f0 = w.f;
+  w.f = pA ? nf : -nf; w.last = w.f - f0; w.ms = (w.ms || 0) + (w.f - f0);
+  if (Math.sign(f0) !== Math.sign(w.f)) needMapRecolor = true;
+  // losses
+  const L = 0.012 / DPM;
+  if (aE > 0) {
+    myInE.list.forEach(u => hurtUnit(u, L * (1 - rE) * lm, Ec.adv));
+    enInE.list.forEach(u => hurtUnit(u, L * rE, M.adv));
+    myNav.list.forEach(u => hurtUnit(u, L * (1 - rE) * 0.5, 0)); enNav.list.forEach(u => hurtUnit(u, L * rE * 0.5, 0));
+  }
+  if (aP > 0) {
+    enInMe.list.forEach(u => hurtUnit(u, L * (1 - rP), M.adv));
+    myInMe.list.forEach(u => hurtUnit(u, L * rP * lm, Ec.adv));
+  }
+  if (aE > 0 || aP > 0) {
+    const r = aE > 0 ? rE : 1 - rP;
+    mine.forEach(m => { if (m !== me && S.c[m] && !hasUnits(m)) { const k = commit(m, w) * L * (1 - r) * 0.5; hurtInv(S.c[m], k, ['troops', 'tanks', 'afv', 'art']); } });
+    theirs.forEach(m => { if (m !== E && S.c[m] && !hasUnits(m)) { const k = commit(m, w) * L * r * 0.5; hurtInv(S.c[m], k, ['troops', 'tanks', 'afv', 'art']); } });
+  }
+  checkWarEnd(w);
+}
+// fights in other enemy countries where our units stand (no ground gained, but both sides bleed)
+function skirmishes() {
+  const lead = new Set(warsOf(S.player).filter(w => w.pause === 0 && (w.a === S.player || w.b === S.player)).map(w => enemyLeaderFor(w, S.player)));
+  const M = P();
+  new Set(S.units.filter(u => u.o === S.player && u.at && u.at !== S.player && domOf(u) !== 'sea').map(u => u.at)).forEach(x => {
+    if (lead.has(x) || !atWar(x, S.player) || !S.c[x]) return;
+    const X = S.c[x], a = forcesIn(S.player, x, X.adv), d = hasUnits(x) ? forcesIn(x, x, M.adv) : null;
+    const A = atkStr(a); if (!A) return;
+    const D = (d ? defStr(d) : power(X) * 0.5) * 1.3, r = A / (A + D + 1e-9), L = 0.012 / DPM;
+    a.list.forEach(u => hurtUnit(u, L * (1 - r), X.adv));
+    if (d) d.list.forEach(u => hurtUnit(u, L * r, M.adv)); else hurtInv(X, L * r * 0.5, ['troops', 'tanks', 'afv', 'art']);
+  });
+}
+/* ---- enemy behaviour: defend, gather against invaders, sometimes counter-attack ---- */
+function aiUnits() {
+  warsOf(S.player).forEach(w => {
+    if (!(w.a === S.player || w.b === S.player)) return;
+    const E = enemyLeaderFor(w, S.player), Ec = S.c[E]; if (!Ec || !Ec.alive) return;
+    const eu = unitsOf(E), fighters = eu.filter(u => domOf(u) !== 'sea');
+    if (w.pause > 0) { fighters.forEach(u => { if (u.at !== E && !u.dest) sendHome(u, true); u.ai = null; }); return; }
+    // beaten attackers fall back
+    fighters.forEach(u => { if (u.ai === 'atk' && u.at === S.player && !u.dest && uStr(u) < (u.s0 || 0) * 0.45) { sendHome(u, true); u.ai = null; addNews('כוחות ' + nm(E) + ' נסוגים מהשטח שלנו.', 'good'); } });
+    const intruders = S.units.filter(u => u.o === S.player && domOf(u) === 'land' && u.at === E);
+    if (intruders.length && S.day % 9 === 0) fighters.forEach(u => {
+      if (domOf(u) !== 'land' || u.at !== E || u.dest || u.ai === 'atk' || R() > 0.5) return;
+      const tg = pick(intruders), p = nearIn(E, [tg.lon, tg.lat]);
+      if (p && km(p, [u.lon, u.lat]) > 60) { u.dest = p; u.mode = 'move'; u.slow = 1; }
+    });
+    if (S.day % 7 !== 0 || !adjacent(E, S.player)) return;
+    const busy = fighters.filter(u => u.ai === 'atk' && (u.at === S.player || u.dest));
+    const home = fighters.filter(u => u.at === E && !u.dest && u.ai !== 'atk');
+    const theirs = home.reduce((s, u) => s + uStr(u), 0);
+    const myHome = S.units.filter(u => u.o === S.player && u.at === S.player && domOf(u) !== 'sea').reduce((s, u) => s + uStr(u), 0);
+    let pr = busy.length ? (w.ru && w.ru.rP < 0.55 && theirs > myHome ? 0.12 : 0) : theirs * 0.45 > myHome ? 0.35 : theirs > myHome * 1.3 ? 0.12 : 0;
+    if (Ec.gov === 'authoritarian') pr *= 1.3;
+    if (!pr || R() > pr) return;
+    let sent = 0; const go = [];
+    home.sort((a, b) => uStr(b) - uStr(a)).forEach(u => { if (sent < theirs * (busy.length ? 0.25 : 0.45) && (domOf(u) === 'land' || (domOf(u) === 'air' && go.length))) { go.push(u); sent += uStr(u); } });
+    if (!go.length) return;
+    go.forEach(u => { const p = nearIn(S.player, [u.lon, u.lat]); if (!p) return; u.dest = p; u.mode = 'move'; u.slow = 1; u.ai = 'atk'; u.s0 = uStr(u); });
+    addNews('כוחות ' + nm(E) + ' חצו את הגבול ופלשו לשטחנו!', 'war');
+    S.pending.push({ type: 'invaded', wid: w.id, from: E, uid: go[0].id });
+  });
+}
+// once a day: move, fight, keep units equal to the inventory
+function unitsDay() {
+  if (!S.units) return;
+  unitsMove();
+  // after peace our units leave the former enemy's land
+  S.units.forEach(u => { if (u.o === S.player && !u.dest && u.at && u.at !== S.player && !atWar(u.at, S.player) && !isAlly(u.at, S.player)) sendHome(u); });
+  skirmishes();
+  aiUnits();
+  syncAllUnits();
+}
 
 /* ================= map ================= */
 let svg, gRoot, gLand, gMarks, zoom, pathGen, curK = 1, W = 0, H = 0, selected = null;
@@ -968,9 +1601,25 @@ function initMap() {
     (pathByTid[t] = pathByTid[t] || []).push(el);
   });
   gMarks = gRoot.append('g').attr('class', 'marks');
-  gLand.on('click', ev => { const t = ev.target && ev.target.getAttribute('data-t'); if (t) onMapTap(t); });
+  // units: their own layer on top, not scaled with the map, so icons keep the same size on screen
+  gUnits = svg.append('g').attr('class', 'units');
+  gRoutes = gUnits.append('g').attr('class', 'routes').node();
+  gIcons = gUnits.append('g').attr('class', 'icons').node();
+  UEL.clear(); RTEL.clear(); curT = d3.zoomIdentity;
+  gLand.on('click', ev => { if (uMode) return; const t = ev.target && ev.target.getAttribute('data-t'); if (t) onMapTap(t); });
+  // a tap anywhere (land or sea) while choosing a destination for a unit
+  svg.on('click.units', ev => {
+    if (!uMode) { if (fanIds) { fanIds = null; drawUnits(); } return; }
+    const t = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-t');
+    modeTap(evLonLat(ev), t);
+  });
+  d3.select(gIcons).on('click', ev => {
+    const g = ev.target.closest && ev.target.closest('[data-k]'); if (!g) return;
+    ev.stopPropagation();
+    onUnitTap(g.getAttribute('data-k'));
+  });
   zoom = d3.zoom().scaleExtent([0.8, 60]).translateExtent([[-W, -H], [W * 2, H * 2]])
-    .on('zoom', ev => { gRoot.attr('transform', ev.transform); if (Math.abs(ev.transform.k - curK) > 0.01) { curK = ev.transform.k; scaleMarks(); } });
+    .on('zoom', ev => { gRoot.attr('transform', ev.transform); curT = ev.transform; if (Math.abs(ev.transform.k - curK) > 0.01) { curK = ev.transform.k; scaleMarks(); if (fanIds && Math.abs(curK / fanK - 1) > 0.25) fanIds = null; } drawUnits(); });
   svg.call(zoom).on('dblclick.zoom', null);
   MAP_PROJ = projection;
   if (!(S && S.player) && W < 900) svg.call(zoom.transform, d3.zoomIdentity.translate(0, H * 0.22 - (topPad + H - botPad) / 2));
@@ -989,9 +1638,20 @@ function zoomToTid(t, maxK) {
   const T = TERR[t]; if (!T || !T.best || !svg) return;
   const [[x0, y0], [x1, y1]] = pathGen.bounds(T.best);
   const [vx0, vy0, vx1, vy1] = visibleRect(), vw = vx1 - vx0, vh = vy1 - vy0;
-  const k = clamp(0.45 / Math.max((x1 - x0) / vw, (y1 - y0) / vh), 1.5, maxK || 10);
-  const tr = d3.zoomIdentity.translate((vx0 + vx1) / 2, (vy0 + vy1) / 2).scale(k).translate(-(x0 + x1) / 2, -(y0 + y1) / 2);
-  svg.transition().duration(700).call(zoom.transform, tr);
+  const [[, sy0], [, sy1]] = pathGen.bounds({ type: 'Sphere' });
+  // at least tall enough to fill the screen top to bottom (no empty sky on a tall phone screen)
+  const k = clamp(Math.max(0.45 / Math.max((x1 - x0) / vw, (y1 - y0) / vh), vh / (sy1 - sy0)), 1.5, Math.max(maxK || 10, vh / (sy1 - sy0)));
+  let tx = (vx0 + vx1) / 2 - k * (x0 + x1) / 2, ty = (vy0 + vy1) / 2 - k * (y0 + y1) / 2;
+  // don't leave empty sky above the map (or below it) when the map is taller than the view
+  if ((sy1 - sy0) * k >= vh - 1) ty = clamp(ty, vy1 - sy1 * k, vy0 - sy0 * k);
+  svg.transition().duration(700).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
+}
+// opening view: our country, or the front if we start the game at war
+function homeView(maxK) {
+  const w = warsOf(S.player).find(w => w.pause === 0 && (w.a === S.player || w.b === S.player));
+  const en = w && enemyLeaderFor(w, S.player);
+  if (en && S.c[en] && S.c[en].alive && adjacent(en, S.player) && mainTid(en)) zoomToTid(mainTid(en), 5);
+  else zoomToTid(S.player, maxK);
 }
 function relColor(r) {
   if (r >= 0) return d3.interpolateRgb('#3a4250', '#2a5a72')(r / 100);
@@ -1057,15 +1717,293 @@ function onMapTap(t) {
   if (!S) return;
   const o = S.owner[t];
   if (!S.player) { if (o) startPick(o); return; }
-  selected = t; recolor();
+  selected = t; if (selUnit || fanIds) { selUnit = null; fanIds = null; unitsDirty = true; } recolor();
   openTab('country');
+}
+
+/* ---- units layer ---- */
+let gUnits = null, gRoutes = null, gIcons = null, curT = d3.zoomIdentity, unitsDirty = true, lastUnitsDraw = 0, selUnit = null, uMode = null, ulistIds = [], fanIds = null, fanK = 1;
+const UEL = new Map(), RTEL = new Map(), SVGNS = 'http://www.w3.org/2000/svg';
+const sEl = (tag, attrs, parent) => { const e = document.createElementNS(SVGNS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+function evLonLat(ev) {
+  const [x, y] = d3.pointer(ev, svg.node());
+  const m = curT.invert([x, y]);
+  return MAP_PROJ.invert(m);
+}
+const uIcon = u => u.t === 'fleet' && (u.m.carriers || 0) >= 0.5 ? 'car' : UT[u.t].ic;
+function kTxt(k) { const v = k * 1000; return v >= 1e6 ? (v / 1e6).toFixed(v >= 1e7 ? 0 : 1) + 'M' : v >= 1000 ? Math.round(v / 1000) + 'K' : String(Math.round(v)); }
+const fl = v => Math.max(0, Math.floor((v || 0) + 1e-6));
+// short strength label under the icon: "120K", "450", "60✈"
+function uLabel(u) {
+  const m = u.m;
+  switch (u.t) {
+    case 'inf': return kTxt(m.troops || 0);
+    case 'arm': return m.tanks >= 1 ? String(fl(m.tanks)) : String(fl(m.afv));
+    case 'art': return String(fl(m.art));
+    case 'msl': return String(fl(m.msl));
+    case 'air': return fl(m.air) >= 1 ? fl(m.air) + '✈︎' : String(fl(m.heli));
+    case 'heli': return String(fl(m.heli));
+    case 'fleet': return String(fl((m.ships || 0) + (m.carriers || 0))) || '0';
+    case 'sub': return String(fl(m.subs));
+  }
+  return '';
+}
+function uFighting(u) {
+  if (u.dest) return false;
+  if (domOf(u) === 'sea') return warsOf(u.o).some(w => { const en = enemyLeaderFor(w, u.o); return w.pause === 0 && S.c[en] && S.c[en].alive && distToC(en, [u.lon, u.lat]) < 600; });
+  if (u.at && u.at !== u.o && atWar(u.at, u.o)) return true;
+  return u.at === u.o && S.units.some(e => e.o !== u.o && e.at === u.o && domOf(e) !== 'sea');
+}
+// current position (smoothly between two game days while time runs)
+function uPos(u) {
+  let lon = u.lon, lat = u.lat;
+  if (S.speed > 0 && u.px != null && (u.px !== u.lon || u.py !== u.lat) && Math.abs(u.px - u.lon) < 90) { const f = clamp(acc, 0, 1); lon = u.px + (u.lon - u.px) * f; lat = u.py + (u.lat - u.py) * f; }
+  return [lon, lat];
+}
+function toScreen(p) { const q = MAP_PROJ(p); return q ? [curT.x + curT.k * q[0], curT.y + curT.k * q[1]] : null; }
+// group units into display items: whole countries when zoomed out, nearby icons when zoomed in
+function buildItems() {
+  const items = [], groups = new Map();
+  // a stack the player opened: its units sit in a ring around the stack's place
+  const fan = fanIds ? fanIds.map(unitById).filter(Boolean) : [];
+  if (fan.length) {
+    let cx = 0, cy = 0, n = 0; fan.forEach(u => { const s = toScreen(uPos(u)); if (s) { cx += s[0]; cy += s[1]; n++; } });
+    if (n) {
+      cx /= n; cy /= n;
+      const rings = fan.length <= 7 ? [fan] : [fan.slice(0, 7), fan.slice(7)];
+      rings.forEach((ring, ri) => {
+        const r = ri ? 92 : (ring.length <= 4 ? 40 : 50);
+        ring.forEach((u, i) => { const a = -Math.PI / 2 + i * 2 * Math.PI / ring.length + ri * 0.4; items.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) * 1.1, us: [u], o: u.o, fan: [cx, cy] }); });
+      });
+    }
+  }
+  const inFan = new Set(fan.map(u => u.id));
+  for (const u of S.units) {
+    if (inFan.has(u.id)) continue;
+    const s = toScreen(uPos(u)); if (!s) continue;
+    if (u.id === selUnit) { items.push({ x: s[0], y: s[1], us: [u], o: u.o }); continue; }
+    const gk = curK < 2.2 ? u.o + '@' + (u.at || ('s' + Math.round(s[0] / 40) + ',' + Math.round(s[1] / 40))) : 'u' + u.id;
+    let g = groups.get(gk); if (!g) { g = { x: 0, y: 0, us: [], o: u.o }; groups.set(gk, g); }
+    g.us.push(u); g.x += s[0]; g.y += s[1];
+  }
+  const gl = [...groups.values()]; gl.forEach(g => { g.x /= g.us.length; g.y /= g.us.length; });
+  // merge same-side icons that would overlap on screen (badge 30×22 plus the label under it)
+  for (let i = 0; i < gl.length; i++) {
+    const a = gl[i]; if (!a) continue;
+    for (let j = i + 1; j < gl.length; j++) {
+      const b = gl[j]; if (!b || b.o !== a.o) continue;
+      const dx = a.x - b.x, dy = a.y - b.y;
+      if (Math.abs(dx) < 40 && Math.abs(dy) < 46) { const n = a.us.length + b.us.length; a.x = (a.x * a.us.length + b.x * b.us.length) / n; a.y = (a.y * a.us.length + b.y * b.us.length) / n; a.us = a.us.concat(b.us); gl[j] = null; j = i; }
+    }
+  }
+  gl.forEach(g => { if (g) items.push(g); });
+  // push apart icons of different sides that sit on top of each other
+  for (let it = 0; it < 3; it++) for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
+    const a = items[i], b = items[j]; if (a.fan || b.fan || (a.o === b.o && a.us[0].id !== selUnit && b.us[0].id !== selUnit)) continue;
+    let dx = a.x - b.x, dy = a.y - b.y; const d = Math.hypot(dx, dy);
+    if (d < 36) { if (d < 0.01) { dx = 1; dy = 0; } const k = (36 - d) / 2 / (d || 1); a.x += dx * k; a.y += dy * k; b.x -= dx * k; b.y -= dy * k; }
+  }
+  return items;
+}
+function mkIcon(key) {
+  const g = sEl('g', { 'data-k': key, class: 'ui' });
+  g.__p = {
+    hit: sEl('rect', { class: 'hit', x: -20, y: -17, width: 40, height: 44 }, g),
+    s2: sEl('rect', { class: 'stk', x: -9, y: -19, width: 30, height: 22, rx: 6 }, g),
+    s1: sEl('rect', { class: 'stk', x: -12, y: -16, width: 30, height: 22, rx: 6 }, g),
+    ring: sEl('circle', { class: 'ring', r: 21 }, g),
+    bg: sEl('rect', { class: 'bg', x: -15, y: -13, width: 30, height: 22, rx: 6 }, g),
+    use: sEl('use', { x: -10, y: -11.5, width: 20, height: 19 }, g),
+    lb: sEl('text', { class: 'lb', y: 18 }, g),
+    fx: sEl('circle', { class: 'fx', cx: -14, cy: -12, r: 4 }, g),
+    cnt: sEl('g', { class: 'cnt' }, g),
+    mini: sEl('g', { class: 'mini' }, g)
+  };
+  // a stack also shows small icons of the other kinds of units inside it
+  g.__p.mu = [0, 1, 2, 3].map(() => { const m = sEl('g', {}, g.__p.mini); sEl('rect', { x: -6.5, y: -5.5, width: 13, height: 12, rx: 3 }, m); m.__u = sEl('use', { x: -5, y: -4.5, width: 10, height: 10 }, m); return m; });
+  sEl('circle', { cx: 14, cy: -13, r: 8 }, g.__p.cnt); g.__p.ct = sEl('text', { x: 14, y: -12.5 }, g.__p.cnt);
+  gIcons.appendChild(g);
+  return g;
+}
+const setA = (e, k, v) => { v = String(v); if (e.getAttribute(k) !== v) e.setAttribute(k, v); };
+const showE = (e, on) => { const v = on ? '' : 'none'; if (e.style.display !== v) e.style.display = v; };
+function drawUnits() {
+  if (!gIcons || !S || !S.units || !MAP_PROJ) return;
+  unitsDirty = false; lastUnitsDraw = performance.now();
+  // while choosing a destination our own icons let taps through to the map (enemy icons stay tappable as targets)
+  gUnits.classed('picking', !!uMode);
+  const items = buildItems(), seen = new Set();
+  for (const it of items) {
+    const multi = it.us.length > 1;
+    const key = multi ? 'c' + it.us.map(u => u.id).sort((a, b) => a - b).join(',') : String(it.us[0].id);
+    seen.add(key);
+    const off = it.x < -60 || it.y < -60 || it.x > W + 60 || it.y > H + 60;
+    let g = UEL.get(key);
+    if (off) { if (g) showE(g, false); continue; }
+    if (!g) { g = mkIcon(key); UEL.set(key, g); }
+    showE(g, true);
+    // a stack shows infantry (with the total soldiers) when it has any, otherwise its strongest unit
+    const P_ = g.__p, lead = multi ? (it.us.filter(u => (u.m.troops || 0) >= 1).sort((a, b) => b.m.troops - a.m.troops)[0] || it.us.slice().sort((a, b) => uStr(b) - uStr(a))[0]) : it.us[0];
+    setA(g, 'transform', 'translate(' + it.x.toFixed(1) + ',' + it.y.toFixed(1) + ')');
+    setA(g, 'class', 'ui ' + (it.o === S.player ? 'me' : 'en') + (!multi && lead.id === selUnit ? ' sel' : ''));
+    setA(P_.use, 'href', '#ui-' + uIcon(lead));
+    let lbl = uLabel(lead);
+    if (multi) { const tr = it.us.reduce((s, u) => s + (u.m.troops || 0), 0); if (tr >= 1) lbl = kTxt(tr); }
+    if (P_.lb.textContent !== lbl) P_.lb.textContent = lbl;
+    showE(P_.s1, multi); showE(P_.s2, multi && it.us.length > 2); showE(P_.cnt, multi);
+    showE(P_.ring, !multi && lead.id === selUnit);
+    if (multi && P_.ct.textContent !== String(it.us.length)) P_.ct.textContent = String(it.us.length);
+    showE(P_.fx, it.us.some(uFighting));
+    const kinds = multi ? [...new Set(it.us.map(uIcon))].filter(k => k !== uIcon(lead)).slice(0, 4) : [];
+    showE(P_.mini, kinds.length > 0);
+    P_.mu.forEach((m, i) => {
+      showE(m, i < kinds.length); if (i >= kinds.length) return;
+      setA(m.__u, 'href', '#ui-' + kinds[i]); setA(m, 'transform', 'translate(' + ((i - (kinds.length - 1) / 2) * 14).toFixed(1) + ',31)');
+    });
+  }
+  UEL.forEach((g, k) => { if (!seen.has(k)) { g.remove(); UEL.delete(k); } });
+  // dashed routes with arrival time for moving units, and battle markers of other wars
+  const rs = new Set();
+  for (const it of items) if (it.fan) {
+    const k = 'f' + it.us[0].id; rs.add(k);
+    let r = RTEL.get(k); if (!r) { r = sEl('g', { class: 'fanl' }, gRoutes); r.__l = sEl('path', {}, r); RTEL.set(k, r); }
+    setA(r.__l, 'd', 'M' + it.fan[0].toFixed(1) + ',' + it.fan[1].toFixed(1) + 'L' + it.x.toFixed(1) + ',' + it.y.toFixed(1));
+  }
+  // arrival-time labels must not cover unit icons or each other
+  const taken = items.map(it => [it.x, it.y + 6, 22, 26]);
+  const free = (x, y) => !taken.some(([tx, ty, rx, ry]) => Math.abs(x - tx) < rx + 20 && Math.abs(y - ty) < ry + 8);
+  const order = S.units.filter(u => u.dest).sort((a, b) => (b.id === selUnit) - (a.id === selUnit));
+  for (const u of order) {
+    if (!u.dest || (u.o !== S.player && u.id !== selUnit && u.ai !== 'atk')) continue;
+    const a = toScreen(uPos(u)), b = toScreen(u.dest); if (!a || !b) continue;
+    const k = 'r' + u.id; rs.add(k);
+    let r = RTEL.get(k);
+    if (!r) { r = sEl('g', {}, gRoutes); r.__l = sEl('path', {}, r); r.__c = sEl('circle', { r: 3.5 }, r); r.__t = sEl('text', {}, r); RTEL.set(k, r); }
+    setA(r.__l, 'class', u.o === S.player ? '' : 'en');
+    let dd = 'M' + a[0].toFixed(1) + ',' + a[1].toFixed(1), prev = a;
+    for (const q of (u.via || []).map(toScreen).concat([b])) { if (!q) continue; dd += (Math.abs(q[0] - prev[0]) > W * curK * 0.45 ? 'M' : 'L') + q[0].toFixed(1) + ',' + q[1].toFixed(1); prev = q; }
+    setA(r.__l, 'd', dd);
+    setA(r.__c, 'cx', b[0].toFixed(1)); setA(r.__c, 'cy', b[1].toFixed(1));
+    // arrival time only where there is room for it (and always for the selected unit)
+    let long = Math.hypot(b[0] - a[0], b[1] - a[1]) > 70 || u.id === selUnit;
+    if (long && u.o === S.player) { if (u.id === selUnit || free(b[0], b[1] - 12)) taken.push([b[0], b[1] - 12, 20, 8]); else long = false; }
+    showE(r.__c, u.o === S.player); showE(r.__t, u.o === S.player && long);
+    if (u.o === S.player && long) { const d = etaDays(u), t = d < 1 ? '< יום' : Math.ceil(d) + ' ימים'; if (r.__t.textContent !== t) r.__t.textContent = t; setA(r.__t, 'x', b[0].toFixed(1)); setA(r.__t, 'y', (b[1] - 8).toFixed(1)); }
+  }
+  S.wars.forEach(w => {
+    if (w.pause > 0 || involvesPlayer(w)) return;
+    const mk = warMark(w); if (!mk) return;
+    const s = toScreen(mk); if (!s) return;
+    const k = 'w' + w.id; rs.add(k);
+    let r = RTEL.get(k);
+    if (!r) { r = sEl('g', {}, gRoutes); r.__t = sEl('text', { class: 'bt' }, r); r.__t.textContent = '⚔'; RTEL.set(k, r); }
+    setA(r.__t, 'x', s[0].toFixed(1)); setA(r.__t, 'y', (s[1] + 5).toFixed(1));
+  });
+  RTEL.forEach((r, k) => { if (!rs.has(k)) { r.remove(); RTEL.delete(k); } });
+}
+// where to draw the ⚔ of a war between two other countries: on the border between them
+function warMark(w) {
+  if (w.mk && w.mk.k === w.a + w.b) return w.mk.p;
+  const ta = mainTid(w.a), tb = mainTid(w.b); if (!ta || !tb) return null;
+  let best = null, bd = 1e9;
+  for (const a of tp(ta).edge) for (const b of tp(tb).edge) { const d = km(a, b); if (d < bd) { bd = d; best = [a, b]; } }
+  const p = best ? d3.geoInterpolate(best[0], best[1])(0.5) : TERR[tb].c;
+  w.mk = { k: w.a + w.b, p }; return p;
+}
+function onUnitTap(key) {
+  if (uMode) { // tapping a unit while choosing a destination: go to where it stands
+    const ids = key[0] === 'c' ? key.slice(1).split(',').map(Number) : [+key];
+    const u = unitById(ids[0]); if (u) modeTap([u.lon, u.lat], null);
+    return;
+  }
+  if (key[0] === 'c') {
+    const us = key.slice(1).split(',').map(Number).map(unitById).filter(Boolean);
+    if (!us.length) return;
+    let spreadPx = 0; const ps = us.map(u => MAP_PROJ([u.lon, u.lat]));
+    ps.forEach(a => ps.forEach(b => { spreadPx = Math.max(spreadPx, Math.hypot(a[0] - b[0], a[1] - b[1]) * curK); }));
+    const spreadMap = spreadPx / curK, newK = Math.min(40, Math.max(curK * 3, 2.6, 60 / Math.max(0.01, spreadMap)));
+    const cx = ps.reduce((s, p) => s + p[0], 0) / ps.length, cy = ps.reduce((s, p) => s + p[1], 0) / ps.length;
+    if (spreadMap * newK >= 45 && newK > curK * 1.2) zoomToMapPt([cx, cy], newK); // zooming in separates them
+    else if (us.length <= 14) { fanIds = us.map(u => u.id); fanK = curK; drawUnits(); } // too close together: fan them out
+    else { ulistIds = us.map(u => u.id); selUnit = null; openTab('ulist'); }
+    return;
+  }
+  selectUnit(+key);
+}
+function selectUnit(id, zoomIn) {
+  const u = unitById(id); if (!u) return;
+  selUnit = id; selected = null; recolor(); unitsDirty = true;
+  openTab('unit'); const b = $('#sheet-body'); if (b) b.scrollTop = 0;
+  drawUnits();
+  setTimeout(() => focusUnit(u, zoomIn), 30);
+}
+function zoomToMapPt(p, k) {
+  const [vx0, vy0, vx1, vy1] = visibleRect();
+  const tr = d3.zoomIdentity.translate((vx0 + vx1) / 2, (vy0 + vy1) / 2).scale(k).translate(-p[0], -p[1]);
+  svg.transition().duration(500).call(zoom.transform, tr);
+}
+// keep the selected unit in the part of the map that the panel doesn't cover
+function focusUnit(u, zoomIn) {
+  if (!u || !S.units.includes(u)) return;
+  const p = MAP_PROJ([u.lon, u.lat]); if (!p) return;
+  const s = [curT.x + curT.k * p[0], curT.y + curT.k * p[1]];
+  const [vx0, vy0, vx1, vy1] = visibleRect(), m = 36;
+  if (zoomIn || s[0] < vx0 + m || s[0] > vx1 - m || s[1] < vy0 + m || s[1] > vy1 - m) zoomToMapPt(p, zoomIn ? Math.max(curK, zoomIn) : curK);
+}
+/* ---- choosing a destination / target on the map ---- */
+const MODE_TXT = { move: 'הקש על היעד במפה', attack: 'הקש על המדינה לתקוף', strike: 'הקש על מדינה לתקיפה אווירית', missile: 'הקש על מדינה למטח טילים' };
+function setMode(kind, uid) {
+  const u = unitById(uid); if (!u) return;
+  uMode = { kind, uid };
+  $('#mv-txt').textContent = uName(u) + ': ' + MODE_TXT[kind];
+  $('#mvbar').classList.add('on'); document.body.classList.add('mv');
+  // close the panel but keep the unit selected, so the whole map is free for choosing
+  tab = null; $('#sheet').classList.remove('open');
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('on'));
+  unitsDirty = true;
+}
+function endMode() { uMode = null; $('#mvbar').classList.remove('on'); document.body.classList.remove('mv'); unitsDirty = true; }
+function modeTap(p, tid) {
+  if (!uMode || !p) return;
+  const u = unitById(uMode.uid); if (!u) { endMode(); return; }
+  const kind = uMode.kind;
+  if (kind === 'strike' || kind === 'missile') {
+    const o = tid ? S.owner[tid] : ownerAt(p[0], p[1]);
+    if (!o || o === S.player || !S.c[o] || !S.c[o].alive) { toast('בחר מדינה זרה', true); return; }
+    endMode(); unitStrike(u, o, kind === 'strike' ? 'air' : 'mis'); return;
+  }
+  let dest = p;
+  if (kind === 'attack') {
+    const o = tid ? S.owner[tid] : ownerAt(p[0], p[1]);
+    if (!o || o === S.player) { toast('בחר מדינה זרה', true); return; }
+    if (domOf(u) !== 'sea') dest = nearIn(o, [u.lon, u.lat]) || p;
+  }
+  orderTo(u, dest, kind === 'attack' ? 'atk' : 'move');
+}
+function orderTo(u, dest, mode) {
+  const r = planMove(u, dest, mode);
+  if (r.err) { toast(r.err, true); return false; }
+  endMode();
+  const go = () => { commitMove(u, r); save(); if (u.o === S.player) selectUnit(u.id); };
+  if (r.needWar) confirmWar(r.needWar, go, uName(u));
+  else go();
+  return true;
+}
+function unitStrike(u, o, kind) {
+  const inW = atWar(o, S.player);
+  if (inW) { strike(o, kind, u.id); return; }
+  const e = strikeFx(o, kind, false);
+  modal({ title: (kind === 'air' ? 'תקיפה אווירית' : 'מטח טילים') + ' על ' + esc(nm(o)), cls: 'danger', html: '<p>אנחנו לא במלחמה עם ' + esc(nm(o)) + '. תקיפה בלי מלחמה תרגיז את העולם, ו' + esc(nm(o)) + ' עלולה להכריז עלינו מלחמה.</p><div class="box">צפוי: ' + fxLine(e) + '</div>',
+    buttons: [{ label: 'תקוף', cls: 'danger', fn: () => strike(o, kind, u.id) }, { label: 'ביטול' }] });
 }
 
 /* ================= UI ================= */
 let tab = null;
 function renderAll() {
   if (!S || !S.player) return;
+  syncAllUnits();
   renderTop(); recolor(); if (tab) renderSheet();
+  drawUnits();
 }
 const setH = (sel, h, cls) => { const e = $(sel); if (!e) return; if (e.__h !== h) { e.innerHTML = h; e.__h = h; } if (cls != null && e.className !== cls) e.className = cls; };
 function renderTop() {
@@ -1085,14 +2023,15 @@ function renderTop() {
   const bh = $('#tabhome'); if (bh) { const v = S.p.proj.length ? String(S.p.proj.length) : ''; if (bh.dataset.badge !== v) bh.dataset.badge = v; }
 }
 function openTab(t) {
-  tab = (tab === t && t !== 'country') ? null : t;
+  tab = (tab === t && t !== 'country' && t !== 'unit' && t !== 'ulist') ? null : t;
+  if (tab !== 'unit' && selUnit) { selUnit = null; unitsDirty = true; }
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   $('#sheet').classList.toggle('open', !!tab);
   if (tab) renderSheet();
 }
 function renderSheet() {
   const el = $('#sheet-body'); if (!el) return;
-  const fn = { country: viewCountry, eco: viewEco, home: viewHome, mil: viewMil, wars: viewWars, news: viewNews }[tab];
+  const fn = { country: viewCountry, eco: viewEco, home: viewHome, mil: viewMil, wars: viewWars, news: viewNews, unit: viewUnit, ulist: viewUnitList }[tab];
   const h = fn ? fn() : '';
   if (el.__h !== h) { el.innerHTML = h; el.__h = h; }
 }
@@ -1167,6 +2106,7 @@ function viewCountry() {
   } else {
     const w = S.wars.find(x => (x.A.includes(o) && x.B.includes(S.player)) || (x.B.includes(o) && x.A.includes(S.player)));
     h += '<div class="btns"><button class="b" data-act="gotowars">עבור ללשונית מלחמות</button></div>';
+    if (w && enemyLeaderFor(w, S.player) === o) h += unitFront(w, o);
     if (w) h += warActions(w, true, o);
   }
   return h;
@@ -1310,6 +2250,8 @@ function viewMil() {
     li('צוללות', cnt(I.subs)) + li('נושאות מטוסים', cnt(I.carriers)) +
     li('טילים במלאי', cnt(I.msl) + ' <small>(' + LVL_HE[c.mlv] + (c.mlv ? ', ' + num(MIS_RANGE[c.mlv]) + ' ק״מ' : '') + ')</small>') + li('הגנה אווירית', LVL_HE[c.adv]) +
     li('ראשי נפץ גרעיניים', num(c.nukes)) + li('הרוגים ופצועים במלחמות', num(p.casTotal * 1000)) + '</div>';
+  const my = unitsOf(S.player);
+  if (my.length) h += '<h3>היחידות שלך על המפה <small class="hint">(' + num(my.length) + ')</small></h3><div class="ulist">' + my.map(unitRow).join('') + '</div><p class="sub">הקש על יחידה (כאן או על המפה) כדי להזיז אותה, לתקוף או להגן.</p>';
   // reserves
   h += '<h3>מילואים</h3><div class="btns">';
   const callN = Math.min(c.res, Math.max(1, c.res * 0.5));
@@ -1348,11 +2290,72 @@ function viewMil() {
 }
 const upgCost = k => Math.max(0.3, P().gdp * 0.002) * ((P()[k] || 0) + 1) * (k === 'mlv' ? 1.5 : 1);
 
+/* ---- units: panel of one unit, and lists ---- */
+const uIc = (u, en) => '<svg class="uic' + (en ? ' en' : '') + '"><use href="#ui-' + uIcon(u) + '"/></svg>';
+function uWhere(u) {
+  if (domOf(u) === 'sea' && !u.at) { const p = [u.lon, u.lat]; const near = alive().filter(c => { const t = mainTid(c); return t && km(TERR[t].c, p) < 2500; }).map(c => [c, distToC(c, p)]).filter(x => x[1] < 500).sort((a, b) => a[1] - b[1])[0]; return near ? 'בים, מול ' + nm(near[0]) : 'בים הפתוח'; }
+  return u.at ? nm(u.at) : (domOf(u) === 'air' ? 'מעל הים' : 'שטח ללא שליטה');
+}
+function uStateTxt(u) {
+  if (u.dest) { const d = etaDays(u), t = d < 1 ? 'מגיעה תוך פחות מיום' : 'עוד ' + daysTxt(d); const to = domOf(u) === 'sea' ? 'ליעד בים' : (ownerAt(u.dest[0], u.dest[1]) ? 'ל' + esc(nm(ownerAt(u.dest[0], u.dest[1]))) : 'ליעד'); return (u.mode === 'ret' ? 'חוזרת הביתה' : 'בתנועה ' + to) + ' · ' + t + (u.slow < 1 ? ' (דרך הים, לאט יותר)' : ''); }
+  if (uFighting(u)) return '<span class="bad">בלחימה</span> — ' + esc(domOf(u) === 'sea' ? 'חוסמת את החוף ומגנה על כוחות' : uWhere(u));
+  return atHome(u) ? 'בבסיס' : 'ממתינה ב' + esc(uWhere(u));
+}
+function uRows(u) {
+  const ks = Object.keys(u.m).filter(k => u.m[k] >= 0.5 || (k === 'troops' && u.m[k] > 0.001));
+  return '<div class="grid">' + ks.map(k => '<div><small>' + INV_HE[k] + '</small>' + (k === 'troops' ? troopsTxt(u.m[k]) : cnt(u.m[k])) + '</div>').join('') +
+    '<div><small>עוצמה</small>' + num(uStr(u)) + '</div><div><small>מיקום</small>' + esc(uWhere(u)) + '</div></div>';
+}
+const enemiesAtWar = () => [...new Set(warsOf(S.player).filter(w => w.pause === 0).flatMap(w => w.A.includes(S.player) ? w.B : w.A))].filter(x => S.c[x] && S.c[x].alive);
+function mergeables(u) { return S.units.filter(x => x !== u && x.o === u.o && domOf(x) === domOf(u) && !x.dest && km([x.lon, x.lat], [u.lon, u.lat]) < 80); }
+function viewUnit() {
+  const u = unitById(selUnit);
+  if (!u) return '<p class="hint">היחידה כבר לא קיימת.</p>';
+  const mine = u.o === S.player, dom = domOf(u);
+  let h = '<h2>' + uIc(u, !mine) + ' ' + esc(uName(u)) + ' <small>' + esc(nm(u.o)) + (mine ? '' : ' · אויב') + '</small></h2>';
+  h += '<p class="sub">' + uStateTxt(u) + '</p>' + uRows(u);
+  if (!mine) return h + '<p class="sub">כדי להילחם בה — שלח לשם יחידות יבשה משלך, או תקוף מהאוויר.</p>';
+  h += '<div class="btns">';
+  h += btn('umove', 'הזז', 'primary') + btn('uattack', 'תקוף מדינה', 'danger');
+  if (u.dest) h += btn('ustop', 'עצור כאן');
+  if (dom !== 'sea') h += btn('udefend', 'הגן על הבית');
+  h += atHome(u) ? '<button class="b" disabled>חזור הביתה<small class="cost">כבר בבסיס</small></button>' : btn('uret', 'חזור הביתה');
+  if (u.t === 'air' || (u.m.air || 0) >= 4) h += btn('ustrike', 'תקיפה אווירית', 'danger');
+  if (u.t === 'msl' && P().mlv > 0) h += btn('umissile', 'מטח טילים', 'danger');
+  const canSplit = Object.keys(u.m).some(k => u.m[k] >= (k === 'troops' ? 2 : 2)) && !(u.t === 'fleet' && (u.m.ships || 0) < 2 && (u.m.carriers || 0) < 2);
+  h += canSplit ? btn('usplit', 'פצל לשתיים') : '<button class="b" disabled>פצל לשתיים<small class="cost">קטנה מדי</small></button>';
+  const mg = mergeables(u).length;
+  h += mg ? btn('umerge', mg === 1 ? 'אחד עם היחידה שכאן' : 'אחד עם ' + mg + ' יחידות כאן') : '<button class="b" disabled>אחד יחידות<small class="cost">אין יחידות אחרות כאן</small></button>';
+  h += '</div><p class="sub">' + ({ land: 'כוחות יבשה זזים ביבשה (חי״ר ~30 ק״מ ביום, שריון ~40). לאי או מעבר לים — רק כשצי שלך באזור, ולאט יותר.', air: 'מטוסים מגיעים תוך יום, עד ' + num(UT[u.t].range) + ' ק״מ מבסיס שלך, של בעלת ברית או מנושאת מטוסים.', sea: 'ספינות שטות כ-' + num(UT[u.t].spd) + ' ק״מ ביום. צי ליד חוף האויב חוסם אותו ומאפשר לכוחות יבשה לחצות את הים.' }[dom]) + '</p>';
+  return h;
+}
+function unitRow(u) {
+  return '<button data-act="selunit" data-u="' + u.id + '">' + uIc(u, u.o !== S.player) + '<b>' + esc(uName(u)) + (u.o !== S.player ? ' · ' + esc(nm(u.o)) : '') + '</b><small>' + esc(uLabel(u)) + ' · ' + (u.dest ? 'בתנועה' : uFighting(u) ? 'בלחימה' : atHome(u) ? 'בבסיס' : esc(uWhere(u))) + '</small></button>';
+}
+function viewUnitList() {
+  const us = ulistIds.map(unitById).filter(Boolean);
+  if (!us.length) return '<p class="hint">אין כאן יחידות.</p>';
+  return '<h2>יחידות במקום הזה <small>' + num(us.length) + '</small></h2><div class="ulist">' + us.map(unitRow).join('') + '</div>';
+}
+
 /* ---- wars ---- */
 function frontBars(w) {
   const fp = mySideFront(w, S.player);
   return '<div class="front"><div class="fl"><small>שטח האויב בידינו</small><div class="prog g"><div style="width:' + Math.max(0, fp) + '%"></div></div>' + pct(Math.max(0, fp)) + '</div>' +
     '<div class="fl"><small>שטחנו בידי האויב</small><div class="prog r"><div style="width:' + Math.max(0, -fp) + '%"></div></div>' + pct(Math.max(0, -fp)) + '</div></div>';
+}
+// who is actually fighting on the ground, from the units on the map
+function unitFront(w, en) {
+  if (!(w.a === S.player || w.b === S.player) || w.pause > 0) return '';
+  const mineIn = S.units.filter(u => u.o === S.player && u.at === en && domOf(u) !== 'sea');
+  const theirsIn = S.units.filter(u => u.o === en && u.at === S.player && domOf(u) !== 'sea');
+  const landIn = mineIn.filter(u => domOf(u) === 'land').length;
+  let h = '<div class="box" style="font-size:13px;line-height:1.6">';
+  h += 'יחידות שלנו בתוך ' + esc(nm(en)) + ': <b>' + num(mineIn.length) + '</b>' + (mineIn.length ? ' (עוצמה ' + num(mineIn.reduce((s, u) => s + uStr(u), 0)) + ')' : '');
+  h += '<br>יחידות אויב בשטחנו: <b class="' + (theirsIn.length ? 'bad' : '') + '">' + num(theirsIn.length) + '</b>';
+  if (w.ru && (w.ru.aE || w.ru.aP)) h += '<br>יחס כוחות בשטח: ' + (w.ru.aE ? 'אצלם ' + pct(w.ru.rE * 100) + ' לטובתנו' : '') + (w.ru.aP ? (w.ru.aE ? ' · ' : '') + 'אצלנו ' + pct((1 - w.ru.rP) * 100) + ' לטובתנו' : '');
+  if (!landIn) h += '<br><span class="warn">אין לנו כוחות יבשה בתוך ' + esc(nm(en)) + ' — אי אפשר לכבוש שטח, רק לתקוף מהאוויר ובטילים. הקש על יחידת חי״ר או שריון ← "תקוף מדינה".</span>';
+  return h + '</div>';
 }
 function warActions(w, compact, target) {
   const en = target || enemyLeaderFor(w, S.player), lead = w.a === S.player || w.b === S.player;
@@ -1376,7 +2379,7 @@ function viewWars() {
       '<p class="sub">מאז ' + (w.startDay != null && w.startDay >= 0 ? dayTxt(w.startDay) : dateTxt(w.start)) + ' · כוחנו: ' + num(power(P())) + ' · כוחם: ' + num(power(S.c[en])) +
       (other.length > 1 ? '<br>לצד האויב: ' + other.filter(x => x !== en).map(nm).join(', ') : '') +
       (side.length > 1 ? '<br>לצדנו: ' + side.filter(x => x !== S.player).map(nm).join(', ') : '') + '</p>' +
-      frontBars(w) + warActions(w) + '</div>';
+      frontBars(w) + unitFront(w, en) + warActions(w) + '</div>';
   });
   const world = S.wars.filter(w => !involvesPlayer(w));
   if (world.length) {
@@ -1432,11 +2435,18 @@ function processPending() {
     if (!w) return processPending();
     const side = w.B.filter(x => x !== S.player), foes = w.A.filter(x => x !== p.from);
     modal({ title: 'מלחמה! ' + esc(nm(p.from)) + ' תקפה אותנו', cls: 'danger', html: '<p><b>' + esc(nm(p.from)) + '</b> הכריזה מלחמה על ' + esc(P().he) + '.</p><ul class="plain">' +
-      '<li>העם מתלכד סביב הדגל: אהבת העם ' + sgn(6) + '.</li>' +
+      (p.noRally ? '<li class="red">הם מגיבים לתקיפה שלנו — הפעם העם לא מתלכד סביבך (אין בונוס).</li>' : '<li>העם מתלכד סביב הדגל: אהבת העם ' + sgn(6) + '.</li>') +
       (side.length ? '<li>לצדנו נלחמות: ' + side.slice(0, 6).map(nm).join(', ') + '</li>' : '<li>אף מדינה לא הצטרפה לצדנו (עדיין).</li>') +
       (foes.length ? '<li class="red">לצד האויב: ' + foes.slice(0, 6).map(nm).join(', ') + '</li>' : '') +
-      '<li>כוחם: ' + num(power(S.c[p.from])) + ' · כוחנו: ' + num(power(P())) + '</li></ul><p class="sub">אפשר לגייס מילואים בלשונית צבא, לתקוף בחזרה או להציע שלום מלשונית מלחמות.</p>',
+      '<li>כוחם: ' + num(power(S.c[p.from])) + ' · כוחנו: ' + num(power(P())) + '</li></ul><p class="sub">יחידות האויב מסומנות באדום על המפה. הזז יחידות כדי להגן על הגבול או לפלוש אליהם, גייס מילואים בלשונית צבא, או הצע שלום מלשונית מלחמות.</p>',
       buttons: [{ label: 'השאר מושהה ותכנן', cls: 'primary', fn: () => { setSpeed(0); openTabFresh('wars'); after(); } }, { label: 'המשך', fn: after }] });
+    return;
+  }
+  if (p.type === 'invaded') {
+    if (!w) return processPending();
+    const u = unitById(p.uid);
+    modal({ title: 'פלישה! ' + esc(nm(p.from)) + ' חצתה את הגבול', cls: 'danger', html: '<p>יחידות של <b>' + esc(nm(p.from)) + '</b> נכנסות לשטח ' + esc(P().he) + '.</p><ul class="plain"><li>כדי לעצור אותן — הזז לשם יחידות יבשה (חי״ר ושריון) ותן להן תמיכה מהאוויר.</li><li>אם לא נגן — האויב יכבוש עוד ועוד שטח.</li></ul>',
+      buttons: [{ label: 'הראה לי', cls: 'primary', fn: () => { setSpeed(0); if (u) { const p2 = MAP_PROJ([u.dest ? u.dest[0] : u.lon, u.dest ? u.dest[1] : u.lat]); zoomToMapPt(p2, Math.max(curK, 8)); } after(); } }, { label: 'המשך', fn: after }] });
     return;
   }
   if (p.type === 'nukealert') {
@@ -1453,7 +2463,7 @@ function processPending() {
     const C = S.c[p.from]; if (!C || !C.alive) return processPending();
     const big = Math.max(0.01, Math.min(P().gdp * 0.002, C.gdp * p.size * 0.5 + 0.02)), small = big * 0.25;
     const eBig = { cost: big, rep: 6, ap: 1, rel: { [p.from]: 18 } }, eSmall = { cost: small, rep: 3, rel: { [p.from]: 8 } }, eNo = { rep: -1, rel: { [p.from]: -4 } };
-    modal({ title: 'בקשת עזרה: ' + esc(p.kind) + ' ב' + esc(C.he), html: '<p>' + esc(p.kind) + ' פגעה קשות ב' + esc(C.he) + '. אלפים איבדו את בתיהם, והממשלה שם מבקשת סיוע מהעולם.</p>',
+    modal({ title: 'בקשת עזרה: ' + esc(p.kind) + ' ב' + esc(C.he), html: '<p>' + esc(p.kind) + ' ב' + esc(C.he) + ': אלפי אנשים נפגעו, והממשלה מבקשת סיוע מהעולם.</p>',
       buttons: [{ label: fxBtn('שלח סיוע גדול', eBig), cls: 'good', fn: () => { if (spend(big)) { fxToast('סיוע ל' + C.he, eBig); addNews('שלחנו משלחת סיוע גדולה ל' + C.he + ' אחרי ה' + p.kind + '. העולם מעריך.', 'good'); } after(); } },
         { label: fxBtn('שלח צוותי חילוץ', eSmall), fn: () => { if (spend(small)) { fxToast('חילוץ ב' + C.he, eSmall); addNews('צוותי חילוץ שלנו נחתו ב' + C.he + '.', 'good'); } after(); } },
         { label: fxBtn('סרב', eNo), fn: () => { fxToast('סירבנו', eNo, true); after(); } }] });
@@ -1577,8 +2587,83 @@ const ACT = {
   newgame: () => modal({ title: 'משחק חדש', html: '<p>המשחק הנוכחי יימחק. להמשיך?</p>', buttons: [{ label: 'כן, משחק חדש', cls: 'danger', fn: () => { wipe(); location.reload(); } }, { label: 'ביטול' }] }),
   startpick: () => beginGame(),
   centerme: () => S && S.player && zoomToTid(S.player, 10),
-  legend: () => $('#legend').classList.toggle('open')
+  legend: () => $('#legend').classList.toggle('open'),
+  /* units */
+  selunit: d => selectUnit(+d.u, 4),
+  umove: () => { if (unitById(selUnit)) setMode('move', selUnit); },
+  uattack: () => attackDialog(unitById(selUnit)),
+  ustrike: () => strikeDialog(unitById(selUnit), 'air'),
+  umissile: () => strikeDialog(unitById(selUnit), 'mis'),
+  ustop: () => { const u = unitById(selUnit); if (!u) return; u.dest = null; u.via = null; u.mode = null; toast(uName(u) + ' עצרה'); save(); renderAll(); },
+  uret: () => { const u = unitById(selUnit); if (!u) return; sendHome(u); save(); renderAll(); },
+  udefend: () => { const u = unitById(selUnit); if (!u) return; const p = defendPt(u); if (!p) { sendHome(u); return; } orderTo(u, p, 'def'); },
+  usplit: () => splitUnit(unitById(selUnit)),
+  umerge: () => mergeUnit(unitById(selUnit)),
+  mvcancel: () => { const id = uMode && uMode.uid; endMode(); if (id) selectUnit(id); }
 };
+// where to stand to defend the homeland: the part of our land closest to the main enemy
+function defendPt(u) {
+  const foes = warsOf(S.player).filter(w => w.pause === 0).map(w => enemyLeaderFor(w, S.player)).filter(x => S.c[x] && S.c[x].alive);
+  if (!foes.length) return u.hb;
+  const foe = foes.sort((a, b) => distToC(a, [u.lon, u.lat]) - distToC(b, [u.lon, u.lat]))[0];
+  let best = null, bd = 1e9;
+  for (const t of tidsOf(S.player)) for (const p of tp(t).in) { const d = distToC(foe, p); if (d < bd) { bd = d; best = p; } }
+  return domOf(u) === 'sea' ? u.hb : best;
+}
+function attackDialog(u) {
+  if (!u) return;
+  const foes = enemiesAtWar();
+  const list = foes.map(o => {
+    const p = domOf(u) === 'sea' ? (snapSea(nearIn(o, [u.lon, u.lat]) || TERR[mainTid(o)].c)) : nearIn(o, [u.lon, u.lat]);
+    const r = p ? planMove(u, p, 'atk') : { err: 'אין מטרה' };
+    return { o, p, r };
+  });
+  const h = '<p>לאן לשלוח את <b>' + esc(uName(u)) + '</b>?</p>' + (list.length ? '<div class="btns col">' + list.map((x, i) => '<button class="b' + (x.r.err ? '' : ' danger') + '" data-at="' + i + '"' + (x.r.err ? ' disabled' : '') + '>' + esc(nm(x.o)) +
+    '<small class="cost">' + (x.r.err ? esc(x.r.err) : (x.r.days < 1 ? 'מגיעה תוך פחות מיום' : 'הגעה בעוד ' + daysTxt(x.r.days)) + (x.r.slow < 1 ? ' · דרך הים' : '')) + '</small></button>').join('') + '</div>' : '<p class="sub">אתה לא במלחמה עם אף מדינה. אפשר לבחור מדינה על המפה — אם היא לא במלחמה איתך, תתבקש להכריז מלחמה.</p>') +
+    '<p class="sub">' + (domOf(u) === 'sea' ? 'צי ליד חוף האויב חוסם אותו, מחליש את הצי שלו ומאפשר לכוחות יבשה לחצות את הים.' : domOf(u) === 'air' ? 'כנף אוויר מעל האויב מחזקת את כוחות היבשה שלנו שם (פי 2 לכל היותר). בלי כוחות יבשה — רק תקיפות.' : 'כוחות יבשה בתוך מדינת האויב כובשים שטח. ארטילריה, מטוסים וצי מחזקים אותם.') + '</p>';
+  modal({ title: 'תקוף מדינה', html: h, buttons: [{ label: 'בחר על המפה', cls: 'primary', fn: () => setMode('attack', u.id) }, { label: 'ביטול' }], onShow: () => {
+    document.querySelectorAll('[data-at]').forEach(b => b.onclick = () => {
+      const x = list[+b.dataset.at]; modalQ.shift(); $('#modal').classList.remove('open');
+      orderTo(u, x.p, 'atk'); setTimeout(showModal, 30);
+    });
+  } });
+}
+function strikeDialog(u, kind) {
+  if (!u) return;
+  const me = P(), rng = kind === 'air' ? AIR_RANGE : MIS_RANGE[me.mlv] || 0;
+  const foes = enemiesAtWar().map(o => ({ o, d: distToC(o, [u.lon, u.lat]) }));
+  const h = '<p>' + esc(uName(u)) + ' — טווח ' + num(rng) + ' ק״מ ממיקום היחידה.</p>' + (foes.length ? '<div class="btns col">' + foes.map((x, i) => '<button class="b danger" data-st="' + i + '"' + (x.d > rng ? ' disabled' : '') + '>' + esc(nm(x.o)) + '<small class="cost">' + (x.d > rng ? 'מחוץ לטווח (' + num(x.d) + ' ק״מ)' : fxLine(strikeFx(x.o, kind, true))) + '</small></button>').join('') + '</div>' : '') +
+    '<p class="sub">אפשר גם לבחור מטרה על המפה — גם מדינה שאתה לא במלחמה איתה (העולם יכעס).</p>';
+  modal({ title: kind === 'air' ? 'תקיפה אווירית' : 'מטח טילים', html: h, buttons: [{ label: 'בחר על המפה', cls: 'primary', fn: () => setMode(kind === 'air' ? 'strike' : 'missile', u.id) }, { label: 'ביטול' }], onShow: () => {
+    document.querySelectorAll('[data-st]').forEach(b => b.onclick = () => {
+      const x = foes[+b.dataset.st]; modalQ.shift(); $('#modal').classList.remove('open');
+      strike(x.o, kind, u.id); setTimeout(showModal, 30);
+    });
+  } });
+}
+function splitUnit(u) {
+  if (!u) return;
+  const m2 = {}; let any = false;
+  for (const k in u.m) {
+    let half = u.m[k] / 2;
+    if (k === 'carriers') half = Math.floor(u.m[k] / 2);
+    if (half > 0) { m2[k] = half; u.m[k] -= half; any = true; }
+  }
+  if (!any) return;
+  const p = [u.lon + 0.25, u.lat - 0.15];
+  const v = newUnit(u.o, u.t, domOf(u) === 'sea' ? (isSeaAt(p) ? p : [u.lon, u.lat]) : (ownerAt(p[0], p[1]) === u.at ? p : [u.lon, u.lat]), m2);
+  v.hb = u.hb.slice(); if (u.dest) { v.dest = u.dest.slice(); v.via = u.via ? u.via.map(q => q.slice()) : null; v.mode = u.mode; v.slow = u.slow; }
+  toast(uName(u) + ' פוצלה: נוספה ' + uName(v));
+  save(); selectUnit(u.id);
+}
+function mergeUnit(u) {
+  if (!u) return;
+  const ms = mergeables(u); if (!ms.length) return;
+  ms.forEach(x => { for (const k in x.m) u.m[k] = (u.m[k] || 0) + x.m[k]; });
+  S.units = S.units.filter(x => !ms.includes(x));
+  toast(ms.length + ' יחידות אוחדו לתוך ' + uName(u));
+  save(); selectUnit(u.id);
+}
 function buyUnits(k) {
   const B = BUY[k], c = P(); if (!B) return;
   const n = B.n * buyMul, cost = B.cost * buyMul;
@@ -1601,31 +2686,41 @@ function dipToggle(type, label, good, bad) {
   else { addRel(o, S.player, -2); toast(C.he + ' סירבה: ' + r.why + ' (אפשר לנסות שוב בעוד חודש)', true); }
   renderAll();
 }
-function confirmWar(o) {
+function confirmWar(o, after, what) {
   if (!o || o === S.player) return;
   const C = S.c[o], j = likelyJoiners(S.player, o);
   const nap = hasPact(o, S.player, 'nap');
   let defP = power(C) * 1.3; j.forEach(c => defP += power(S.c[c]) * 0.35 * allyProj(c, o, S.player));
   const ratio = power(P()) * proj(S.player, o) / (defP + 1);
   const e = warFx(o);
-  let h = '<p>להכריז מלחמה על <b>' + C.he + '</b>?</p><ul class="plain">' +
-    '<li>' + (adjacent(S.player, o) ? 'שכנה — הצבא יכול לפעול במלוא הכוח.' : 'מדינה רחוקה (' + num(dist(S.player, o)) + ' ק״מ) — רק חלק מהכוח יגיע, והעלות גבוהה.') + '</li>' +
+  let h = (what ? '<p class="warnbox">' + esc(what) + ' נכנסת לשטח של ' + esc(C.he) + ' — זו הכרזת מלחמה.</p>' : '') + '<p>להכריז מלחמה על <b>' + C.he + '</b>?</p><ul class="plain">' +
+    '<li>' + (adjacent(S.player, o) ? 'שכנה — כוחות יבשה יכולים להיכנס ישר מעבר לגבול.' : 'אין גבול יבשתי (' + num(dist(S.player, o)) + ' ק״מ) — כוחות יבשה צריכים צי שלך באזור כדי לחצות, והמלחמה יקרה ואיטית יותר.') + '</li>' +
     '<li>יחס כוחות אפקטיבי בחזית: ' + num(ratio, 1) + ' : 1 ' + (ratio > 2 ? '(טוב)' : ratio > 1 ? '(צמוד)' : '(מסוכן!)') + '</li>' +
     (j.length ? '<li class="red">צפויות להצטרף לצד האויב: ' + j.slice(0, 8).map(nm).join(', ') + (j.length > 8 ? ' ועוד ' + (j.length - 8) : '') + '</li>' : '<li>אין לה בעלות ברית שצפויות להגן עליה.</li>') +
     (nap ? '<li class="red">יש לכם הסכם אי-תוקפנות — הפרתו תפגע במוניטין שלך בכל העולם.</li>' : '') +
     (justified(o) ? '<li>יש לך סיבה: ' + (provoked(o) ? 'הם תקפו אותך או את בעלות בריתך.' : 'רוב העולם מתנגד להם.') + ' העולם יכעס פחות.</li>' : '<li class="red">מלחמה בלי סיבה — העולם יראה בך תוקפן.</li>') +
+    '<li>כדי לכבוש צריך להכניס לשם כוחות יבשה (חי״ר ושריון) — הקש על יחידה שלך ← "תקוף מדינה".</li>' +
     '<li>מלחמה עולה כסף, הורגת חיילים ומעייפת את העם.</li></ul><div class="box">צפוי: ' + fxLine(e) + '</div>';
   modal({ title: 'הכרזת מלחמה', html: h, buttons: [{ label: 'הכרז מלחמה', cls: 'danger', fn: () => {
     const just = justified(o);
-    const w = declareWar(S.player, o); if (w) { w.just = just; fxToast('המלחמה החלה', { ap: e.ap, rep: e.rep }, true); selected = o; renderAll(); openTabFresh('wars'); setTimeout(() => zoomToTid(o, 10), 280); }
+    const w = declareWar(S.player, o); if (w) { w.just = just; fxToast('המלחמה החלה', { ap: e.ap, rep: e.rep }, true); syncAllUnits();
+      if (after) { after(); renderAll(); } else { selected = o; renderAll(); openTabFresh('wars'); setTimeout(() => zoomToTid(o, 10), 280); } }
   } }, { label: 'ביטול' }] });
 }
 // air strike or missile salvo, during a war or as a stand-alone attack
-function strike(o, kind) {
+const sancTxt = n => n === 1 ? 'מדינה אחת הטילה עלינו סנקציות' : n + ' מדינות הטילו עלינו סנקציות';
+function strike(o, kind, uid) {
   if (!o || !S.c[o] || !S.c[o].alive || o === S.player) return;
   const me = P(), E = S.c[o], sr = strikeRange(o);
-  if (kind === 'air' ? !sr.air : !sr.mis) { toast('המטרה מחוץ לטווח', true); return; }
-  const ck = (kind === 'air' ? 'air:' : 'mis:') + o; if (cdLeft(ck)) return;
+  // a strike by one specific air wing / missile battery on the map: its own range and its own planes
+  const su = uid != null ? unitById(uid) : null;
+  if (su) {
+    const have = kind === 'air' ? fl(su.m.air) : fl(su.m.msl), need = kind === 'air' ? 4 : 5;
+    const rng = kind === 'air' ? AIR_RANGE : MIS_RANGE[me.mlv] || 0;
+    if (have < need) { toast(kind === 'air' ? 'אין מספיק מטוסים ביחידה' : 'אין מספיק טילים ביחידה', true); return; }
+    if (distToC(o, [su.lon, su.lat]) > rng) { toast('המטרה מחוץ לטווח של ' + uName(su) + ' (' + rng.toLocaleString('en-US') + ' ק״מ)', true); return; }
+  } else if (kind === 'air' ? !sr.air : !sr.mis) { toast('המטרה מחוץ לטווח', true); return; }
+  const ck = (kind === 'air' ? 'air:' : 'mis:') + o + (su ? ':' + su.id : ''); if (cdLeft(ck)) { toast('היחידה עוד מתארגנת — אפשר שוב בעוד ' + daysTxt(cdLeft(ck)).replace(/<[^>]+>/g, ''), true); return; }
   const w = S.wars.find(x => (x.A.includes(o) && x.B.includes(S.player)) || (x.B.includes(o) && x.A.includes(S.player)));
   if (w && w.pause > 0) { toast('יש הפסקת אש', true); return; }
   const preview = strikeFx(o, kind, !!w);
@@ -1635,14 +2730,16 @@ function strike(o, kind) {
   const before = {}; ['tanks', 'air', 'art', 'ships', 'troops'].forEach(k => before[k] = E.inv[k]);
   let frac, lost = 0, used = 0;
   if (kind === 'air') {
-    used = sortie();
+    used = su ? Math.min(sortie(), fl(su.m.air)) : sortie();
     frac = clamp(used * me.q / (E.inv.air * 0.5 + E.inv.tanks * 0.03 + 40) * 0.1, 0.004, 0.1) * (1 - 0.15 * E.adv);
     lost = Math.round(used * [0.003, 0.01, 0.025, 0.05][E.adv] * (0.5 + R()));
     me.inv.air = Math.max(0, me.inv.air - lost);
+    if (su) su.m.air = Math.max(0, (su.m.air || 0) - lost);
     hurtInv(E, frac, ['air', 'heli', 'tanks', 'art', 'msl']); hurtInv(E, frac * 0.4, ['ships', 'afv', 'troops']);
     E.gdp *= 1 - frac * 0.06;
   } else {
-    used = salvo(); me.inv.msl = Math.max(0, me.inv.msl - used);
+    used = su ? Math.min(salvo(), fl(su.m.msl)) : salvo(); me.inv.msl = Math.max(0, me.inv.msl - used);
+    if (su) su.m.msl = Math.max(0, (su.m.msl || 0) - used);
     const hits = used * (1 - [0, 0.25, 0.5, 0.75][E.adv]);
     frac = clamp(hits / (hits + 300) * 0.2, 0.002, 0.06);
     hurtInv(E, frac, ['air', 'art', 'msl', 'ships']); hurtInv(E, frac * 0.5, ['tanks', 'troops']);
@@ -1654,11 +2751,13 @@ function strike(o, kind) {
   if (before.art - E.inv.art >= 1) dmg.push(Math.round(before.art - E.inv.art) + ' תותחים');
   if (before.ships - E.inv.ships >= 1) dmg.push(Math.round(before.ships - E.inv.ships) + ' ספינות');
   const dTxt = dmg.length ? 'הושמדו ' + dmg.slice(0, 3).join(', ') : 'נפגעו בסיסים ותשתיות';
-  const what = kind === 'air' ? 'תקיפה אווירית' : 'מטח טילים';
+  const what = (kind === 'air' ? 'תקיפה אווירית' : 'מטח טילים') + (su ? ' (' + uName(su) + ')' : '');
   if (w) {
     const eff = clamp(power(me) / (power(E) + power(me) + 1) * 2, 0.15, 1.5) * Math.sqrt(proj(S.player, o));
     const amt = kind === 'air' ? eff : 0.75;
-    if (w.A.includes(S.player)) w.f += amt; else w.f -= amt; w.f = clamp(w.f, -100, 100);
+    // strikes only help take ground where our ground forces are already fighting
+    const ground = !(w.a === S.player || w.b === S.player) || forcesIn(S.player, o, E.adv).l > 0;
+    if (ground) { if (w.A.includes(S.player)) w.f += amt; else w.f -= amt; w.f = clamp(w.f, -100, 100); }
     if (kind === 'mis') alive().forEach(id => { if (id !== S.player && id !== o && isAlly(id, o)) addRel(id, S.player, -3); });
     addNews(what + ' ב' + E.he + ': ' + dTxt + (lost ? '. איבדנו ' + lost + ' מטוסים' : '') + '.', 'war');
     toast(what + ' בוצעה: ' + dTxt + (lost ? ' · איבדנו ' + lost + ' מטוסים' : ''));
@@ -1677,12 +2776,12 @@ function strike(o, kind) {
       if (rel(id, S.player) < -30 && R() < 0.3) { S.sanc[id + '>' + S.player] = 1; sancN++; }
     });
     S.p.lastStrike = { o, day: S.day };
-    addNews(what + ' שלנו ב' + E.he + ' (בלי הכרזת מלחמה): ' + dTxt + '.' + (sancN ? ' ' + sancN + ' מדינות הטילו עלינו סנקציות.' : ''), 'war');
+    addNews(what + ' שלנו ב' + E.he + ' (בלי הכרזת מלחמה): ' + dTxt + '.' + (sancN ? ' ' + sancTxt(sancN) + '.' : ''), 'war');
     fxToast(what + ' ב' + E.he, e, true);
     if (dmg.length || lost) toast(dTxt + (lost ? ' · איבדנו ' + lost + ' מטוסים' : ''));
-    if (sancN) toast(sancN + ' מדינות הטילו עלינו סנקציות', true);
+    if (sancN) toast(sancTxt(sancN), true);
     if (R() < retaliateChance(o)) {
-      const nw = declareWar(o, S.player, { provoked: true, joinAtt: true });
+      const nw = declareWar(o, S.player, { provoked: true, joinAtt: true, noRally: true });
       if (nw) addNews(E.he + ' הגיבה לתקיפה והכריזה עלינו מלחמה!', 'war');
     }
   }
@@ -1707,7 +2806,7 @@ function confirmNuke(o) {
       P().nukes--; nukeImpact(S.player, o, false);
       fxToast('☢ שיגור גרעיני', { rep: -50 }, true);
       if (w && S.wars.includes(w)) { if (w.A.includes(S.player)) w.f += 35; else w.f -= 35; w.f = clamp(w.f, -100, 100); checkWarEnd(w); }
-      else if (!w && S.c[o].alive && R() < 0.9) declareWar(o, S.player, { provoked: true, joinAtt: true });
+      else if (!w && S.c[o].alive && R() < 0.9) declareWar(o, S.player, { provoked: true, joinAtt: true, noRally: true });
       approvalQuick(); save(); renderAll();
       setTimeout(showModal, 30);
     } },
@@ -1752,10 +2851,15 @@ function showHelp() {
     '<li><b>כלכלה:</b> מס, רווחה ותקציב ביטחון. אפשר להיכנס לחוב, אבל חוב גדול מדי = פשיטת רגל.</li>' +
     '<li><b>בית:</b> פרויקטים (בתי חולים, בתי ספר, תשתיות, דיור, אנרגיה ירוקה ועוד) עולים כסף ולוקחים זמן, ואז משפרים את העם או את הצמיחה.</li>' +
     '<li><b>צבא:</b> מספרים אמיתיים — חיילים, טנקים, מטוסים, ספינות. קונים בלשונית צבא, וזה מגיע אחרי זמן ייצור (מטוס — שנה, ספינה — שנתיים). מילואים מגיעים תוך ימים, אבל העם והכלכלה סובלים.</li>' +
-    '<li><b>מפה:</b> צבוט כדי להגדיל, גרור כדי לזוז, הקש על מדינה כדי לפתוח אותה. צהוב = אתה, כחול = בעלות ברית, אדום = במלחמה איתך.</li>' +
+    '<li><b>מפה:</b> צבוט כדי להגדיל, גרור כדי לזוז, הקש על מדינה כדי לפתוח אותה, הקש על סמל של יחידה כדי לפקד עליה. צהוב = אתה, כחול = בעלות ברית, אדום = במלחמה איתך.</li>' +
     '<li><b>דיפלומטיה:</b> הקש על מדינה: סיוע, סחר, ברית, אי-תוקפנות, סנקציות או מלחמה. אחרי ניסוי שנכשל — מחכים חודש.</li>' +
     '<li><b>תקיפות:</b> אפשר לתקוף מהאוויר או בטילים כל מדינה בטווח — גם בלי מלחמה. זה פוגע בצבא שלהם, אבל העולם כועס והם עלולים להכריז מלחמה.</li>' +
-    '<li><b>מלחמה:</b> שכנות קל לתקוף, רחוקות קשה. החזית זזה כל יום לפי יחס הכוחות, ואבדות מורידות טנקים ומטוסים אמיתיים. כבשת 100% — המדינה מסופחת. בעלות ברית נכנסות להגן זו על זו!</li>' +
+    '<li><b>יחידות על המפה:</b> הצבא שלך מופיע על המפה כסמלים קטנים בצהוב — חי״ר, שריון, ארטילריה, טילים, מטוסים, מסוקים, ציים וצוללות (המקרא למטה משמאל). המספר מתחת לסמל = כמה יש ביחידה (למשל 120K חיילים, 450 טנקים, 60✈ מטוסים).</li>' +
+    '<li><b>להזיז יחידה:</b> הקש על הסמל ← "הזז" ← הקש על היעד במפה. קו מקווקו מראה את הדרך וכמה ימים זה ייקח. חי״ר עובר כ-30 ק״מ ביום, שריון כ-40, ספינות כ-500, ומטוסים מגיעים תוך יום (עד 2,500 ק״מ מבסיס או מנושאת מטוסים).</li>' +
+    '<li><b>ים:</b> כוחות יבשה הולכים רק ביבשה, לשכנות. כדי לחצות ים (למשל לאי) — קודם שלח צי שלך לאזור, ואז כוחות היבשה יעברו (לאט יותר).</li>' +
+    '<li><b>פקודות נוספות:</b> "תקוף מדינה" שולח את היחידה לתוך מדינת אויב. "הגן על הבית" — לגבול מול האויב. "חזור הביתה", "פצל לשתיים" ו"אחד" יחידות שעומדות באותו מקום. כנף אוויר יכולה גם לבצע תקיפה אווירית.</li>' +
+    '<li><b>מלחמה:</b> כדי לכבוש שטח צריך להכניס כוחות יבשה (חי״ר ושריון) לתוך מדינת האויב. ארטילריה, מטוסים ומסוקים מחזקים אותם, וצי ליד החוף חוסם ומגן על הכוחות שחוצים את הים. בלי כוחות יבשה בפנים — אפשר רק לתקוף מהאוויר ובטילים. כבשת 100% — המדינה מסופחת. אבדות מורידות חיילים, טנקים ומטוסים מהיחידות שנלחמות.</li>' +
+    '<li><b>האויב:</b> יחידות האויב בסמלים אדומים. הן מגינות, ולפעמים פולשות למדינה שלך — השאר כוח בבית! כשהמפה רחוקה, יחידות באותה מדינה מתאחדות לסמל אחד עם מספר; הקש עליו או הגדל את המפה כדי לראות כל יחידה. ⚔ = קרב בין מדינות אחרות.</li>' +
     '<li><b>שלום:</b> בלשונית מלחמות. ככל שאתה מנצח יותר, תוכל לדרוש יותר.</li>' +
     '<li><b>מדינות קטנות קשות יותר.</b> המשחק נשמר אוטומטית כל כמה שניות.</li></ul>' });
 }
@@ -1802,8 +2906,8 @@ function beginGame() {
   $('#start').classList.remove('open');
   $('#app').classList.add('playing');
   S.speed = 1;
-  selected = null; save(); renderAll(); zoomToTid(pickId, 10);
-  modal({ title: 'ברוך הבא, מנהיג ' + P().he, html: '<p>1 בינואר 2026. העולם מתוח. <b>הזמן רץ</b> — יום אחד בשנייה. אפשר לעצור (⏸) או להאיץ (×2, ×4, ×8) בכפתורים למעלה.</p><p>טיפ: התחל מלשונית <b>כלכלה</b>, שמור על העם מרוצה ועל המוניטין שלך בעולם, ובנה בריתות לפני שאתה יוצא למלחמה.</p>',
+  selected = null; save(); renderAll(); homeView(16);
+  modal({ title: 'ברוך הבא, מנהיג ' + P().he, html: '<p>1 בינואר 2026. העולם מתוח. <b>הזמן רץ</b> — יום אחד בשנייה. אפשר לעצור (⏸) או להאיץ (×2, ×4, ×8) בכפתורים למעלה.</p><p>הצבא שלך מופיע על המפה כ<b>סמלים צהובים</b> — הקש על סמל כדי להזיז יחידה, לתקוף או להגן.</p><p>טיפ: התחל מלשונית <b>כלכלה</b>, שמור על העם מרוצה ועל המוניטין שלך בעולם, ובנה בריתות לפני שאתה יוצא למלחמה.</p>',
     buttons: [{ label: 'איך משחקים?', fn: showHelp }, { label: 'קדימה', cls: 'primary' }] });
 }
 
@@ -1816,7 +2920,7 @@ function setSpeed(v) {
 }
 let sliderT0 = null;
 let lastT = 0, acc = 0, lastUi = 0, lastSheet = 0, lastSave = 0, uiBusy = 0;
-const LIVE_TABS = { eco: 1, home: 1, mil: 1, wars: 1, country: 1, news: 1 };
+const LIVE_TABS = { eco: 1, home: 1, mil: 1, wars: 1, country: 1, news: 1, unit: 1, ulist: 1 };
 function frame(t) {
   requestAnimationFrame(frame);
   const dt = lastT ? Math.min(0.25, (t - lastT) / 1000) : 0; lastT = t;
@@ -1836,6 +2940,11 @@ function frame(t) {
   if (ticked && t - lastUi > 120) { lastUi = t; renderTop(); }
   if (tab && LIVE_TABS[tab] && ticked && t - lastSheet > 1000 && t > uiBusy) { lastSheet = t; renderSheet(); }
   if (needMapRecolor && t - lastRecolor > 600) recolor();
+  // the units layer is the only thing animated per frame (≈30 fps while units move)
+  if (S.units && gIcons) {
+    const moving = S.speed > 0 && !modalOpen() && S.units.some(u => u.dest || u.px !== u.lon || u.py !== u.lat);
+    if (unitsDirty || (ticked && t - lastUnitsDraw > 100) || (moving && t - lastUnitsDraw > 33)) drawUnits();
+  }
   if (t - lastSave > 5000) { lastSave = t; save(); }
 }
 
@@ -1849,6 +2958,7 @@ function buildStartRel() {
 }
 function boot() {
   try { initGeo(); } catch (e) { $('#loading').textContent = 'שגיאה בטעינת המפה'; return; }
+  initRaster();
   buildStartRel();
   const resumed = load();
   if (!resumed) newGame(null);
@@ -1879,9 +2989,10 @@ function boot() {
     // coming back to a saved game: start paused so nothing happens before the player looks
     if (S.speed) S.lastSpeed = S.speed;
     S.speed = 0;
-    renderAll(); zoomToTid(S.player, 10);
+    renderAll(); homeView(10);
     if (S.over) showGameOver();
     else toast('ברוך השב! המשחק מושהה — לחץ ×1 כדי להמשיך');
+    if (UNITS_MIGRATED) setTimeout(() => toast('חדש: הצבא שלך מופיע על המפה כיחידות — הקש על סמל כדי לתת פקודה'), 600);
   } else {
     recolor(); initStart();
     if (OLD_SAVE_FOUND) setTimeout(() => toast('המשחק עודכן לזמן אמת — מתחילים משחק חדש'), 400);
@@ -1892,7 +3003,9 @@ function boot() {
   }, 300); });
   requestAnimationFrame(frame);
   window.__W26 = { get S() { return S; }, dayTick, runDays: n => { for (let i = 0; i < n && !S.over; i++) dayTick(); renderAll(); }, declareWar, annex, power, rel, ACT, setSpeed, strike,
-    selectTid: t => { selected = t; recolor(); openTab('country'); }, zoomToTid, processPending, wipe };
+    selectTid: t => { selected = t; recolor(); openTab('country'); }, zoomToTid, processPending, wipe,
+    U: { unitById, unitsOf, planMove, orderTo, commitMove, selectUnit, setMode, modeTap, syncAllUnits, buildItems, uStr, distToC, nearIn, tidAt, ownerAt, isSeaAt, snapSea, toScreen, drawUnits, zoomToMapPt, tp, mapProj: p => MAP_PROJ(p),
+      get curK() { return curK; }, get uMode() { return uMode; }, get selUnit() { return selUnit; } } };
 }
 window.addEventListener('DOMContentLoaded', () => {
   loadScript('countries-data.js').catch(() => loadScript('countries-data.sample.js')).catch(() => { window.COUNTRY_DATA = {}; }).then(boot);

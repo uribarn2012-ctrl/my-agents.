@@ -28,6 +28,40 @@ button{font:inherit;color:inherit}
 .marks text{text-anchor:middle;dominant-baseline:middle;font-weight:700;paint-order:stroke;stroke:#0b0f14;fill:#fff;font-family:inherit}
 .marks text.me{fill:#ffe08a}.marks text.en{fill:#ffb3b3}
 #loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:18px}
+/* units layer (constant screen size, drawn above the map) */
+.units{font-family:inherit}
+.units .ui{cursor:pointer}
+.units .hit{fill:transparent}
+.units.picking .me{pointer-events:none;opacity:.55}
+.units .bg{fill:#0b0f14;fill-opacity:.9;stroke-width:1.6}
+.units .stk{fill:#0b0f14;fill-opacity:.75;stroke-width:1.2;opacity:.85}
+.units .me{color:#f5b301}.units .me .bg,.units .me .stk{stroke:#f5b301}
+.units .en{color:#ff6b6b}.units .en .bg,.units .en .stk{stroke:#e5383b}
+.units .sel .bg{stroke:#fff;stroke-width:2.6}
+.units .sel .ring{fill:none;stroke:#fff;stroke-width:1.5;stroke-dasharray:3 3;opacity:.9}
+.units .icons text{direction:ltr;unicode-bidi:embed}
+.units text.lb{font-size:10.5px;font-weight:800;text-anchor:middle;dominant-baseline:middle;fill:#fff;paint-order:stroke;stroke:#0b0f14;stroke-width:3px;stroke-linejoin:round}
+.units .en text.lb{fill:#ffd0d0}
+.units .cnt circle{fill:#f5b301;stroke:#0b0f14;stroke-width:1.5}.units .en .cnt circle{fill:#e5383b}
+.units .cnt text{font-size:10px;font-weight:800;text-anchor:middle;dominant-baseline:central;fill:#1a1300}.units .en .cnt text{fill:#fff}
+.units .mini rect{fill:#0b0f14;fill-opacity:.85;stroke:currentColor;stroke-width:1}
+.units .fx{fill:#ff3b3b;stroke:#0b0f14;stroke-width:1;animation:pulse 1.2s ease-in-out infinite}
+.routes{pointer-events:none}
+.routes path{fill:none;stroke:#f5b301;stroke-width:2;stroke-dasharray:6 5;stroke-linecap:round;opacity:.95}
+.routes path.en{stroke:#ff6b6b}
+.routes .fanl path{stroke:#ffffffa0;stroke-width:1.2;stroke-dasharray:none}
+.routes circle{fill:#f5b301;stroke:#0b0f14;stroke-width:1.5}
+.routes text{font-size:11px;font-weight:800;text-anchor:middle;fill:#ffe08a;paint-order:stroke;stroke:#0b0f14;stroke-width:3px}
+.routes text.bt{font-size:15px;fill:#ffb36b}
+.uic{width:20px;height:18px;vertical-align:-3px;color:var(--gold);flex:none}
+.uic.en{color:#ff6b6b}
+#mvbar{position:fixed;left:8px;right:8px;top:calc(var(--topH) + env(safe-area-inset-top) + 4px);z-index:22;display:none;align-items:center;gap:8px;background:#2a2410f2;border:1px solid var(--gold);border-radius:12px;padding:6px 8px 6px 10px;font-weight:700;font-size:14px;box-shadow:0 6px 18px #0009}
+#mvbar.on{display:flex}
+#mvbar span{flex:1;min-width:0;line-height:1.35}
+body.mv #toasts{top:calc(var(--topH) + 62px + env(safe-area-inset-top))}
+.ulist{display:flex;flex-direction:column;gap:4px;margin:6px 0}
+.ulist button{display:flex;align-items:center;gap:8px;text-align:start;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:7px 10px;min-height:42px;cursor:pointer}
+.ulist button b{flex:1;min-width:0;font-size:14px}.ulist button small{color:var(--mut);font-size:12px;white-space:nowrap}
 
 /* top bar */
 #top{position:fixed;top:0;left:0;right:0;z-index:20;background:linear-gradient(#0b0f14f2,#0b0f14d9);border-bottom:1px solid var(--line);padding:env(safe-area-inset-top) 8px 4px;display:none;backdrop-filter:blur(6px)}
@@ -115,11 +149,13 @@ ul.help li{margin:6px 0}
 
 /* legend */
 #legend{position:fixed;left:8px;bottom:calc(var(--barH) + 10px + env(safe-area-inset-bottom));z-index:15;display:none;font-size:12px}
-.playing #legend{display:block}
+.playing #legend{display:flex;flex-direction:column;align-items:flex-end}
 #legend .lg{display:none;background:#0b0f14e6;border:1px solid var(--line);border-radius:10px;padding:6px 8px;margin-bottom:4px}
 #legend.open .lg{display:block}
 #legend .lg div{display:flex;align-items:center;gap:6px;margin:2px 0;white-space:nowrap}
 #legend i{display:inline-block;width:12px;height:12px;border-radius:3px}
+#legend .lgu{display:grid!important;grid-template-columns:auto auto;column-gap:10px;border-top:1px solid var(--line);margin-top:4px;padding-top:4px}
+#legend .lgu div{margin:1px 0}
 #legend .ic{height:30px;font-size:12px}
 
 /* start */
@@ -197,6 +233,18 @@ ul.help li{margin:6px 0}
       <div><i style="background:#3a4250"></i>ניטרלית</div>
       <div><i style="background:#6a2f36"></i>יחסים עוינים</div>
       <div><i style="background:#22272e"></i>שטח ללא שליטה</div>
+      <div class="lgu">
+        <div><svg class="uic"><use href="#ui-inf"/></svg>חי״ר</div>
+        <div><svg class="uic"><use href="#ui-arm"/></svg>שריון</div>
+        <div><svg class="uic"><use href="#ui-art"/></svg>ארטילריה</div>
+        <div><svg class="uic"><use href="#ui-msl"/></svg>טילים</div>
+        <div><svg class="uic"><use href="#ui-air"/></svg>מטוסי קרב</div>
+        <div><svg class="uic"><use href="#ui-heli"/></svg>מסוקים</div>
+        <div><svg class="uic"><use href="#ui-fleet"/></svg>צי ספינות</div>
+        <div><svg class="uic"><use href="#ui-car"/></svg>נושאת מטוסים</div>
+        <div><svg class="uic"><use href="#ui-sub"/></svg>צוללות</div>
+        <div><svg class="uic en"><use href="#ui-inf"/></svg>יחידת אויב</div>
+      </div>
     </div>
     <button class="ic" data-act="legend">מקרא</button>
   </div>
@@ -224,6 +272,22 @@ ul.help li{margin:6px 0}
   <ul id="plist"></ul>
 </div>
 <div id="startTitle"><h1>עולם 2026</h1><p>בחר מדינה לנהל — הקש על המפה או חפש ברשימה</p></div>
+
+<div id="mvbar"><span id="mv-txt"></span><button class="ic" data-act="mvcancel">ביטול</button></div>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="ui-inf" viewBox="0 0 24 24" fill="currentColor"><path d="M7 9.2a5 5 0 0 1 10 0z"/><rect x="5.4" y="8.6" width="13.2" height="1.7" rx=".8"/><circle cx="12" cy="12.4" r="2.5"/><path d="M5.5 21.5c0-4.1 2.8-6.6 6.5-6.6s6.5 2.5 6.5 6.6z"/><path d="M18.6 6.5l1.5-.4 2.2 12.6-1.5.4z"/></symbol>
+    <symbol id="ui-arm" viewBox="0 0 24 24" fill="currentColor"><rect x="1.5" y="14" width="21" height="6.5" rx="3.2"/><path d="M3.5 14l2.2-3.2h12.6l2.2 3.2z"/><path d="M7.5 10.8V8.2h7.8l1.6 2.6z"/><rect x="15" y="8.3" width="8" height="1.5" rx=".7"/><g fill="#0b0f14"><circle cx="5.5" cy="17.2" r="1.4"/><circle cx="9.8" cy="17.2" r="1.4"/><circle cx="14.2" cy="17.2" r="1.4"/><circle cx="18.5" cy="17.2" r="1.4"/></g></symbol>
+    <symbol id="ui-art" viewBox="0 0 24 24" fill="currentColor"><path d="M8.2 14.6L20.6 4.2l1.3 1.6L9.6 16.4z"/><circle cx="9" cy="17" r="4.4"/><circle cx="9" cy="17" r="1.6" fill="#0b0f14"/><path d="M8 18.5L2.5 21.8l-.8-1.4 5.6-3.3z"/></symbol>
+    <symbol id="ui-air" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.5c.9 0 1.5 1.6 1.5 3.6v3.6l8 5.2v2.2l-8-2.4-.4 4.6 2.8 2.1v1.8L12 21.2l-3.9 1V20.4l2.8-2.1-.4-4.6-8 2.4v-2.2l8-5.2V5.1c0-2 .6-3.6 1.5-3.6z"/></symbol>
+    <symbol id="ui-heli" viewBox="0 0 24 24" fill="currentColor"><rect x="1.5" y="3.6" width="18" height="1.6" rx=".8"/><rect x="9.7" y="4.4" width="1.6" height="4"/><path d="M4.2 12.2c0-2.6 2.4-4.3 5.8-4.3h1.5c3.1 0 5 1.8 5 4.3v1.3c0 1.5-1.2 2.6-2.7 2.6H6.8c-1.5 0-2.6-1.4-2.6-3z"/><path d="M15.8 10.8h6.2l-.4 2h-5.8z"/><rect x="21" y="8" width="1.4" height="6.5" rx=".7"/><rect x="4.5" y="18.6" width="12" height="1.4" rx=".7"/><rect x="7" y="15.6" width="1.3" height="3.4"/><rect x="12.6" y="15.6" width="1.3" height="3.4"/></symbol>
+    <symbol id="ui-fleet" viewBox="0 0 24 24" fill="currentColor"><path d="M1 14.8h22l-3.4 5.7H4.4z"/><path d="M6.5 14.8v-3.3h3V8.6h3.4v2.9h4.4v3.3z"/><rect x="10.6" y="3.8" width="1.3" height="5"/><rect x="8.8" y="5.4" width="5" height="1.2"/></symbol>
+    <symbol id="ui-car" viewBox="0 0 24 24" fill="currentColor"><path d="M1.5 13.6h21l-2.7 6.4H4.2z"/><rect x=".5" y="11.4" width="23" height="1.8" rx=".5"/><rect x="15.2" y="6.4" width="3.4" height="5"/><rect x="16.3" y="3.6" width="1.2" height="3"/><path d="M4 9.8l3-.6 1-1.6h.8l-.3 1.6 2.6-.2v.8l-2.6.5.3 1.4h-.8l-1-1.2-3 .1z"/></symbol>
+    <symbol id="ui-sub" viewBox="0 0 24 24" fill="currentColor"><rect x="1.5" y="12" width="21" height="6.4" rx="3.2"/><path d="M9.3 12V8.3h5l1.2 3.7z"/><rect x="11.4" y="4.6" width="1.3" height="3.9"/><rect x="11.4" y="4.6" width="3" height="1.2"/></symbol>
+    <symbol id="ui-msl" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.2c2.1 2 3 4.7 3 7.8v8.2H9V9c0-3.1.9-5.8 3-7.8z"/><path d="M9 12.6l-3.2 4.2v3l3.2-1.7z"/><path d="M15 12.6l3.2 4.2v3L15 18.1z"/><path d="M10.2 18h3.6L12 23z" opacity=".75"/></symbol>
+  </defs>
+</svg>
 
 <div id="modal" class="modal"><div class="mbox"><h2 id="m-title"></h2><div id="m-body"></div><div id="m-foot"></div></div></div>
 <div id="toasts" aria-live="polite"></div>
