@@ -94,7 +94,7 @@ function daysTxt(d) { d = Math.max(1, Math.ceil(d)); return d >= 60 ? num(Math.r
 // troops / reserves are kept in thousands
 function troopsTxt(k) { const v = k * 1000; return v >= 1e6 ? num(v / 1e6, 2) + ' מיליון' : v >= 1e4 ? num(v / 1000) + ' אלף' : num(Math.round(v / 10) * 10); }
 // wrap signed numbers / percents inside Hebrew text so they keep their left-to-right shape
-const isoNums = t => String(t).replace(/[+−-]?\$?\d[\d.,]*(?:%|[BMTK](?![A-Za-z]))?/g, m => '<span class="num" dir="ltr">' + m + '</span>');
+const isoNums = t => String(t).replace(/(?:(?<![א-ת])[+−-])?\$?\d[\d.,]*(?::\d[\d.,]*)?(?:%|[BMTK](?![A-Za-z]))?/g, m => '<span class="num" dir="ltr">' + m + '</span>');
 const cnt = v => num(Math.max(0, Math.floor(v + 1e-6)));
 // signed number for effect lines: +3 / −12
 function sgn(v) { const a = Math.abs(v); return '<span class="num" dir="ltr">' + (v > 0 ? '+' : v < 0 ? '−' : '±') + (a >= 1 || a === 0 ? Math.round(a) : a.toFixed(1)) + '</span>'; }
@@ -2027,7 +2027,8 @@ function evMinPick(m, e, c) {
     if (tr === 'aggr') s -= (x.ro || 0) * 0.12;
     if (tr === 'corrupt') s += mon * 0.5;
     s += (R() - 0.5) * (6 - es) * 1.5;
-    if (cost > 0 && noMoney(e.r || 'fin', cost)) s -= 1e6;
+    // no money: a costly choice is off the table — and when every choice costs, the cheapest one wins
+    if (cost > 0 && noMoney(e.r || 'fin', cost)) s -= 1e6 + cost / gdp * 1e6;
     if (s > bs) { bs = s; best = i; }
   });
   return best < 0 ? e.ch.length - 1 : best;
@@ -2091,7 +2092,7 @@ function eventsDay() {
   const m = e.r && minOn(e.r);
   if (m) {
     const i = evMinPick(m, e, ctx), x = effAdd(e.b, (e.ch[i] || {}).e), cost = -((x.m || 0) * P().gdp + (x.cash || 0));
-    if (cost > 0) { const g = G(); g.spent = (g.spent || 0) + cost; (g.spR || (g.spR = {}))[e.r] = (g.spR[e.r] || 0) + cost; if (ENV_R.includes(e.r)) { const v = envOf(); v.used[e.r] = (v.used[e.r] || 0) + cost; } }
+    if (cost > 0) { const g = G(); g.spent = (g.spent || 0) + cost; g.spEv = (g.spEv || 0) + cost; (g.spR || (g.spR = {}))[e.r] = (g.spR[e.r] || 0) + cost; if (ENV_R.includes(e.r)) { const v = envOf(); v.used[e.r] = (v.used[e.r] || 0) + cost; } }
     evChoose(e, i, ctx, { m, r: e.r }); return;
   }
   // too many dialogs waiting: the cautious default happens and it becomes news
@@ -4370,6 +4371,7 @@ function renderTop() {
   setH('#t-nuke', num(c.nukes));
   setH('#t-score', num(score()));
   setH('#t-name', esc(c.he));
+  { const nb = $('#t-name'); if (nb) nb.classList.toggle('long', c.he.length > 8); }
   document.querySelectorAll('#speed button').forEach(b => b.classList.toggle('on', +b.dataset.v === S.speed));
   const n = S.wars.filter(involvesPlayer).length;
   const b = $('#tabwars'); if (b && b.dataset.badge !== String(n || '')) b.dataset.badge = n || '';
@@ -4566,8 +4568,8 @@ function minCard(r) {
 // the monthly budget envelopes: how much each minister may still spend this month
 function envHtml() {
   const e = envOf(), fm = minOf('fin');
-  const bar = (r, l) => { const tot = e[r] || 0, used = Math.min(tot, e.used[r] || 0), w = tot > 0 ? used / tot * 100 : 0;
-    return '<div class="fl"><small>' + l + '</small><div class="prog' + (w >= 99 ? ' r' : ' g') + '"><div style="width:' + w.toFixed(0) + '%"></div></div><span class="nw">' + money(Math.max(0, tot - used), true) + '</span></div>'; };
+  const bar = (r, l) => { const tot = e[r] || 0, used = Math.min(tot, e.used[r] || 0), w = tot > 0 ? (tot - used) / tot * 100 : 0; // the bar shows what is left
+    return '<div class="fl"><small>' + l + '</small><div class="prog' + (w <= 1 ? ' r' : ' g') + '"><div style="width:' + w.toFixed(0) + '%"></div></div><span class="nw">' + money(Math.max(0, tot - used), true) + '</span></div>'; };
   return '<div class="card env"><h3>תקציב השרים לחודש <small class="hint">' + (fm ? 'קובע: ' + esc(mTitle('fin', fm)) : 'אין שר אוצר — חלוקה קבועה') + '</small></h3>' +
     '<div class="front">' + bar('def', 'ביטחון') + bar('int', 'בינוי') + bar('fo', 'חוץ') + '</div>' +
     '<p class="sub">נשאר לכל שר עד סוף החודש. ' + (e.why ? esc(e.why) + '. ' : '') + 'שר לא מוציא כסף שאין: כשהקופה במינוס — אין רכש, פרויקטים או סיוע (חוץ מגיוס חירום כשפולשים אלינו).</p></div>';
@@ -5220,7 +5222,9 @@ const ACT = {
   legend: () => $('#legend').classList.toggle('open'),
   urgent: () => openTabFresh('urgent'),
   urgpend: () => { openTab(null); processPending(); },
-  urgidle: d => { ulistIds = String(d.ids).split(',').map(Number); selUnit = null; openTabFresh('ulist'); },
+  urgidle: d => { ulistIds = String(d.ids).split(',').map(Number); selUnit = null; openTabFresh('ulist');
+    // bring the waiting units into view above the sheet
+    const u = unitById(ulistIds[0]); if (u) setTimeout(() => { const q = MAP_PROJ([u.lon, u.lat]); if (!q) return; const sx = curT.x + curK * q[0], sy = curT.y + curK * q[1], [vx0, vy0, vx1, vy1] = visibleRect(); if (sx < vx0 + 30 || sx > vx1 - 30 || sy < vy0 + 30 || sy > vy1 - 30) zoomToMapPt(q, curK); }, 80); },
   tutnext: () => tutStep(1),
   tutskip: () => tutEnd(),
   tutstart: () => tutStart(),

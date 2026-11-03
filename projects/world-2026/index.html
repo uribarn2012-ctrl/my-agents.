@@ -69,6 +69,7 @@ body.mv #toasts{top:calc(var(--topH) + 62px + env(safe-area-inset-top))}
 #top .r1{display:flex;align-items:center;gap:6px;height:42px}
 #top .who{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.15}
 #top .who b{font-size:15px;color:var(--gold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#top .who b.long{font-size:13.5px;letter-spacing:-.2px}
 #top #t-date{font-size:12.5px;color:var(--txt);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ic{background:var(--panel2);border:1px solid var(--line);border-radius:10px;min-width:34px;height:32px;padding:0 8px;cursor:pointer;font-weight:700;flex:none}
 #speed{display:flex;flex:none;border:1px solid #33465c;border-radius:10px;overflow:hidden;direction:ltr}
@@ -76,6 +77,7 @@ body.mv #toasts{top:calc(var(--topH) + 62px + env(safe-area-inset-top))}
 #speed button:first-child{border:0}
 #speed button.on{background:var(--gold);color:#1a1300}
 #speed button[data-v="0"].on{background:#e5383b;color:#fff}
+@media (max-width:420px){#top .r1{gap:4px}#top .ic{min-width:32px;padding:0 6px}#speed button{width:28px}}
 #top .r2{display:grid;grid-template-columns:repeat(6,1fr);gap:3px;margin-top:2px}
 #top .cell{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:2px 2px;text-align:center;min-width:0}
 #top .cell small{display:block;font-size:10.5px;color:var(--mut);line-height:1.3;white-space:nowrap;overflow:hidden}
