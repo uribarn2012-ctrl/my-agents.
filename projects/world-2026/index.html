@@ -229,6 +229,28 @@ svg.chart .zl{stroke:#6b7a8c;stroke-width:1;stroke-dasharray:3 3;vector-effect:n
 ul.blog li{font-size:13px;padding:5px 8px}ul.blog li small{color:var(--mut);margin-inline-end:4px}
 h3.mh{margin:14px 0 4px;font-size:15px}
 @media (prefers-reduced-motion:reduce){#rcard.on{animation:none}}
+/* government, events and the world view */
+#m-foot.col{flex-direction:column}#m-foot.col .b{flex:none;width:100%;text-align:start}
+.b.off{opacity:.45}
+.mcard .mh{display:flex;align-items:center;gap:8px}.mcard .mh b{flex:1;font-size:15px}
+.mcard .mn{font-size:17px;font-weight:800;color:var(--gold);margin:2px 0}
+.mcard .chips{margin:4px 0}.mcard .sub{margin:4px 0}
+.mcard .pl{margin-top:6px}.mcard .pl small{display:block;color:var(--mut);font-size:12px;margin-bottom:-2px}
+.mcard .last{border-top:1px solid var(--line);padding-top:4px}
+.seg.sm button{padding:7px 4px;font-size:13px;min-height:36px}
+.stars{color:var(--gold);font-size:13px;letter-spacing:1px;white-space:nowrap;direction:ltr;unicode-bidi:isolate}.stars i{font-style:normal;color:#3a4656}
+.b.cand{text-align:start}.b.cand .mh{display:flex;align-items:center;gap:8px}.b.cand .mh b{flex:1;font-size:15px}
+.rk{display:flex;flex-direction:column;gap:3px;margin:8px 0 4px}
+.rkr{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:6px 8px;min-height:40px;cursor:pointer;text-align:start;font-size:14px}
+.rkr.me{border-color:var(--gold);background:#2a2410}
+.rkr .n{width:20px;color:var(--mut);font-size:12.5px;text-align:center;flex:none}
+.rkr b{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rkr .v{white-space:nowrap;font-weight:700}.rkr .v small{font-weight:400;margin-inline-start:2px}
+.rkr .tr{width:34px;flex:none;text-align:center;font-size:12px;color:var(--mut)}.rkr .tr.up{color:var(--green)}.rkr .tr.down{color:#ff8a8a}
+#sheet-body>.seg:first-child{margin-top:2px}
+.tabs button{font-size:12px;letter-spacing:-.4px}
+/* while a dialog is open its title must stay readable: toasts wait behind it */
+#modal.open ~ #toasts{z-index:55}
 
 @media (min-width:900px){
   #rcard{left:12px;right:auto;width:400px}
@@ -300,6 +322,7 @@ h3.mh{margin:14px 0 4px;font-size:15px}
       <button data-act="tab" data-tab="country">מדינה</button>
       <button data-act="tab" data-tab="eco">כלכלה</button>
       <button data-act="tab" data-tab="home" id="tabhome">בית</button>
+      <button data-act="tab" data-tab="gov" id="tabgov">ממשלה</button>
       <button data-act="tab" data-tab="mil">צבא</button>
       <button data-act="tab" data-tab="wars" id="tabwars">מלחמות</button>
       <button data-act="tab" data-tab="news">חדשות</button>

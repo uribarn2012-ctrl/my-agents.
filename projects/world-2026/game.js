@@ -247,7 +247,8 @@ function setupPlayer(id) {
   S.p = { tax: clamp(Math.round((0.15 + 0.11 + clamp(c.defPct, 0.005, 0.12) - 0.005) * 100) / 100, 0.15, 0.5), welfare: 0.15, defPct: clamp(c.defPct, 0.005, 0.12), defPct0: clamp(c.defPct, 0.005, 0.12),
     treasury: c.gdp * 0.04, unrest: 0, shock: 0, lowTurns: 0, annexed: [], gdpHist: [c.gdp], budget: null,
     nprog: null, cas: 0, casTotal: 0, startGdp: c.gdp, startPop: c.pop, startShare: c.gdp / worldGdp(), bankrupt: false,
-    cd: {}, griev: {}, queue: [], proj: [], built: {}, apBonus: 0, growthBonus: 0, bm: null, mStart: null, crack: 0 };
+    cd: {}, griev: {}, queue: [], proj: [], built: {}, apBonus: 0, growthBonus: 0, bm: null, mStart: null, crack: 0, gov: newGov(), tm: [], tg: [] };
+  S.ev = { nx: 18, cd: {}, ld: 14, n: 0, dn: 0 }; // a calm first few weeks
   // world reputation starts from how the world already sees this country
   let avg = 0, n = 0; alive().forEach(o => { if (o !== id) { avg += rel(o, id); n++; } }); avg /= n || 1;
   S.p.rep = clamp(Math.round({ democracy: 58, hybrid: 48, authoritarian: 40 }[c.gov] + avg * 0.5), 10, 90);
@@ -256,6 +257,7 @@ function setupPlayer(id) {
   S.p.mStart = { tr: S.p.treasury, ap: c.approval, rep: S.p.rep };
   addNews('ממשלה חדשה נכנסה לתפקיד ב' + c.he + '. העם מצפה לשינוי.', 'good');
   initUnits();
+  worldSnap();
 }
 
 /* ================= relations / pacts ================= */
@@ -300,11 +302,18 @@ function isAlly(a, b) {
   return (A.includes('NATO') && B.includes('NATO')) || (A.includes('CSTO') && B.includes('CSTO'));
 }
 const sanctions = (a, b) => !!S.sanc[a + '>' + b];
+// sum of the economies sanctioning each country, worked out once per game day
+let SHC = { t: null, m: null };
 function sanctionHit(b) {
-  let s = 0; const wg = worldGdp();
-  for (const k in S.sanc) { const [a, t] = k.split('>'); if (t === b && S.c[a] && S.c[a].alive) s += S.c[a].gdp; }
-  return Math.min(0.3, s / wg * 0.35);
+  const tk = S.day + ':' + S.wid;
+  if (SHC.t !== tk || SHC.s !== S.sanc) {
+    const m = {};
+    for (const k in S.sanc) { const i = k.indexOf('>'), a = k.slice(0, i), t = k.slice(i + 1); if (S.c[a] && S.c[a].alive) m[t] = (m[t] || 0) + S.c[a].gdp; }
+    SHC = { t: tk, s: S.sanc, m };
+  }
+  return Math.min(0.3, (SHC.m[b] || 0) / worldGdp() * 0.35);
 }
+const sancDirty = () => { SHC.t = null; };
 let WG_CACHE = { t: -1, v: 1 };
 function worldGdp() {
   if (WG_CACHE.t === (S ? S.day + ':' + S.wid : 0)) return WG_CACHE.v;
@@ -657,6 +666,7 @@ function checkWarEnd(w) {
 function annex(win, lose) {
   const W = S.c[win], L = S.c[lose];
   if (!W || !L || !L.alive) return;
+  L.tids0 = tidsOf(lose).slice(); L.annexDay = S.day;
   tidsOf(lose).slice().forEach(t => S.owner[t] = win);
   L.alive = false; L.annexedBy = win;
   S.wars.forEach(w => { if ((w.a === lose || w.b === lose) && S.player && inWar(w, S.player)) archiveWar(w, inWar(w, win) && (w.A.includes(win) === w.A.includes(S.player)) ? 'won' : 'lost'); });
@@ -705,11 +715,11 @@ function budgetDay() {
   const c = P(), p = S.p;
   c.def = c.gdp * p.defPct;
   const d = c.gdp / DPY;
-  const b = { income: d * p.tax, welfare: d * p.welfare, admin: d * 0.11, defense: c.def / DPY, war: 0, interest: 0, upkeep: extraUpkeep(c) / DPY, nuke: 0 };
+  const b = { income: d * p.tax, welfare: d * p.welfare, admin: d * 0.11, defense: c.def / DPY, war: 0, interest: 0, upkeep: extraUpkeep(c) / DPY, nuke: 0, gov: govSal() / DPY };
   warsOf(S.player).forEach(w => { if (w.pause > 0) return; const en = enemyLeaderFor(w, S.player); b.war += 0.002 * power(c) * commit(S.player, w) / Math.sqrt(proj(S.player, en)) / DPM; });
   if (p.treasury < 0) b.interest = -p.treasury * (p.bankrupt ? 0.009 : 0.0035) / DPM;
   if (p.nprog && !p.nprog.done) b.nuke = nukeCost(c) / DPM;
-  b.net = b.income - b.welfare - b.admin - b.defense - b.war - b.interest - b.upkeep - b.nuke;
+  b.net = b.income - b.welfare - b.admin - b.defense - b.war - b.interest - b.upkeep - b.nuke - b.gov;
   return b;
 }
 function casMonthToast() {
@@ -733,6 +743,9 @@ function playerEconomy() {
   let g = 0.026 + (R() - 0.5) * 0.012 - (p.tax - 0.30) * 0.08 + (p.welfare - 0.15) * 0.03 - sanctionHit(S.player) * 0.05 - wars * 0.012 - (S.recession > 0 ? 0.03 : 0) + (p.growthBonus || 0);
   let tr = 0; for (const k in S.pacts) if (S.pacts[k].trade && k.split('|').includes(S.player)) tr++;
   g += Math.min(0.02, tr * 0.004);
+  // events that change growth for a while, and a skilled finance minister
+  g += tmSum(p.tg);
+  const fm = minOf('fin'); if (fm) g += (mSk(fm) - 3) * 0.0015;
   if (c.mob > 0) g -= c.mob / Math.max(1, c.pop * 500) * 1.5; // reservists are away from their jobs
   const debtRatio = p.treasury < 0 ? -p.treasury / c.gdp : 0;
   if (debtRatio > 0.6) g -= (debtRatio - 0.6) * 0.05;
@@ -754,11 +767,15 @@ function equipStep(c) {
   }
 }
 function aiEconomy() {
+  const rec = S.recession > 0 ? 0.03 : 0;
   alive().forEach(id => {
     if (id === S.player) return;
     const c = S.c[id];
     const wars = activeWars(id);
-    const g = 0.025 + (R() - 0.5) * 0.02 - sanctionHit(id) * 0.05 - wars * 0.015 - (S.recession > 0 ? 0.03 : 0);
+    // poorer countries grow faster; recessions, booms and national projects move it up or down
+    const pc = c.gdp / Math.max(0.01, c.pop), base = 0.017 + 0.022 * clamp(1 - pc / 60, 0, 1);
+    const cy = c.cy ? (c.cy.k === 'rec' ? -0.035 : 0.02) : 0;
+    const g = base + (R() - 0.5) * 0.02 - sanctionHit(id) * 0.05 - wars * 0.015 - rec + cy + (c.gb || 0);
     c.gdp *= 1 + g / DPY; c.pop *= 1 + 0.008 / DPY;
     c.def = c.gdp * c.defPct * (wars ? 1.5 : 1);
     equipStep(c);
@@ -775,7 +792,7 @@ function warWeariness() {
 function approvalTarget() {
   const c = P(), p = S.p;
   const wars = activeWars(S.player);
-  let T = 62 - (p.tax - 0.30) * 120 + (p.welfare - 0.15) * 150 - warWeariness() + (p.apBonus || 0);
+  let T = 62 - (p.tax - 0.30) * 120 + (p.welfare - 0.15) * 150 - warWeariness() + (p.apBonus || 0) + govAp() + tmSum(p.tm);
   if (!wars) T -= Math.max(0, p.defPct - 0.05) * 100 * 1.2;
   if (c.mob > 0) T -= Math.min(8, c.mob / Math.max(1, c.pop * 10) * 4);
   const debtRatio = p.treasury < 0 ? -p.treasury / c.gdp : 0;
@@ -864,6 +881,7 @@ function aiDiplomacy() {
     else if (roll < 0.08 && r > 0 && r < 60) { addRel(a, b, 6); addNews('פסגה מדינית: ראשי ' + nm(a) + ' ו' + nm(b) + ' נפגשו לשיחות.', 'world'); }
     else addRel(a, b, (R() - 0.5) * 6);
   }
+  worldDiplomacy(ids);
 }
 function aiWars() {
   const ids = alive();
@@ -881,8 +899,16 @@ function aiWars() {
       const g = A.gov === 'authoritarian' ? 1.5 : A.gov === 'hybrid' ? 1 : 0.3;
       // a hated player (low world reputation) is a target: others feel free to attack
       const repK = isP ? (S.p.rep < 20 ? 2.5 : S.p.rep < 35 ? 1.6 : 1) : 1;
-      const pr = isP ? (ratio > 1.6 / Math.sqrt(repK) && rel(a, b) < -70 / Math.sqrt(repK) ? 0.04 * g * repK : 0) : (ratio > 2 && aiWarsN < 6 ? 0.035 * g : 0);
-      if (R() < pr) { declareWar(a, b); return; }
+      let pr = isP ? (ratio > 1.6 / Math.sqrt(repK) && rel(a, b) < -70 / Math.sqrt(repK) ? 0.04 * g * repK : 0) : (ratio > 2 && aiWarsN < 6 ? 0.045 * g : 0);
+      if (!isP && pr) {
+        // nuclear powers almost never fight each other; nobody without the bomb attacks one that has it
+        if (B.nukes > 0 && !A.nukes) continue;
+        if (B.nukes > 0 && A.nukes > 0) pr *= 0.05;
+        // a calm world: not more than a few new wars a year
+        const y = Math.floor(S.day / 365.25); if (!S.wy || S.wy.y !== y) S.wy = { y, n: 0 };
+        if (S.wy.n >= 2) pr *= 0.2;
+      }
+      if (R() < pr) { const w = declareWar(a, b); if (w && !isP && S.wy) S.wy.n++; return; }
     }
   }
   // AI wars ending
@@ -895,6 +921,8 @@ function aiWars() {
       addNews(nm(lose) + ' נכנעה ל' + nm(win) + ' וויתרה על חלק משטחה בהסכם שלום.', 'world'); endWar(w);
     } else if (age > 18 && Math.abs(f) < 30 && R() < 0.012) {
       w.pause = 183; addNews('הפסקת אש בין ' + nm(w.a) + ' ל' + nm(w.b) + ' בתיווך בינלאומי.', 'world');
+    } else if (age > 30 && Math.abs(f) < 50 && R() < 0.03) {
+      addNews('אחרי ' + Math.round(age / 12) + ' שנות לחימה: ' + nm(w.a) + ' ו' + nm(w.b) + ' חתמו על הסכם שלום.', 'world'); endWar(w);
     }
   });
   // AI offers to the player
@@ -920,36 +948,22 @@ function aiWars() {
 /* ================= events ================= */
 function randomEvents() {
   const ids = alive(), me = P();
-  if (R() < 0.035) {
-    ids.forEach(id => { const c = S.c[id]; c.gdp *= OIL.has(id) ? 1.015 : 0.996; });
-    addNews('מחירי הנפט זינקו ב-30% בעקבות מתיחות במפרץ. ' + (OIL.has(S.player) ? 'הקופה שלנו מרוויחה.' : 'המשק שלנו נפגע.'), OIL.has(S.player) ? 'good' : 'bad');
-  }
-  if (R() < 0.018 && S.recession === 0) { S.recession = 8; S.p.shock -= 2; addNews('מיתון עולמי: הבורסות צונחות והצמיחה נעצרת בכל העולם.', 'bad'); }
-  if (R() < 0.18) {
-    const id = pick(ids), c = S.c[id], hit = 0.01 + R() * 0.02;
+  // (oil shocks, recessions, pandemics, scandals and good news at home now live in the event table)
+  if (R() < 0.14) {
+    const id = pick(ids.filter(x => x !== S.player)), c = S.c[id], hit = 0.01 + R() * 0.02;
     const kind = pick(['רעידת אדמה', 'שיטפונות קשים', 'סופת הוריקן', 'בצורת חמורה', 'שריפות ענק']);
-    c.gdp *= 1 - hit;
-    if (id === S.player) { S.p.shock -= 2; S.p.treasury -= c.gdp * 0.003; addNews(kind + ' פגעה ב' + c.he + '. הממשלה מממנת שיקום.', 'bad'); }
-    else {
-      addNews(kind + ' ב' + c.he + ': נזק כבד ואלפי עקורים.', 'world');
-      // the stricken country asks the world (and us) for help
-      if (!atWar(id, S.player) && rel(id, S.player) > -60 && R() < 0.75) S.pending.push({ type: 'aid', from: id, kind, size: hit });
-    }
+    c.gdp *= 1 - hit; tag(c, 'disaster', 150);
+    addNews(kind + ' ב' + c.he + ': נזק כבד ואלפי עקורים.', 'world');
+    // the stricken country asks the world (and us) for help
+    if (!atWar(id, S.player) && rel(id, S.player) > -60 && R() < 0.7) pushAid(id, kind, hit);
   }
   // refugees from a war zone knock on our door
   if (R() < 0.05) {
     const torn = S.wars.filter(w => w.pause === 0 && !involvesPlayer(w)).map(w => w.f >= 0 ? w.b : w.a).filter(x => S.c[x] && S.c[x].alive);
     if (torn.length) S.pending.push({ type: 'refugees', from: pick(torn) });
   }
-  if (R() < 0.05) {
-    const dems = ids.filter(i => S.c[i].gov === 'democracy' && i !== S.player);
-    if (dems.length) { const id = pick(dems); addNews('בחירות ב' + nm(id) + ': ' + pick(['השלטון הוחלף', 'הממשלה נבחרה מחדש', 'הימין ניצח', 'השמאל ניצח', 'נוצר תיקו פוליטי']) + '.', 'world'); }
-  }
-  if (R() < 0.03) { S.p.shock -= 4; addNews(pick(['שערוריית שחיתות בממשלה מסעירה את המדינה.', 'דליפה מביכה מהלשכה: התקשורת חוגגת.', 'שר בכיר התפטר בעקבות חקירה.']), 'bad'); }
-  if (R() < 0.03) { me.gdp *= 1.008; S.p.shock += 2; addNews(pick(['תעשיית ההייטק מזנקת: השקעות זרות זורמות למדינה.', 'תגלית גז טבעי גדולה מול החוף.', 'שנת יבול שיא לחקלאות.']), 'good'); }
-  if (R() < 0.004) { ids.forEach(id => S.c[id].gdp *= 0.98); S.p.shock -= 3; addNews('מגפה חדשה מתפשטת בעולם. מדינות סוגרות גבולות.', 'bad'); }
   const unhappy = ids.filter(i => i !== S.player && S.c[i].approval < 20);
-  if (unhappy.length && R() < 0.2) addNews('מחאות המוניות ב' + nm(pick(unhappy)) + ' נגד השלטון.', 'world');
+  if (unhappy.length && R() < 0.15) { const u = pick(unhappy); tag(S.c[u], 'protest', 45); addNews('מחאות המוניות ב' + nm(u) + ' נגד השלטון.', 'world'); }
 }
 function nukeProgram() {
   const p = S.p, c = P(), np = p.nprog; if (!np) return;
@@ -979,6 +993,936 @@ function nukeProgram() {
   } else if ((S.turn - np.since) % 6 === 5 && c.nukes < 60) c.nukes++;
 }
 
+/* ================= names (Hebrew transliteration, a small pool per region) ================= */
+const NAMES = {
+  he: { m: ['יוסי', 'אבי', 'דני', 'איתן', 'עמית', 'משה', 'רון', 'אורי'], f: ['מיכל', 'נועה', 'רונית', 'שרה', 'גלית', 'תמר', 'יעל', 'אורית'], l: ['כהן', 'לוי', 'מזרחי', 'פרץ', 'ביטון', 'אברהם', 'פרידמן', 'שפירא', 'גולן', 'אזולאי', 'רוזן', 'דהן'] },
+  ar: { m: ['מוחמד', 'אחמד', 'חאלד', 'עומר', 'יוסף', 'סמיר', 'כרים', 'האני'], f: ['פאטמה', 'לילה', 'נאדיה', 'ראניה', 'סלמה', 'מונא'], l: ['אל-חסן', 'חדאד', 'נסר', 'סאלח', 'אל-עלי', 'מנסור', 'חמדאן', 'עבדאללה', 'קאסם', 'אל-רשיד', 'ח׳ורי', 'זיידאן'] },
+  fa: { m: ['עלי', 'רזא', 'מהדי', 'חוסיין', 'דאריוש', 'כאמראן'], f: ['פרשתה', 'נסרין', 'סארה', 'לאלה', 'מרים', 'שירין'], l: ['אחמדי', 'רזאיי', 'מוסוי', 'חוסייני', 'כרימי', 'תהראני', 'ג׳עפרי', 'נורי', 'סאדקי', 'פרהאדי'] },
+  tr: { m: ['מהמט', 'אמרה', 'בוראק', 'מוראט', 'קאאן', 'אחמט'], f: ['אייסה', 'זיינפ', 'אליף', 'סלין', 'דניז', 'אמינה'], l: ['יילמז', 'קאיה', 'דמיר', 'שאהין', 'צ׳ליק', 'אוזטורק', 'אידין', 'ארסלאן', 'קוצ׳', 'דוגאן'] },
+  zh: { lf: 1, m: ['וויי', 'מינג', 'האו', 'פנג', 'צ׳יאנג', 'ג׳ון'], f: ['ג׳ינג', 'שיאו-לין', 'יון', 'לי-נה', 'ג׳יה', 'מיי'], l: ['ליו', 'צ׳ן', 'ואנג', 'ג׳אנג', 'לי', 'יאנג', 'הואנג', 'ג׳או', 'וו', 'סון', 'גאו', 'לין'] },
+  ja: { lf: 1, m: ['הירושי', 'קנג׳י', 'אקירה', 'טאקשי', 'ריו', 'נאוקי'], f: ['יוקו', 'מאיקו', 'הארוקה', 'אמי', 'סאקורה', 'נאומי'], l: ['סאטו', 'סוזוקי', 'טקהאשי', 'טנאקה', 'ואטאנבה', 'איטו', 'יאמאמוטו', 'נקאמורה', 'קובאיאשי', 'קאטו'] },
+  ko: { lf: 1, m: ['מין-ג׳ון', 'ג׳י-הו', 'דונג-היון', 'סונג-מין', 'ג׳ה-וון', 'הייון-וו'], f: ['סו-יון', 'הא-און', 'יון-אה', 'ג׳י-מין', 'סו-ג׳ין', 'מין-סו'], l: ['קים', 'לי', 'פארק', 'צ׳וי', 'ג׳ונג', 'קאנג', 'צ׳ו', 'יון', 'האן', 'סונג'] },
+  ru: { fem: 1, m: ['איוון', 'אלכסיי', 'דמיטרי', 'סרגיי', 'ניקולאי', 'פאבל', 'איגור', 'ויקטור'], f: ['אנה', 'אולגה', 'מרינה', 'טטיאנה', 'אירינה', 'נטליה'], l: ['איבנוב', 'פטרוב', 'סמירנוב', 'קוזנצוב', 'פופוב', 'סוקולוב', 'מורוזוב', 'וולקוב', 'נוביקוב', 'פדורוב', 'אורלוב', 'בונדרנקו', 'שבצ׳נקו'] },
+  en: { m: ['ג׳יימס', 'מייקל', 'דייוויד', 'רוברט', 'תומס', 'דניאל', 'אנדרו', 'מארק'], f: ['שרה', 'אמילי', 'ג׳ניפר', 'קתרין', 'לורה', 'רייצ׳ל', 'הלן'], l: ['סמית׳', 'ג׳ונסון', 'בראון', 'טיילור', 'מילר', 'דייוויס', 'קלארק', 'ווקר', 'הול', 'אלן', 'רייט', 'מרפי'] },
+  es: { m: ['חוזה', 'קרלוס', 'חואן', 'לואיס', 'מיגל', 'חורחה', 'דייגו'], f: ['מריה', 'אנה', 'לוסיה', 'קרמן', 'סופיה', 'איזבל'], l: ['גרסיה', 'רודריגס', 'מרטינס', 'לופס', 'גונסאלס', 'פרס', 'סאנצ׳ס', 'רמירס', 'טורס', 'פלורס', 'מוראלס', 'ורגס'] },
+  pt: { m: ['ז׳ואאו', 'פדרו', 'לוקאס', 'רפאל', 'גבריאל', 'מרסלו'], f: ['אנה', 'ז׳וליאנה', 'מריאנה', 'פרננדה', 'קמילה', 'ביאטריס'], l: ['סילבה', 'סנטוס', 'אוליביירה', 'סוזה', 'פריירה', 'קוסטה', 'אלמיידה', 'קרבליו', 'גומש', 'ריביירו'] },
+  fr: { m: ['פייר', 'ז׳אן', 'לוק', 'פרנסואה', 'אנטואן', 'ניקולא'], f: ['מארי', 'סופי', 'קמיל', 'איזבל', 'קלואה', 'נטלי'], l: ['מרטן', 'ברנאר', 'דובואה', 'תומא', 'רובר', 'פטי', 'דוראן', 'לפבר', 'מורו', 'לורן'] },
+  de: { m: ['תומאס', 'מיכאל', 'שטפן', 'אנדראס', 'יורגן', 'קלאוס'], f: ['אנה', 'קטרינה', 'זבינה', 'מוניקה', 'יוליה', 'אורסולה'], l: ['מילר', 'שמידט', 'שניידר', 'פישר', 'ובר', 'מאייר', 'וגנר', 'בקר', 'שולץ', 'הופמן'] },
+  it: { m: ['מרקו', 'ג׳וזפה', 'אלסנדרו', 'לוקה', 'פרנצ׳סקו', 'אנדראה'], f: ['ג׳וליה', 'פרנצ׳סקה', 'קיארה', 'אלנה', 'סרה', 'מרטינה'], l: ['רוסי', 'רוסו', 'פרארי', 'אספוזיטו', 'ביאנקי', 'רומאנו', 'קולומבו', 'ריצ׳י', 'מרינו', 'גרקו'] },
+  eu: { m: ['יאן', 'פטר', 'מרטין', 'טומאש', 'אנדריי', 'לוקאש', 'ניקוס', 'לארס'], f: ['אנה', 'קטז׳ינה', 'מרתה', 'אווה', 'יאנה', 'מריה', 'אלני'], l: ['נובאק', 'קובאלסקי', 'הורבאט', 'קובאץ׳', 'ניימן', 'ויסניבסקי', 'פופסקו', 'יוהנסון', 'ניילסן', 'האנסן', 'לינדברג', 'פאפאדופולוס'] },
+  in: { m: ['ראג׳', 'אמיט', 'ויג׳אי', 'ראהול', 'סנג׳אי', 'עימראן'], f: ['פרייה', 'אנג׳לי', 'סוניה', 'קאוויטה', 'מירה', 'עאישה'], l: ['שארמה', 'פאטל', 'סינג', 'גופטה', 'קומאר', 'ראו', 'ח׳אן', 'רדי', 'נאיר', 'ג׳ושי'] },
+  af: { m: ['קוואמה', 'אמדו', 'ג׳ומו', 'סיפו', 'אובינה', 'מוסה'], f: ['אמינאטה', 'צ׳יפו', 'נומסה', 'אדג׳ואה', 'פאטו', 'זאינבו'], l: ['אוקונקוו', 'מנסה', 'דיאלו', 'קמארה', 'אוקפור', 'נדלובו', 'מוואנגי', 'טראורה', 'באנדה', 'אסאנטה'] },
+  sea: { m: ['בודי', 'סומצ׳אי', 'רמון', 'האדי', 'תאן', 'ארי'], f: ['סרי', 'מריה', 'דוי', 'מאליה', 'רינה', 'לין'], l: ['סנטוסו', 'ויג׳איה', 'צ׳אי', 'רייס', 'נגוין', 'טראן', 'רחמן', 'ליים', 'בונג', 'קוסומה'] }
+};
+const RG_ID = { '376': 'he', '364': 'fa', '004': 'fa', '762': 'fa', '792': 'tr', '031': 'tr', '795': 'tr', '156': 'zh', '158': 'zh', '702': 'zh', '392': 'ja', '410': 'ko', '408': 'ko',
+  '643': 'ru', '804': 'ru', '112': 'ru', '398': 'ru', '860': 'ru', '417': 'ru', '498': 'ru', '051': 'ru', '268': 'ru', '496': 'ru',
+  '840': 'en', '826': 'en', '124': 'en', '036': 'en', '554': 'en', '372': 'en', '250': 'fr', '056': 'fr', '442': 'fr', '756': 'de', '276': 'de', '040': 'de', '380': 'it',
+  '724': 'es', '620': 'pt', '076': 'pt', '024': 'pt', '508': 'pt', '356': 'in', '586': 'in', '050': 'in', '144': 'in', '524': 'in' };
+function regionOf(id) {
+  if (RG_ID[id]) return RG_ID[id];
+  const c = S.c[id], b = c ? c.blocs : [];
+  if (b.includes('ArabLeague') || b.includes('GCC')) return 'ar';
+  if (b.includes('CSTO') || b.includes('CIS')) return 'ru';
+  const t = mainTid(id), p = t && TERR[t] ? TERR[t].c : [0, 0];
+  if (p[0] < -30) return 'es';
+  if (p[1] < 20 && p[0] > -20 && p[0] < 55) return 'af';
+  if (p[1] > 35 && p[0] > -25 && p[0] < 45) return 'eu';
+  if (p[0] >= 90 && p[0] < 150 && p[1] < 25) return 'sea';
+  if (p[0] >= 60 && p[0] < 92 && p[1] < 36) return 'in';
+  if (p[0] > 150 || p[1] < -10) return 'en';
+  return 'eu';
+}
+function genName(id, g) {
+  const N = NAMES[regionOf(id)] || NAMES.en;
+  g = g || (R() < 0.3 ? 'f' : 'm');
+  const f = pick(N[g]); let l = pick(N.l);
+  if (N.fem && g === 'f' && /(וב|ין)$/.test(l)) l += 'ה';
+  return { n: N.lf ? l + ' ' + f : f + ' ' + l, g };
+}
+
+/* ================= government: ministers who act on their own ================= */
+const MIN_R = {
+  def: { he: 'שר הביטחון', hf: 'שרת הביטחון', sh: 'ביטחון', per: 2, off: 0, d: 'מנהל את הצבא: מגן על הגבולות, שולח כוחות לחזיתות, מחזיר יחידות פגועות ושומר כוח בבית. אף פעם לא מכריז מלחמה בעצמו.' },
+  fin: { he: 'שר האוצר', hf: 'שרת האוצר', sh: 'אוצר', per: 15, off: 3, d: 'קובע את המס והרווחה כדי לשמור על הקופה, החוב ואהבת העם — לפי היעד שבחרת.' },
+  int: { he: 'שר הבינוי והפנים', hf: 'שרת הבינוי והפנים', sh: 'בינוי', per: 10, off: 5, d: 'בונה פרויקטים לאומיים (בתי חולים, דיור, תשתיות) מכסף פנוי בקופה.' },
+  fo: { he: 'שר החוץ', hf: 'שרת החוץ', sh: 'חוץ', per: 7, off: 1, d: 'חותם על הסכמי סחר, שולח סיוע באסונות, משפר יחסים כשהמוניטין נמוך ומציע שלום כשמלחמה הולכת רע.' }
+};
+const MIN_ORDER = ['def', 'fin', 'int', 'fo'];
+const MIN_POL0 = { def: { st: 'bal', buy: 1, mob: 1 }, fin: { goal: 'bal' }, int: { pri: 'people' }, fo: { rep: 65, peace: 1 } };
+const TRAITS = {
+  careful: { he: 'זהיר', d: 'נמנע מסיכונים', ap: 0, sc: 0.5 },
+  aggr: { he: 'תוקפני', d: 'מעדיף כוח ולחץ', ap: 0, sc: 1 },
+  frugal: { he: 'חסכן', d: 'חוסך כסף, שכר נמוך', ap: -0.5, sc: 0.6, sal: 0.7 },
+  popul: { he: 'פופוליסט', d: 'מרצה את העם, פחות אכפת לו מהקופה', ap: 2, sc: 1.2 },
+  corrupt: { he: 'מושחת', d: 'גונב קצת מהקופה — סכנת שערוריה', ap: 0, sc: 4, steal: 1 },
+  dipl: { he: 'דיפלומט', d: 'מצוין ביחסים עם העולם', ap: 0.5, sc: 0.6 },
+  pro: { he: 'מקצוען', d: 'עובד היטב (מיומנות +1)', ap: 0.5, sc: 0.5, sk: 1, sal: 1.2 },
+  char: { he: 'כריזמטי', d: 'העם אוהב אותו', ap: 1.5, sc: 1 }
+};
+const G = () => S.p.gov || (S.p.gov = newGov());
+const newGov = () => ({ m: {}, log: [], ovr: {}, no: {}, pt: {}, tc: {}, cand: {} });
+const minOf = r => (S && S.p && S.p.gov && S.p.gov.m[r]) || null;
+const minOn = r => { const m = minOf(r); return m && m.auto ? m : null; };
+const mSk = m => clamp(m.sk + (TRAITS[m.tr].sk || 0), 1, 6);
+const mTitle = (r, m) => m && m.g === 'f' ? MIN_R[r].hf : MIN_R[r].he;
+const govN = () => MIN_ORDER.filter(minOf).length;
+function minSal(sk, tr) { return Math.max(0.002, P().gdp * 0.00008) * (0.6 + 0.25 * sk) * (TRAITS[tr].sal || 1); }
+function mkCand(r) {
+  const sk = clamp(1 + Math.floor(R() * 5), 1, 5), tr = pick(Object.keys(TRAITS)), n = genName(S.player);
+  return { n: n.n, g: n.g, sk, tr, sal: minSal(sk, tr), auto: true, pol: Object.assign({}, MIN_POL0[r]), pop: clamp(Math.round(45 + (TRAITS[tr].ap || 0) * 6 + (R() - 0.5) * 20), 20, 80), d0: S.day };
+}
+// three people to choose from (kept for a while, so reopening the dialog shows the same faces)
+function candsFor(r) {
+  const g = G(), c = g.cand[r];
+  if (c && c.d > S.day && c.l.length) return c.l;
+  const l = [mkCand(r), mkCand(r), mkCand(r)];
+  if (!l.some(x => x.sk >= 3)) l[0].sk = 3, l[0].sal = minSal(3, l[0].tr);
+  // three different faces
+  for (let i = 1; i < 3; i++) for (let t = 0; t < 8 && l.slice(0, i).some(x => x.n.split(' ')[0] === l[i].n.split(' ')[0] || x.n.split(' ').pop() === l[i].n.split(' ').pop()); t++) { const n = genName(S.player); l[i].n = n.n; l[i].g = n.g; }
+  g.cand[r] = { d: S.day + 90, l }; return l;
+}
+const minAp = m => (TRAITS[m.tr].ap || 0) + (m.sk - 3) * 0.3 + (m.pop - 50) / 40;
+function govAp() { const g = S.p && S.p.gov; if (!g) return 0; let s = 0; for (const r in g.m) if (g.m[r]) s += minAp(g.m[r]); return clamp(s, -6, 8); }
+function govSal() { const g = S.p && S.p.gov; if (!g) return 0; let s = 0; for (const r in g.m) if (g.m[r]) s += g.m[r].sal; return s; }
+const pctT = v => '⁦' + Math.round(v * 100) + '%⁩';
+// a minister's report: kept in the log, and shown as a small toast (not more than one every ~1.6 s)
+function logMin(r, txt, fx, bad) {
+  const g = G(), m = g.m[r];
+  g.log.unshift({ d: S.day, r, t: txt, fx: fx || '', bad: !!bad }); if (g.log.length > 40) g.log.length = 40;
+  const now = performance.now();
+  if (now - (logMin.t || 0) > 1600) { logMin.t = now; toast(mTitle(r, m) + ': ' + txt + (fx ? ' · ' + fx : ''), bad); }
+}
+function hireMin(r, cand) {
+  const g = G(), old = g.m[r];
+  g.m[r] = Object.assign({}, cand, { d0: S.day });
+  if (old) g.m[r].pol = Object.assign({}, old.pol);
+  delete g.cand[r];
+  addNews(mTitle(r, g.m[r]) + ' חדש' + (g.m[r].g === 'f' ? 'ה' : '') + ' מונה' + (g.m[r].g === 'f' ? 'תה' : '') + ': ' + cand.n + ' (' + TRAITS[cand.tr].he + ').', 'good');
+}
+// fire (or lose) a minister; a corrupt one leaving is good news, a popular one leaving hurts
+function fireMin(r, quiet, resigned) {
+  const g = G(), m = g.m[r]; if (!m) return;
+  g.m[r] = null;
+  const e = { ap: m.tr === 'corrupt' ? 1 : m.pop > 62 ? -1 : 0 };
+  if (!resigned) S.p.treasury -= m.sal * 0.5;
+  if (!quiet) { fxToast((resigned ? 'התפטר' + (m.g === 'f' ? 'ה' : '') : 'פוטר' + (m.g === 'f' ? 'ה' : '')) + ': ' + m.n, e, e.ap < 0); addNews(mTitle(r, m) + ' ' + m.n + ' פוטר' + (m.g === 'f' ? 'ה' : '') + '.', 'event'); }
+  else applyFx(e);
+}
+function govDay() {
+  const g = S.p && S.p.gov; if (!g || S.over) return;
+  for (const r of MIN_ORDER) {
+    const m = g.m[r]; if (!m || !m.auto) continue;
+    const D = MIN_R[r];
+    if ((S.day + D.off) % D.per !== 0) continue;
+    MIN_FN[r](m);
+    if (S.over) return;
+  }
+}
+// once a month: popularity drifts with the government's, corrupt ministers take their share
+function govMonth() {
+  const g = S.p && S.p.gov; if (!g) return;
+  for (const r of MIN_ORDER) {
+    const m = g.m[r]; if (!m) continue;
+    m.pop = clamp(m.pop + (R() - 0.5) * 6 + (P().approval - 50) * 0.03 + (TRAITS[m.tr].ap || 0) * 0.3, 5, 95);
+    if (TRAITS[m.tr].steal) { const s = P().gdp * 0.00012 * (0.5 + R()); S.p.treasury -= s; m.st = (m.st || 0) + s; }
+  }
+}
+/* ---- the defence minister: runs the army ---- */
+function minDef(m) {
+  const me = S.player, M = P(), pol = m.pol, g = G(), st = pol.st, tr = m.tr, es = mSk(m);
+  const mine = unitsOf(me); if (!mine.length) return;
+  const free = u => !u.dest && !(u.man > S.day) && S.units.includes(u);
+  const said = [];
+  // a) badly damaged units come home to refit
+  const lim = { def: 0.5, bal: 0.4, atk: 0.3 }[st] + (tr === 'careful' ? 0.08 : tr === 'aggr' ? -0.08 : 0);
+  let back = 0;
+  mine.forEach(u => {
+    const s = uStr(u);
+    if (atHome(u)) { u.pk = s; return; }
+    if (!u.pk || s > u.pk) u.pk = s;
+    if (domOf(u) === 'land' && free(u) && u.at && u.at !== me && atWar(u.at, me) && s < u.pk * lim) { sendHome(u, true); back++; }
+  });
+  if (back) said.push(back === 1 ? 'יחידה פגועה הוחזרה הביתה' : back + ' יחידות פגועות הוחזרו הביתה');
+  const wars = warsOf(me).filter(w => w.pause === 0 && (w.a === me || w.b === me));
+  if (warsOf(me).some(w => w.pause === 0)) S.p.lastWar = S.day;
+  // b) invaders in our land: enough force at home, units move towards them, call back troops if needed
+  const intr = S.units.filter(u => u.o !== me && u.at === me && domOf(u) === 'land');
+  const I = intr.reduce((s, u) => s + uStr(u), 0);
+  const homeF = () => mine.filter(u => S.units.includes(u) && domOf(u) !== 'sea' && u.at === me).reduce((s, u) => s + uStr(u), 0);
+  let H = homeF();
+  if (I > 0) {
+    const need = I * ({ def: 1.8, bal: 1.5, atk: 1.25 }[st]);
+    const tgt = intr.slice().sort((a, b) => uStr(b) - uStr(a))[0];
+    let moved = 0, rec = 0;
+    mine.filter(u => free(u) && domOf(u) === 'land' && u.at === me && km([u.lon, u.lat], [tgt.lon, tgt.lat]) > 80).slice(0, 4).forEach(u => {
+      const p = nearIn(me, [tgt.lon + (R() - 0.5) * 0.4, tgt.lat + (R() - 0.5) * 0.4]); if (!p) return;
+      const r = planMove(u, p, 'def'); if (!r.err && !r.needWar) { commitMove(u, r, true); moved++; }
+    });
+    if (H < need) mine.filter(u => free(u) && domOf(u) !== 'sea' && u.at && u.at !== me).sort((a, b) => uStr(b) - uStr(a)).forEach(u => { if (H >= need) return; sendHome(u, true); H += uStr(u); rec++; });
+    if (H < need && pol.mob && M.res >= 1 && !cdLeft('mob') && !(M.mob > 0)) { mobilize(true); said.push('גיוס מילואים'); }
+    if (moved || rec) said.push('הגנה על הבית: ' + [moved ? moved + ' יחידות נעו מול הפולשים' : '', rec ? rec + ' הוחזרו מהחזית' : ''].filter(Boolean).join(', '));
+  }
+  // c) take the fight to the enemy, one front per order (the weakest neighbour first), never a new war
+  if (I <= 0 || H >= I * 2) {
+    const fronts = wars.map(w => ({ w, E: enemyLeaderFor(w, me) })).filter(x => S.c[x.E] && S.c[x.E].alive)
+      .sort((a, b) => (adjacent(b.E, me) - adjacent(a.E, me)) || (power(S.c[a.E]) - power(S.c[b.E])));
+    for (const { w, E } of fronts) {
+      const Ec = S.c[E];
+      const totLand = mine.filter(u => S.units.includes(u) && domOf(u) === 'land').reduce((s, u) => s + uStr(u), 0);
+      let avail = mine.filter(u => S.units.includes(u) && domOf(u) === 'land' && u.at === me && !u.dest).reduce((s, u) => s + uStr(u), 0) - totLand * ({ def: 0.6, bal: 0.35, atk: 0.2 }[st]);
+      const inE = forcesIn(me, E, Ec.adv);
+      const dE = (hasUnits(E) ? defStr(forcesIn(E, E, M.adv)) : power(Ec) * 0.6) * (1.3 + Math.max(0, mySideFront(w, me)) / 250);
+      const thr = { def: 2.0, bal: 1.15, atk: 0.85 }[st] * (tr === 'aggr' ? 0.85 : tr === 'careful' ? 1.2 : 1) * (1 + (R() - 0.5) * (6 - es) * 0.08);
+      let l = inE.l, s = inE.s;
+      const ratio = () => atkStr({ l, s }) / (dE + 1);
+      const pool = mine.filter(u => free(u) && domOf(u) === 'land' && u.at === me).sort((a, b) => uStr(b) - uStr(a));
+      const sent = [];
+      if (ratio() < thr * 1.1 && avail > 0 && pool.length) {
+        let L2 = l, S2 = s, A = avail;
+        for (const u of pool) { if (A <= 0) break; const pw = uPow(u, Ec.adv); L2 += pw.l; S2 += pw.s; A -= uStr(u); }
+        if (atkStr({ l: L2, s: S2 }) / (dE + 1) >= thr) {
+          for (const u of pool) {
+            if (avail <= 0 || ratio() >= thr * 1.15) break;
+            const p = nearIn(E, [u.lon, u.lat]); if (!p) break;
+            const r = planMove(u, p, 'atk'); if (r.err || r.needWar) continue;
+            commitMove(u, r, true); u.pk = uStr(u);
+            const pw = uPow(u, Ec.adv); l += pw.l; s += pw.s; avail -= uStr(u); sent.push(u);
+          }
+        } else if (!(g.sg && g.sg[E] > S.day)) {
+          (g.sg || (g.sg = {}))[E] = S.day + 90;
+          logMin('def', 'אין מספיק כוח כדי לפלוש ל' + nm(E) + ' — הכוחות נשארים להגן. כדאי לשקול רכש או בעלות ברית', '', true);
+        }
+      }
+      if (sent.length) said.push((sent.length === 1 ? uName(sent[0]) + ' נשלחה' : sent.length + ' יחידות נשלחו') + ' לחזית ' + nm(E));
+      // air cover over our troops in their land
+      if (l > 0 && !mine.some(u => domOf(u) === 'air' && S.units.includes(u) && (u.at === E || (u.dest && u.mode === 'atk')))) {
+        const air = mine.find(u => domOf(u) === 'air' && u.at === me && free(u));
+        const p = air && nearIn(E, [air.lon, air.lat]), r = p && planMove(air, p, 'atk');
+        if (r && !r.err && !r.needWar) { commitMove(air, r, true); said.push(uName(air) + ' לסיוע אווירי'); }
+      }
+      // across the sea: first a fleet off their coast, so ground forces can cross
+      if (!adjacent(me, E) && l === 0 && !sent.length && pool.length && !navyNear(me, E, 600).n && !mine.some(u => domOf(u) === 'sea' && u.dest && distToC(E, u.dest) < 700)) {
+        const fl = mine.find(u => domOf(u) === 'sea' && free(u) && (u.m.ships || 0) >= 1);
+        const p0 = fl && nearIn(E, [fl.lon, fl.lat]), p = p0 && snapSea(p0);
+        const r = p && planMove(fl, p, 'atk');
+        if (r && !r.err) { commitMove(fl, r, true); said.push(uName(fl) + ' יצא לחופי ' + nm(E)); }
+      }
+      if (sent.length) break;
+    }
+  }
+  // d) reserves: called up when the war goes badly, sent home after the peace
+  if (pol.mob && wars.length && !(M.mob > 0) && M.res >= 1 && !cdLeft('mob') && wars.some(w => mySideFront(w, me) < -8)) { mobilize(true); said.push('גיוס מילואים — החזית בבעיה'); }
+  if (!wars.length && M.mob > 0 && S.day - (S.p.lastWar || 0) > 30) { demobilize(true); said.push('המילואימניקים שוחררו הביתה'); }
+  // e) once a month: the defence budget follows the wars (unless the player set it himself), and purchases
+  if (S.day - (g.lb || -99) >= 30) {
+    g.lb = S.day;
+    const p = S.p;
+    if (!(g.ovr.def > S.day)) {
+      if (wars.length && st !== 'def' && p.defPct < Math.min(0.12, p.defPct0 * 1.5)) { p.defPct = Math.min(0.12, Math.round((p.defPct + 0.005) * 1000) / 1000); said.push('תקציב הביטחון הוגדל ל-' + '⁦' + (p.defPct * 100).toFixed(1) + '%⁩'); }
+      else if (!wars.length && S.day - (p.lastWar || -999) > 90 && p.defPct > p.defPct0 * 1.05 && st !== 'atk') { p.defPct = Math.max(p.defPct0, Math.round((p.defPct - 0.003) * 1000) / 1000); said.push('תקציב הביטחון הוחזר ל-' + '⁦' + (p.defPct * 100).toFixed(1) + '%⁩'); }
+    }
+    if (pol.buy) { const b = minBuy(m); if (b) said.push(b); }
+    // the minister may suggest a war, but never starts one
+    if (st !== 'def' && !wars.length && !(g.sw > S.day) && R() < 0.3) {
+      const t = neighborsOf(me).filter(x => S.c[x] && S.c[x].alive && justified(x) && rel(x, me) < -50 && power(M) > power(S.c[x]) * 2.5 && !isAlly(x, me))[0];
+      if (t) { g.sw = S.day + 240; logMin('def', 'המלצה: ' + nm(t) + ' עוינת וחלשה מאיתנו. ההחלטה אם לצאת למלחמה — שלך בלבד', '', false); }
+    }
+  }
+  if (said.length) logMin('def', said.join(' · '));
+}
+// weapons the defence minister orders on his own, within his share of the treasury
+function minBuy(m) {
+  const c = P(), p = S.p; if (p.bankrupt) return null;
+  const atw = activeWars(S.player) > 0;
+  const share = (m.pol.buy === 2 ? 0.3 : 0.12) * (atw ? 1.5 : 1) * (m.tr === 'frugal' ? 0.6 : 1);
+  const budget = (p.treasury - c.gdp * 0.02) * share; if (budget <= 0) return null;
+  const keys = ['tanks', 'air', 'art', 'heli', 'afv'].concat(c.mlv ? ['msl'] : [], c.inv0.ships > 0 ? ['ships'] : [], atw ? ['troops'] : []);
+  const k = keys.sort((a, b) => ((c.inv[a] || 0) + 1) / ((c.inv0[a] || 0) + 1) - ((c.inv[b] || 0) + 1) / ((c.inv0[b] || 0) + 1))[0];
+  const B = BUY[k], mul = Math.min(20, Math.floor(budget / B.cost)); if (mul < 1) return null;
+  if (!buyPkg(k, mul, true)) return null;
+  return 'רכש: ' + (k === 'troops' ? troopsPlain(B.n * mul) + ' חיילים' : '⁦' + B.n * mul + '⁩ ' + B.unit) + ' (' + '⁦' + moneyTxt(B.cost * mul) + '⁩)';
+}
+/* ---- the finance minister: tax and welfare ---- */
+function minFin(m) {
+  const g = G(); if (g.ovr.fin > S.day) return;
+  const p = S.p, c = P(), bd = budgetDay(), debt = p.treasury < 0 ? -p.treasury / c.gdp : 0, ap = c.approval;
+  const netY = bd.net * DPY / c.gdp, goal = m.pol.goal, tr = m.tr;
+  const lim = { grow: 0.45, bal: 0.2, wel: 0.4 }[goal] + (tr === 'popul' ? 0.15 : tr === 'frugal' ? -0.1 : 0);
+  const res = c.gdp * (tr === 'frugal' ? 0.06 : 0.03);
+  let k = null, d = 0, why = '';
+  if (p.bankrupt || debt > lim + 0.2 || (debt > lim && netY < 0.003)) {
+    why = p.bankrupt ? 'פשיטת רגל' : 'החוב גבוה';
+    if ((goal === 'wel' || tr === 'popul') && p.tax < 0.45) { k = 'tax'; d = 0.01; }
+    else if (p.welfare > 0.09 && ap > 38) { k = 'welfare'; d = -0.01; } else if (p.tax < 0.5) { k = 'tax'; d = 0.01; }
+  } else if (ap < 34 && debt < lim + 0.3) {
+    why = 'העם כועס';
+    if (goal === 'wel' && p.welfare < 0.3) { k = 'welfare'; d = 0.01; } else if (p.tax > 0.16) { k = 'tax'; d = -0.01; }
+  } else if (netY > 0.004 && p.treasury > res) {
+    why = 'עודף בקופה';
+    if (goal === 'grow' && p.tax > 0.18) { k = 'tax'; d = -0.01; }
+    else if (goal === 'wel' && p.welfare < 0.28) { k = 'welfare'; d = 0.01; }
+    else if (goal === 'bal' && (ap < 52 || p.treasury > c.gdp * 0.08) && p.tax > 0.2) { k = 'tax'; d = -0.01; }
+  } else if (netY < ({ grow: -0.025, bal: -0.006, wel: -0.02 }[goal] - (tr === 'popul' ? 0.01 : 0)) && (goal === 'bal' || debt > 0.1)) {
+    why = 'גירעון';
+    if ((goal === 'grow' || tr === 'frugal') && p.welfare > 0.1 && ap > 40) { k = 'welfare'; d = -0.01; } else if (p.tax < 0.5) { k = 'tax'; d = 0.01; }
+  }
+  if (!k) return;
+  if (R() < (5 - mSk(m)) * 0.07) return; // a weak minister sometimes hesitates
+  const T0 = approvalTarget();
+  p[k] = Math.round((p[k] + d) * 100) / 100;
+  const dd = approvalTarget() - T0;
+  const what = k === 'tax' ? (d > 0 ? 'מס ההכנסה הועלה ל-' : 'מס ההכנסה הורד ל-') : (d > 0 ? 'תקציב הרווחה הוגדל ל-' : 'תקציב הרווחה קוצץ ל-');
+  logMin('fin', what + pctT(p[k]) + ' (' + why + ')', Math.abs(dd) >= 0.5 ? 'העם ' + sgnT(dd) + ' בהדרגה' : '', dd < -0.5);
+}
+/* ---- the construction minister: national projects from spare money ---- */
+const INT_ORD = { people: ['hosp', 'house', 'school', 'infra', 'green'], growth: ['infra', 'school', 'green', 'hosp', 'house'], green: ['green', 'infra', 'school', 'hosp', 'house'] };
+function minInt(m) {
+  const p = S.p, c = P(); if (p.bankrupt) return;
+  const debt = p.treasury < 0 ? -p.treasury / c.gdp : 0; if (debt > 0.3) return;
+  const reserve = c.gdp * (m.tr === 'frugal' ? 0.05 : m.tr === 'popul' ? 0.01 : 0.025);
+  const free = p.treasury - reserve; if (free <= 0) return;
+  if (p.proj.length >= (m.tr === 'careful' || m.tr === 'frugal' ? 1 : 2)) return;
+  for (const k of INT_ORD[m.pol.pri] || INT_ORD.people) {
+    if (p.proj.some(q => q.k === k) || (p.built[k] || 0) >= projMax(k)) continue;
+    const cost = projCost(k); if (cost > free * 0.7) continue;
+    if (!startProj(k, true)) return;
+    const D = PROJ[k];
+    logMin('int', 'התחלת בנייה: ' + D.he + ' (' + '⁦' + moneyTxt(cost) + '⁩, ' + Math.round(D.days / DPM) + ' חודשים)', D.ap ? 'העם +' + D.ap + ' בסיום' : '');
+    return;
+  }
+}
+/* ---- the foreign minister: trade, aid, relations, peace ---- */
+function minFo(m) {
+  const g = G(), me = S.player, es = mSk(m);
+  // 1) a war that goes badly: propose a cease-fire or peace
+  if (m.pol.peace) for (const w of warsOf(me)) {
+    if (w.pause > 0 || !(w.a === me || w.b === me)) continue;
+    const fp = mySideFront(w, me), age = S.day - (w.startDay || 0);
+    const lim = m.tr === 'aggr' ? -30 : m.tr === 'careful' ? -6 : -15;
+    if (!(fp < lim || (age > 300 && fp < 5)) || (g.pt[w.id] || 0) > S.day) continue;
+    g.pt[w.id] = S.day + 45;
+    const k = fp < -25 ? 'cease' : 'white', en = enemyLeaderFor(w, me);
+    if (peaceW(w) + (m.tr === 'dipl' ? 10 : 0) + (es - 3) * 4 > { cease: 0, white: 10 }[k]) {
+      applyPeace(w, k, me, en, 0);
+      logMin('fo', (k === 'cease' ? 'הושגה הפסקת אש עם ' : 'נחתם הסכם שלום עם ') + nm(en), '');
+    } else logMin('fo', nm(en) + ' דחתה את הצעת ה' + (k === 'cease' ? 'הפסקת אש' : 'שלום') + ' שלנו', '', true);
+    return;
+  }
+  // 2) about once a month: a new trade deal with a big economy that likes us
+  if (S.day - (g.lt || -99) >= (m.tr === 'dipl' ? 21 : 30)) {
+    g.lt = S.day;
+    const l = alive().filter(o => o !== me && !hasPact(o, me, 'trade') && !atWar(o, me) && !sanctions(o, me) && !sanctions(me, o) && rel(o, me) > 10 &&
+      !(g.no['trade:' + o] > S.day) && !(g.tc[o] > S.day)).sort((a, b) => S.c[b].gdp - S.c[a].gdp).slice(0, 6);
+    const o = l.length ? pick(l) : null;
+    if (o) {
+      if (aiScore('trade', o).ok) { setPact(o, me, 'trade', true); const parts = applyFx({ rep: 2, rel: { [o]: 8 } }); addNews('נחתם הסכם סחר בין ' + P().he + ' ל' + nm(o) + '.', 'good'); logMin('fo', 'הסכם סחר עם ' + nm(o), parts.join(' · ')); }
+      else { g.tc[o] = S.day + 150; addRel(o, me, -1); }
+    }
+  }
+  // 3) reputation below the target: aid and gestures to countries that matter
+  if (S.p.rep < m.pol.rep && S.day - (g.lg || -99) >= (m.tr === 'frugal' ? 60 : 30) && !S.p.bankrupt) {
+    g.lg = S.day;
+    const l = alive().filter(o => o !== me && !atWar(o, me) && rel(o, me) > -40 && rel(o, me) < 70 && !cdLeft('gift:' + o)).sort((a, b) => giftRep(b) - giftRep(a) || S.c[b].gdp - S.c[a].gdp).slice(0, 8);
+    const o = l.length ? pick(l) : null, amt = giftAmt();
+    if (o && S.p.treasury > -P().gdp * 0.5 && spend(amt)) {
+      setCd('gift:' + o, 30);
+      const parts = applyFx({ rep: giftRep(o), rel: { [o]: giftRel(o) } });
+      addNews('שלחנו סיוע הומניטרי ל' + nm(o) + '.', 'dip');
+      logMin('fo', 'סיוע ל' + nm(o) + ' (' + '⁦' + moneyTxt(amt) + '⁩)', parts.join(' · '));
+    }
+  }
+}
+const MIN_FN = { def: minDef, fin: minFin, int: minInt, fo: minFo };
+// a disaster abroad: the foreign minister answers on his own, otherwise the player is asked
+function pushAid(id, kind, size) {
+  const m = minOn('fo');
+  if (!m) { S.pending.push({ type: 'aid', from: id, kind, size }); return; }
+  const C = S.c[id]; if (!C) return;
+  const big = Math.max(0.01, Math.min(P().gdp * 0.002, C.gdp * size * 0.5 + 0.02));
+  const goBig = S.p.rep < m.pol.rep && m.tr !== 'frugal' && S.p.treasury > big * 4;
+  const amt = goBig ? big : big * 0.25, e = goBig ? { ap: 1, rep: 6, rel: { [id]: 18 } } : { rep: 3, rel: { [id]: 8 } };
+  if (S.p.bankrupt || !spend(amt)) { logMin('fo', 'אין כסף לסיוע ל' + C.he, '', true); return; }
+  const parts = applyFx(e);
+  addNews((goBig ? 'שלחנו משלחת סיוע גדולה ל' : 'צוותי חילוץ שלנו נחתו ב') + C.he + ' אחרי ה' + kind + '.', 'good');
+  logMin('fo', (goBig ? 'משלחת סיוע ל' : 'צוותי חילוץ ל') + C.he + ' (' + kind + ')', parts.join(' · '));
+}
+
+/* ================= living world: other countries grow, arm, vote, rebel ================= */
+const TAG_HE = { army: 'מגדילה את הצבא', rec: 'במיתון', boom: 'בצמיחה מהירה', elec: 'לקראת בחירות', coup: 'אחרי הפיכה צבאית', build: 'משקיעה בתשתיות', protest: 'מחאות נגד השלטון',
+  ally: 'חתמה על ברית', disaster: 'מתאוששת מאסון', newgov: 'ממשלה חדשה', rebel: 'נלחמת על עצמאותה', sanc: 'מטילה סנקציות', revo: 'אחרי מהפכה' };
+const TAG_CLS = { army: 'orange', rec: 'bad', boom: 'ok', elec: 'blue', coup: 'red', build: 'teal', protest: 'orange', ally: 'blue', disaster: 'orange', newgov: 'teal', rebel: 'red', sanc: 'orange', revo: 'teal' };
+function tag(c, k, days) { if (c) (c.tg || (c.tg = {}))[k] = Math.round(S.day + days); }
+const hasTag = (c, k) => !!(c && c.tg && c.tg[k] > S.day);
+const wnews = t => addNews(t, 'world');
+const wcount = k => { const o = S.wc || (S.wc = {}); o[k] = (o[k] || 0) + 1; };
+let BIG = { t: -1, s: new Set() };
+function bigSet() { if (BIG.t !== S.turn || !BIG.s.size) BIG = { t: S.turn, s: new Set(alive().sort((a, b) => S.c[b].gdp - S.c[a].gdp).slice(0, 20)) }; return BIG.s; }
+// countries the player cares about: big economies, neighbours, allies, enemies
+function notable(id) { if (!S.player || !S.c[S.player] || !S.c[S.player].alive) return bigSet().has(id); return bigSet().has(id) || adjacent(id, S.player) || isAlly(id, S.player) || atWar(id, S.player) || rel(id, S.player) < -45; }
+const hashId = id => { let h = 7; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0; return Math.abs(h); };
+function aiInit(c) {
+  if (c.ld) return;
+  const n = genName(c.id); c.ld = n.n; c.lg = n.g; c.dp0 = c.defPct; c.gm = c.gdp; c.g = 0.025;
+  if (c.gov !== 'authoritarian') c.el = S.day + 30 + Math.floor(R() * (c.gov === 'democracy' ? 1430 : 1800));
+}
+const vg = (c, m, f) => c && c.lg === 'f' ? f : m;
+// each country gets its monthly turn on its own day, so the work is spread over the month
+function worldDay() {
+  if (!S.player) return;
+  const d = S.day % 30;
+  for (const id in S.c) { const c = S.c[id]; if (!c.alive || id === S.player) continue; if ((c.hd == null ? (c.hd = hashId(id) % 30) : c.hd) !== d) continue; aiMonth(c); }
+}
+function aiMonth(c) {
+  aiInit(c);
+  const id = c.id, wars = activeWars(id), nt = notable(id);
+  // yearly growth, smoothed so one-off shocks don't look like a boom or a crash
+  c.g = (c.g == null ? 0.025 : c.g) * 0.8 + (c.gdp / (c.gm || c.gdp) - 1) * 12 * 0.2; c.gm = c.gdp;
+  // business cycle: recessions and booms come and go
+  if (c.cy && S.day >= c.cy.u) { if (nt && c.cy.k === 'rec') wnews(c.he + ' יצאה מהמיתון — הכלכלה חוזרת לצמוח.'); c.cy = null; }
+  else if (!c.cy) {
+    const pr = 0.006 + wars * 0.02 + sanctionHit(id) * 0.15 + (S.recession > 0 ? 0.04 : 0) + (c.approval < 25 ? 0.01 : 0);
+    if (R() < pr) { wcount('rec'); c.cy = { k: 'rec', u: S.day + 200 + Math.floor(R() * 400) }; tag(c, 'rec', c.cy.u - S.day); if (nt) wnews('מיתון ב' + c.he + ': ' + pick(['האבטלה מזנקת והבורסה צונחת.', 'המפעלים מפטרים עובדים.', 'הצריכה נעצרת והמטבע נחלש.'])); }
+    else if (!wars && R() < 0.006) { wcount('boom'); c.cy = { k: 'boom', u: S.day + 300 + Math.floor(R() * 500) }; tag(c, 'boom', c.cy.u - S.day); if (nt) wnews('פריחה כלכלית ב' + c.he + ': ' + pick(['השקעות זרות זורמות לשם.', 'הייצוא שובר שיאים.', 'תעשיית הטכנולוגיה מזנקת.'])); }
+  }
+  if (c.cy) c.approval = clamp(c.approval + (c.cy.k === 'rec' ? -2 : 1.2), 5, 95);
+  if (c.approval < 25) tag(c, 'protest', 40);
+  armsMonth(c, nt, wars);
+  // domestic projects: roads, ports, hospitals
+  if (!wars && c.cy && c.cy.k === 'rec' ? false : !wars && R() < 0.035) {
+    wcount('build'); c.gb = Math.min(0.008, (c.gb || 0) + 0.002); c.approval = clamp(c.approval + 2, 5, 95); tag(c, 'build', 365);
+    if (nt && bigSet().has(id) && R() < 0.4) wnews(c.he + ' ' + pick(['משיקה תוכנית תשתיות לאומית ענקית.', 'בונה רשת רכבות מהירות חדשה.', 'משקיעה מיליארדים בבתי חולים ובתי ספר.', 'מקימה נמל ושדה תעופה חדשים.']));
+  }
+  c.gb = (c.gb || 0) * 0.992;
+  politicsMonth(c, nt);
+  if (c.bought) for (const k in c.bought) { c.bought[k] *= 0.996; if (c.bought[k] < 0.5) delete c.bought[k]; }
+}
+// arms build-up: threatened or fighting countries raise the budget and buy equipment
+function armsMonth(c, nt, wars) {
+  const id = c.id; let thr = 0;
+  for (const n of neighborsOf(id)) { const N = S.c[n]; if (N && N.alive && rel(id, n) < -40) thr = Math.max(thr, power(N) / power(c)); }
+  const t = (c.dp0 || c.defPct) * (wars ? 1.35 : thr > 0.7 ? 1.2 : 1);
+  c.defPct = clamp(c.defPct + (t - c.defPct) * 0.06, 0.003, 0.15);
+  if ((wars || thr > 0.6) && R() < 0.2 && c.def > 0.3) {
+    const k = c.def > 20 ? pick(['air', 'tanks', 'ships', 'msl', 'air', 'heli']) : pick(['tanks', 'art', 'afv', 'heli']);
+    if ((k === 'ships' && !(c.inv0.ships > 0)) || (k === 'msl' && !c.mlv)) return;
+    const B = BUY[k], n = Math.max(B.n, Math.round(Math.min(c.def * 0.06 / unitPrice(k), (c.inv0[k] || 0) * 0.08 + B.n) / B.n) * B.n);
+    (c.bought || (c.bought = {}))[k] = (c.bought[k] || 0) + n;
+    tag(c, 'army', 240); wcount('arms');
+    if (nt) wnews(c.he + ' ' + pick(['הזמינה', 'רוכשת', 'חתמה על עסקה לרכישת']) + ' ' + n.toLocaleString('en-US') + ' ' + B.unit + (wars ? ' לקראת המשך הלחימה.' : ' על רקע המתיחות עם שכנותיה.'));
+  }
+}
+function politicsMonth(c, nt) {
+  if (c.gov !== 'authoritarian' && c.el) {
+    if (c.el > S.day && c.el - S.day < 45) tag(c, 'elec', c.el - S.day + 2);
+    if (S.day >= c.el) return election(c, nt);
+  }
+  if (c.gov !== 'democracy' && c.approval < 20 && R() < (c.gov === 'authoritarian' ? 0.02 : 0.03)) return worldCoup(c.id);
+  if (c.gov === 'democracy' && c.approval < 12 && c.gdp / c.pop < 8 && R() < 0.01) return worldCoup(c.id);
+  if (c.gov === 'authoritarian' && c.approval < 12 && R() < 0.012) return revolution(c);
+}
+function election(c, nt) {
+  const keep = c.approval + (R() - 0.5) * 30 + (c.gov === 'hybrid' ? 25 : 0) > 48;
+  c.el = S.day + (c.gov === 'democracy' ? 1461 : 1826) + Math.floor((R() - 0.5) * 120);
+  wcount(keep ? 'reelect' : 'newleader');
+  if (keep) { c.approval = clamp(c.approval + 5, 5, 95); if (nt) wnews('בחירות ב' + c.he + ': ' + c.ld + ' ' + vg(c, 'נבחר', 'נבחרה') + ' לכהונה נוספת.'); return; }
+  const old = c.ld, n = genName(c.id); c.ld = n.n; c.lg = n.g; c.approval = 55 + R() * 12; tag(c, 'newgov', 180);
+  // a new government brings a new foreign policy
+  if (S.player && S.player !== c.id) addRel(c.id, S.player, Math.round((R() - 0.5) * 24));
+  neighborsOf(c.id).slice(0, 4).forEach(x => addRel(c.id, x, Math.round((R() - 0.5) * 16)));
+  if (nt || bigSet().has(c.id)) wnews('מהפך בבחירות ב' + c.he + ': ' + n.n + ' ' + vg(c, 'ינהיג', 'תנהיג') + ' את המדינה במקום ' + old + '.');
+}
+// the army takes power; democracies are angry
+function worldCoup(id) {
+  const c = S.c[id]; if (!c || !c.alive || id === S.player) return;
+  aiInit(c);
+  const old = c.ld, n = genName(id, 'm'), was = c.gov;
+  wcount('coup'); c.ld = 'הגנרל ' + n.n; c.lg = 'm'; c.gov = 'authoritarian'; c.approval = 45; delete c.el; tag(c, 'coup', 365);
+  if (was !== c.gov) BASE.clear();
+  alive().forEach(d => { const D = S.c[d]; if (d === id || D.gov !== 'democracy') return; addRel(d, id, -12); if (d !== S.player && D.gdp > 200 && R() < 0.3) { S.sanc[d + '>' + id] = 1; tag(D, 'sanc', 180); } });
+  wnews('הפיכה צבאית ב' + c.he + ': הצבא הדיח את ' + old + ', והגנרל ' + n.n + ' תפס את השלטון.');
+  needMapRecolor = true;
+}
+function revolution(c) {
+  wcount('revo'); const old = c.ld, n = genName(c.id); c.ld = n.n; c.lg = n.g;
+  c.gov = R() < 0.35 ? 'democracy' : 'hybrid'; c.approval = 65; c.el = S.day + 365 + Math.floor(R() * 365); tag(c, 'revo', 365);
+  BASE.clear();
+  for (const k in S.sanc) if (k.endsWith('>' + c.id) && S.c[k.split('>')[0]] && S.c[k.split('>')[0]].gov === 'democracy') delete S.sanc[k];
+  alive().forEach(d => { if (d !== c.id && S.c[d].gov === 'democracy') addRel(d, c.id, 10); });
+  wnews('מהפכה ב' + c.he + ': ההמונים הפילו את ' + old + '. ' + n.n + ' ' + vg(c, 'עומד', 'עומדת') + ' בראש ממשלת מעבר ומבטיח' + vg(c, '', 'ה') + ' בחירות.');
+}
+// diplomacy between other countries: alliances form and break, trade deals end, sanctions come and go
+function worldDiplomacy(ids) {
+  for (let i = 0; i < 2; i++) {
+    const a = pick(ids); if (!a || a === S.player) continue;
+    const cands = neighborsOf(a).concat([...bigSet()]).filter(b => b !== a && b !== S.player && S.c[b] && S.c[b].alive);
+    const b = cands.length ? pick(cands) : null; if (!b) continue;
+    if (rel(a, b) > 45 && !isAlly(a, b) && !atWar(a, b) && !warsOf(a).length && !warsOf(b).length && R() < 0.3) {
+      wcount('ally'); setPact(a, b, 'alliance', true); addRel(a, b, 10); tag(S.c[a], 'ally', 180); tag(S.c[b], 'ally', 180);
+      wnews('ברית צבאית חדשה: ' + nm(a) + ' ו' + nm(b) + ' חתמו על הסכם הגנה הדדית.');
+    }
+  }
+  for (const k in S.pacts) {
+    const [a, b] = k.split('|'); if (a === S.player || b === S.player) continue;
+    const p = S.pacts[k]; if (!p) continue; const r = rel(a, b);
+    if (p.alliance && r < 10 && R() < 0.3) { wcount('allyx'); setPact(a, b, 'alliance', false); wnews('הברית בין ' + nm(a) + ' ל' + nm(b) + ' התפרקה אחרי חודשים של מתיחות.'); }
+    else if (p.trade && r < -15 && R() < 0.3) { setPact(a, b, 'trade', false); if (notable(a) || notable(b)) wnews(nm(a) + ' ביטלה את הסכם הסחר עם ' + nm(b) + '.'); }
+  }
+  const a = pick(ids.filter(x => x !== S.player && S.c[x].gov === 'democracy' && S.c[x].gdp > 150));
+  if (a) {
+    const l = ids.filter(b => b !== a && b !== S.player && rel(a, b) < -45 && !S.sanc[a + '>' + b]);
+    const b = l.length ? pick(l) : null;
+    if (b && R() < 0.35) { wcount('sanc'); S.sanc[a + '>' + b] = 1; tag(S.c[a], 'sanc', 180); if (notable(a) || notable(b)) wnews(nm(a) + ' הטילה סנקציות כלכליות על ' + nm(b) + '.'); }
+  }
+  for (const k in S.sanc) {
+    const [x, y] = k.split('>'); if (x === S.player || y === S.player || !S.c[x] || !S.c[y]) continue;
+    if (rel(x, y) > -25 && R() < 0.15) { delete S.sanc[k]; if (notable(x) || notable(y)) wnews(nm(x) + ' הסירה את הסנקציות על ' + nm(y) + '.'); }
+  }
+}
+// once a month: annexed lands may rise up
+function worldRebels() {
+  for (const id in S.c) {
+    const L = S.c[id]; if (L.alive || !L.annexedBy || !L.tids0 || S.day - (L.annexDay || 0) < 365) continue;
+    const W = S.c[L.annexedBy]; if (!W || !W.alive) continue;
+    const pr = 0.004 * (W.gov === 'authoritarian' ? 1.5 : 1) * (W.approval < 40 ? 2 : 1) * (L.annexedBy === S.player ? 1.5 : 1);
+    if (R() < pr) rebel(L);
+  }
+}
+function rebel(L) {
+  const wid = L.annexedBy, W = S.c[wid];
+  const tids = (L.tids0 || []).filter(t => S.owner[t] === wid); if (!W || !tids.length) return;
+  wcount('rebel'); tids.forEach(t => S.owner[t] = L.id);
+  L.alive = true; delete L.annexedBy;
+  L.gdp *= 0.6; W.gdp = Math.max(W.gdp * 0.5, W.gdp - L.gdp * 0.6); W.pop = Math.max(W.pop * 0.5, W.pop - L.pop * 0.85);
+  for (const k of INV_KEYS) L.inv[k] = (L.inv0[k] || 0) * (k === 'troops' ? 0.5 : 0.25);
+  L.bought = {}; L.nukes = 0; L.mob = 0; L.approval = 75; L.def = L.def0 * 0.5; L.cy = null;
+  const n = genName(L.id); L.ld = n.n; L.lg = n.g; tag(L, 'rebel', 365);
+  if (wid === S.player) { S.p.annexed = S.p.annexed.filter(x => x !== L.id); S.p.shock -= 3; }
+  rebuildOwn(); WG_CACHE.t = -1;
+  const w = declareWar(L.id, wid, { noJoin: true, provoked: true, silent: wid !== S.player, noRally: true });
+  if (w) { w.f = 0; w.startDay = S.day; }
+  addNews('מרד ב' + L.he + ': המורדים הכריזו עצמאות מ' + W.he + ' והשתלטו על ' + (tids.length > 1 ? 'רוב השטח' : 'השטח') + '. ' + n.n + ' ' + vg(L, 'עומד', 'עומדת') + ' בראשם.', wid === S.player ? 'war' : 'world');
+  needMapRecolor = true;
+}
+// a sanctions wave against a pariah: many democracies join in
+function sanctionWave(o) {
+  let n = 0;
+  alive().forEach(d => { const D = S.c[d]; if (d === o || d === S.player || D.gov !== 'democracy' || D.gdp < 50 || S.sanc[d + '>' + o]) return; if (rel(d, o) < 10 && R() < 0.6) { S.sanc[d + '>' + o] = 1; n++; } });
+  if (n) tag(S.c[o], 'sanc', 1);
+  return n;
+}
+const oilShock = dir => () => alive().forEach(id => { if (id !== S.player) S.c[id].gdp *= OIL.has(id) ? 1 + 0.02 * dir : 1 - 0.004 * dir; });
+// world reputation of any country (the player's is kept separately)
+function repOf(id) { if (id === S.player) return S.p.rep; return clamp(50 + worldView(id) * 0.8 - (S.wars.some(w => w.a === id && w.pause === 0) ? 10 : 0), 0, 100); }
+let RKC = { d: -1 };
+function ranks() {
+  if (RKC.d === S.day && RKC.w === S.wid) return RKC;
+  const ids = alive(), by = f => ids.map(id => [id, f(id)]).sort((a, b) => b[1] - a[1]).slice(0, 40).map(x => x[0]);
+  RKC = { d: S.day, w: S.wid, g: by(id => S.c[id].gdp), p: by(id => power(S.c[id])), r: by(repOf) };
+  return RKC;
+}
+// every three months: remember the rankings, so the world view can show who rises and who falls
+function worldSnap() {
+  RKC.d = -1; const r = ranks(), cur = { g: r.g.slice(), p: r.p.slice(), r: r.r.slice(), d: S.day };
+  const h = (S.wh && Array.isArray(S.wh.h)) ? S.wh.h : (S.wh && S.wh.cur ? [S.wh.cur] : []);
+  h.push(cur); while (h.length > 5) h.shift();
+  S.wh = { h, prev: h[0], cur }; // prev = about a year ago
+}
+
+/* ================= random events: a data table ================= */
+// effects: ap/rep (now), m (money as a share of GDP: − = cost), cash (bn), gdp (share), gv+gd (growth per year for gd days),
+// at+ad (approval target for ad days), ro/ro2 (relations with the other country), rd (relations with all democracies),
+// un (anger in the street), mil {kind: share lost}, pop (share). A choice may also have f(ctx) and need(ctx).
+const fnv = (v, c) => typeof v === 'function' ? v(c) : v;
+const C_ = (l, e, o) => Object.assign({ l, e: e || {} }, o || {});
+const notMe = x => x !== S.player && S.c[x] && S.c[x].alive;
+const pk = l => l && l.length ? pick(l) : null;
+// how the other country of an event is chosen
+const EVO = {
+  nb: () => pk(neighborsOf(S.player).filter(x => notMe(x) && !atWar(x, S.player))),
+  nbh: () => pk(neighborsOf(S.player).filter(x => notMe(x) && !atWar(x, S.player) && rel(x, S.player) < 0)),
+  riv: () => pk(alive().filter(x => notMe(x) && S.c[x].gdp > 5 && rel(x, S.player) < -25 && !atWar(x, S.player)).sort((a, b) => rel(a, S.player) - rel(b, S.player)).slice(0, 8)),
+  fr: () => pk(alive().filter(x => notMe(x) && rel(x, S.player) > 30 && !atWar(x, S.player))),
+  frna: () => pk(alive().filter(x => notMe(x) && rel(x, S.player) > 40 && !isAlly(x, S.player) && !atWar(x, S.player) && !warsOf(x).length && S.c[x].gdp > 20)),
+  big: () => pk([...bigSet()].filter(x => notMe(x) && !atWar(x, S.player))),
+  bigtr: () => pk([...bigSet()].filter(x => notMe(x) && !atWar(x, S.player) && rel(x, S.player) < 30)),
+  any: () => pk(alive().filter(x => notMe(x) && S.c[x].gdp > 5)),
+  authbig: () => pk(alive().filter(x => notMe(x) && S.c[x].gov === 'authoritarian' && S.c[x].gdp > 300 && !atWar(x, S.player))),
+  weak: () => pk(alive().filter(x => notMe(x) && S.c[x].gov !== 'democracy' && S.c[x].approval < 40 && !atWar(x, S.player))),
+  poorany: () => pk(alive().filter(x => notMe(x) && S.c[x].gdp / S.c[x].pop < 4)),
+  poorfr: () => pk(alive().filter(x => notMe(x) && S.c[x].gdp / S.c[x].pop < 8 && rel(x, S.player) > 10 && !atWar(x, S.player))),
+  torn: () => pk(S.wars.filter(w => w.pause === 0 && !involvesPlayer(w)).map(w => w.f >= 0 ? w.b : w.a).filter(notMe)),
+  pariah: () => pk(alive().filter(x => notMe(x) && S.c[x].gdp > 20 && !atWar(x, S.player) && (hated(x) || (S.c[x].gov === 'authoritarian' && worldView(x) < 0)))),
+  buyer: () => pk(alive().filter(x => notMe(x) && rel(x, S.player) > 15 && S.c[x].gdp > 10 && !atWar(x, S.player))),
+  seller: () => pk([...bigSet()].filter(x => notMe(x) && rel(x, S.player) > 0 && S.c[x].inv.air > 200)),
+  risky: () => pk(alive().filter(x => notMe(x) && (S.c[x].gdp / S.c[x].pop < 4 || rel(x, S.player) < -30) && !atWar(x, S.player))),
+  nukeauth: () => pk(alive().filter(x => notMe(x) && S.c[x].nukes > 0 && S.c[x].gov !== 'democracy')),
+  aiwar: () => { const w = pk(S.wars.filter(w => w.pause === 0 && !involvesPlayer(w))); return w ? [w.a, w.b] : null; },
+  aipair: () => { for (let i = 0; i < 6; i++) { const a = pk(alive().filter(notMe)); const b = a && pk(neighborsOf(a).filter(x => notMe(x) && rel(a, x) < -10 && !atWar(a, x))); if (b) return [a, b]; } return null; },
+  pw2: () => { const l = alive().filter(notMe).sort((a, b) => power(S.c[b]) - power(S.c[a])).slice(0, 8); if (l.length < 2) return null; const a = pick(l); return [a, pick(l.filter(x => x !== a))]; }
+};
+const anyCorrupt = () => MIN_ORDER.some(r => minOf(r) && minOf(r).tr === 'corrupt');
+const EV = [
+  /* ---------- at home: strikes and protests ---------- */
+  { id: 'strike_gen', c: 'dom', w: 3, r: 'fin', t: 'שביתה כללית', x: c => 'ההסתדרויות הכריזו על שביתה כללית ב' + c.he + ': נמלים, רכבות ומשרדי ממשלה סגורים. הן דורשות העלאת שכר במגזר הציבורי.',
+    ch: [C_('לתת את ההעלאה', { m: -0.002, ap: 3 }), C_('פשרה: חצי מהדרישה', { m: -0.001, ap: 1 }), C_('לשבור את השביתה', { ap: -4, un: 1, gdp: -0.002 })] },
+  { id: 'strike_doc', c: 'dom', w: 2, r: 'fin', t: 'שביתת רופאים', x: 'רופאי בתי החולים שובתים בגלל עומס ומחסור בתקנים. ניתוחים נדחים והתורים מתארכים.',
+    ch: [C_('להוסיף תקנים ותקציב', { m: -0.0012, ap: 2 }), C_('צו ריתוק לרופאים', { ap: -2, rep: -1 }), C_('לחכות שזה יעבור', { ap: -2, at: -2, ad: 120 })] },
+  { id: 'strike_port', c: 'dom', w: 2, r: 'fin', ok: c => c.sea, t: 'שביתה בנמלים', x: 'עובדי הנמלים השביתו את הייצוא והייבוא. מכולות נערמות והמחירים בחנויות עולים.',
+    ch: [C_('להיענות לדרישות', { m: -0.0006, ap: 1 }), C_('להפריט את הנמלים', { m: 0.002, ap: -3, gv: 0.002, gd: 730 }), C_('לסרב', { gdp: -0.003, ap: -1 })] },
+  { id: 'strike_teach', c: 'dom', w: 2, r: 'fin', t: 'שביתת מורים', x: 'המורים לא נכנסים לכיתות עד שיקבלו העלאת שכר. ההורים זועמים — על כולם.',
+    ch: [C_('העלאת שכר למורים', { m: -0.001, ap: 2, gv: 0.001, gd: 1095 }), C_('קיצור חופשות במקום כסף', { ap: -1 }), C_('לסרב', { ap: -3 })] },
+  { id: 'prot_cost', c: 'dom', w: c => (c.rec || S.p.tax > 0.32 ? 4 : 1.5), r: 'fin', t: 'מחאת יוקר המחיה', x: 'מאות אלפים יצאו לרחובות נגד מחירי הדיור, המזון והדלק. "אי אפשר לגמור את החודש".',
+    ch: [C_('להוריד מע״מ על מזון', { m: -0.003, ap: 4 }), C_('סבסוד ממוקד למשפחות', { m: -0.0012, ap: 2 }), C_('להתעלם', { ap: -3, un: 1 })] },
+  { id: 'prot_judic', c: 'dom', w: 2, ok: c => c.dem, t: 'מחאה נגד רפורמה משפטית', x: 'הצעת חוק לצמצום סמכויות בית המשפט העליון הוציאה מאות אלפים להפגין. כלכלנים מזהירים מבריחת משקיעים.',
+    ch: [C_('להקפיא את הרפורמה', { ap: 2, rep: 1 }), C_('להמשיך בכל הכוח', { ap: -4, un: 1, rep: -3, gv: -0.003, gd: 365 }), C_('להציע משאל עם', { m: -0.0002, ap: 1 })] },
+  { id: 'prot_climate', c: 'dom', w: c => c.rich ? 2.5 : 1, r: 'int', t: 'מחאת אקלים', x: 'צעירים חוסמים כבישים ודורשים מהממשלה לסגור את תחנות הכוח המזהמות.',
+    ch: [C_('תוכנית אנרגיה ירוקה', { m: -0.002, ap: 2, rep: 3 }), C_('הבטחה לוועדה', { ap: 1 }), C_('לפנות את החסימות', { ap: -1, rep: -1 })] },
+  { id: 'prot_stud', c: 'dom', w: 1.5, r: 'int', t: 'מחאת סטודנטים', x: 'סטודנטים השתלטו על הקמפוסים בדרישה לבטל את שכר הלימוד.',
+    ch: [C_('לימודים חינם', { m: -0.0015, ap: 3, gv: 0.002, gd: 1095 }), C_('מלגות לנזקקים', { m: -0.0005, ap: 1 }), C_('לסרב', { ap: -2 })] },
+  { id: 'prot_minor', c: 'dom', w: 1.5, t: 'מחאת מיעוטים', x: 'בני מיעוט במדינה מפגינים נגד אפליה בתקציבים ובשיטור. התמונות מגיעות לעיתונות העולמית.',
+    ch: [C_('להיענות לדרישות', { m: -0.0008, ap: -1, rep: 3 }), C_('דיאלוג וועדה ציבורית', { rep: 1 }), C_('יד קשה של המשטרה', { ap: 1, rep: -4, un: 1 })] },
+  { id: 'prot_farm', c: 'dom', w: 1.5, r: 'fin', t: 'מחאת החקלאים', x: 'טרקטורים חוסמים את הכניסות לבירה: החקלאים דורשים הגנה מפני ייבוא זול.',
+    ch: [C_('סובסידיות לחקלאים', { m: -0.0008, ap: 2 }), C_('מכסים על ייבוא', { ap: 1, gv: -0.001, gd: 365 }), C_('לפתוח את השוק', { ap: -2, gv: 0.002, gd: 730 })] },
+  { id: 'prot_vets', c: 'dom', w: c => (S.p.casTotal > 1 || c.war ? 2.5 : 0), r: 'def', t: 'מחאת הלוחמים המשוחררים', x: 'לוחמים פצועים ומשפחות שכולות מפגינים מול משרד הביטחון: "הפקרתם אותנו".',
+    ch: [C_('מענק ותוכנית שיקום', { m: -0.001, ap: 3 }), C_('להבטיח בדיקה', { ap: -1 }), C_('להתעלם', { ap: -3 })] },
+  /* ---------- politics and scandals ---------- */
+  { id: 'scan_pm', c: 'dom', w: 2, t: 'חקירה בלשכה', x: 'עוזר בכיר בלשכתך נחקר בחשד לקבלת שוחד מאיל הון. העיתונים שואלים מה ידעת.',
+    ch: [C_('לפטר את העוזר מיד', { ap: -1 }), C_('להכחיש ולתקוף את התקשורת', { ap: -2, at: -2, ad: 120, rep: -1 }), C_('ועדת חקירה עצמאית', { m: -0.0002, ap: 1, rep: 1 })] },
+  { id: 'scan_arms', c: 'dom', w: 1.5, r: 'def', t: 'שחיתות בעסקת נשק', x: 'תחקיר חושף: קצינים קיבלו עמלות סודיות מיצרנית נשק זרה.',
+    ch: [C_('לבטל את העסקה', { m: 0.0005, ap: 2, mil: { air: 0.01 } }), C_('להשאיר את העסקה ולפטר את הקצינים', { ap: 1 }), C_('לטשטש', { ap: -3, rep: -2 })] },
+  { id: 'coal_crisis', c: 'dom', w: c => c.dem ? 2 : 0, t: 'משבר קואליציוני', x: 'מפלגה שותפה מאיימת לפרק את הממשלה אם לא תקבל תקציב למגזר שלה.',
+    ch: [C_('לתת את התקציב', { m: -0.001, ap: -1 }), C_('לקרוא לבלוף', { ap: -2, un: 0.5 }), C_('להחליף שותפים', { ap: 1, at: -1, ad: 90 })] },
+  { id: 'early_elec', c: 'dom', w: c => (c.dem && c.ap > 52 ? 1.5 : 0), cd: 900, t: 'בחירות מוקדמות?', x: 'הסקרים מחייכים אליך. היועצים ממליצים להקדים את הבחירות ולקבל מנדט חזק.',
+    ch: [C_('להקדים בחירות', { m: -0.0003, at: 3, ad: 365 }), C_('לא עכשיו', {})] },
+  { id: 'media_law', c: 'dom', w: c => c.dem ? 0.5 : 2, t: 'עיתונאי ביקורתי נעצר', x: 'עיתונאי שחשף שחיתות נעצר באשמת "פגיעה בביטחון". ארגוני זכויות בעולם מוחים.',
+    ch: [C_('לשחרר אותו', { rep: 3, ap: -1 }), C_('להעמיד לדין', { rep: -4, ap: 1 }), C_('לגרש אותו מהמדינה', { rep: -1 })] },
+  { id: 'relig', c: 'dom', w: 1.5, t: 'מתיחות דתית', x: 'עימותים סביב מקום קדוש מאיימים להצית אלימות בין קהילות.',
+    ch: [C_('להגביל את הגישה', { ap: 1, rep: -2 }), C_('פסגת מנהיגי דת', { rep: 2, ap: -1 }), C_('לפרוס כוחות משטרה', { m: -0.0003, ap: 1, un: 0.5 })] },
+  { id: 'pension', c: 'dom', w: 1.5, r: 'fin', t: 'רפורמת פנסיה', x: 'קרנות הפנסיה בגירעון. משרד האוצר מציע להעלות את גיל הפרישה.',
+    ch: [C_('להעלות את גיל הפרישה', { m: 0.003, ap: -4 }), C_('רפורמה מתונה', { m: 0.001, ap: -1 }), C_('לא לגעת', { gv: -0.002, gd: 730 })] },
+  { id: 'surplus', c: 'dom', w: c => (c.tr > c.gdp * 0.06 ? 3 : 0), r: 'fin', t: 'עודף בקופה', x: c => 'הקופה מלאה: ' + moneyTxt(S.p.treasury) + '. מה עושים עם הכסף?',
+    ch: [C_('החזר מס לאזרחים', { m: -0.004, ap: 4 }), C_('קרן תשתיות', { m: -0.004, gv: 0.004, gd: 1095 }), C_('לשמור לימים קשים', { rep: 1 })] },
+  { id: 'downgrade', c: 'dom', w: c => (c.debt > 0.4 ? 3 : 0), r: 'fin', t: 'הורדת דירוג אשראי', x: 'סוכנויות הדירוג הורידו את דירוג החוב שלנו. הריבית על ההלוואות קופצת.',
+    ch: [C_('תוכנית קיצוצים', { m: 0.004, ap: -4 }), C_('להעלות מסים זמנית', { m: 0.003, ap: -2, gv: -0.002, gd: 365 }), C_('להתעלם', { gv: -0.006, gd: 365 })] },
+  { id: 'coup_plot', c: 'dom', w: c => (!c.dem && c.ap < 40 ? 3 : c.ap < 30 ? 1 : 0), r: 'def', t: 'מזימת הפיכה נחשפה', x: 'המודיעין חשף קבוצת קצינים שתכננה להפיל את השלטון.',
+    ch: [C_('טיהור בצבא', { mil: { troops: 0.02 }, ap: 1, rep: -2 }), C_('העלאת שכר לקצינים', { m: -0.0015 }), C_('משפט פומבי', { ap: 2, rep: -1, un: 0.5 })] },
+  { id: 'assass', c: 'dom', w: 1.2, o: 'riv', oOpt: 1, t: 'ניסיון התנקשות', x: c => 'המאבטחים סיכלו ניסיון להתנקש בחייך באירוע פומבי. ' + (c.o ? 'החשד: יד של ' + c.on + '.' : 'המניע לא ברור.'),
+    ch: [C_('נאום אחדות לאומית', { ap: 4 }), C_('מצב חירום וסמכויות מיוחדות', { ap: 2, rep: -3, un: 0.5 }), C_(c => c.o ? 'להאשים את ' + c.on : 'להאשים את האופוזיציה', { ap: 3, ro: -15, un: 0.5 })] },
+  /* ---------- security ---------- */
+  { id: 'terror', c: 'dom', w: c => c.war ? 3 : 1.5, r: 'def', t: 'פיגוע טרור', x: 'פיגוע בלב העיר: עשרות הרוגים ופצועים. המדינה בהלם והציבור דורש תגובה.', b: { ap: -1 },
+    ch: [C_('הידוק האבטחה בכל הארץ', { m: -0.001, ap: 2, gv: -0.001, gd: 180 }), C_('לשמור על השגרה', { rep: 1, ap: -1 }), C_('עוצר ומעצרים המוניים', { ap: 1, rep: -3, un: 0.5 })] },
+  { id: 'cyber_dom', c: 'dom', w: 2, r: 'def', o: 'riv', oOpt: 1, t: 'מתקפת סייבר', x: c => 'האקרים השביתו את מערכות הבנקים ובתי החולים' + (c.o ? '. העקבות מובילים ל' + c.on + '.' : '.'),
+    ch: [C_('לשלם כופר', { m: -0.0004, rep: -1 }), C_('לבנות מחדש את המערכות', { m: -0.0015, gdp: -0.001 }), C_('תקיפת סייבר נגדית', { ap: 2, ro: -12 }, { need: c => !!c.o })] },
+  { id: 'mil_acc', c: 'dom', w: 1.5, r: 'def', t: 'תאונה צבאית', x: 'מסוק צבאי התרסק באימון לילה. הצוות נהרג, ומשפחות שואלות על תחזוקה כושלת.', b: { mil: { heli: 0.01, troops: 0.0002 } },
+    ch: [C_('ועדת חקירה וקרקוע הצי', { ap: 1, m: -0.0002 }), C_('להחליף את מפקד חיל האוויר', { ap: 1 }), C_('להמשיך כרגיל', { ap: -2 })] },
+  { id: 'spy', c: 'dom', w: 1.5, r: 'fo', o: 'riv', t: 'מרגל נתפס', x: c => 'שירות הביטחון עצר מרגל שעבד עבור ' + c.on + ' ומסר סודות צבאיים.',
+    ch: [C_('לגרש את הדיפלומטים שלהם', { ro: -10, ap: 2 }), C_('עסקת חילופים שקטה', { ro: 4, ap: -1 }), C_('משפט ראווה', { ro: -15, ap: 3, rep: 1 })] },
+  { id: 'defect', c: 'dom', w: 1.2, r: 'def', o: 'riv', t: 'עריק מבקש מקלט', x: c => 'קצין בכיר מצבא ' + c.on + ' ערק אלינו עם מסמכים סודיים.',
+    ch: [C_('להעניק מקלט', { ro: -12, ap: 1 }), C_('להחזיר אותו', { ro: 8, ap: -2, rep: -2 })] },
+  { id: 'border_inc', c: 'dom', w: 2, r: 'def', o: 'nbh', t: 'תקרית ירי בגבול', x: c => 'חיילים שלנו וחיילים של ' + c.on + ' החליפו אש בגבול. יש נפגעים לשני הצדדים.', b: { mil: { troops: 0.0001 } },
+    ch: [C_('תגובה צבאית חריפה', { ro: -15, ap: 2 }), C_('מחאה דיפלומטית', { ap: -1 }), C_('פגישת מפקדים להרגעה', { ro: 6, rep: 2, ap: -1 })] },
+  { id: 'water', c: 'dom', w: 1.2, r: 'fo', o: 'nb', t: 'סכסוך מים', x: c => c.on + ' בונה סכר שיקטין את המים שזורמים אלינו.',
+    ch: [C_('הסכם חלוקת מים', { ro: 10, ap: -1 }), C_('איום צבאי', { ro: -18, ap: 2 }), C_('בוררות בינלאומית', { rep: 2, m: -0.0002 })] },
+  { id: 'hostage', c: 'intl', w: 1.2, r: 'def', o: 'risky', t: 'משבר חטופים', x: c => 'אזרחים שלנו נחטפו ב' + c.on + ' על ידי קבוצה חמושה שדורשת כופר.',
+    ch: [C_('לשלם בשקט', { m: -0.0004, ap: 2, rep: -1 }), C_('מבצע חילוץ', { ap: 4, ro: -12, mil: { troops: 0.0002 } }), C_('משא ומתן ארוך', { ap: -2, rep: 1 })] },
+  { id: 'embassy', c: 'intl', w: 1.2, r: 'fo', o: 'riv', t: 'השגרירות שלנו הותקפה', x: c => 'המון זועם פרץ לשגרירות שלנו ב' + c.on + '. הדיפלומטים פונו בבהלה.',
+    ch: [C_('לדרוש התנצלות', { ro: -8, ap: 1 }), C_('לנתק יחסים', { ro: -25, ap: 2, rep: -1 }), C_('להרגיע ולחזור', { ap: -1, rep: 1 })] },
+  { id: 'piracy', c: 'intl', w: c => c.sea ? 1.5 : 0, r: 'def', t: 'פיראטים חטפו ספינה', x: 'פיראטים השתלטו על ספינת משא שלנו עם 20 אנשי צוות.',
+    ch: [C_('הצי יחלץ אותם', { ap: 3, rep: 1, mil: { ships: 0.002 } }, { need: () => P().inv.ships >= 1 }), C_('לשלם כופר', { m: -0.0003, ap: -1 }), C_('משא ומתן דרך מתווכים', { ap: -2, rep: 1 })] },
+  /* ---------- disasters and health ---------- */
+  { id: 'quake', c: 'dom', w: 1.2, r: 'int', t: 'רעידת אדמה', x: 'רעידת אדמה חזקה פגעה בעיר גדולה. בניינים קרסו ואלפים נותרו בלי בית.', b: { gdp: -0.006 },
+    ch: [C_('שיקום מלא ומהיר', { m: -0.004, ap: 3 }), C_('שיקום בסיסי', { m: -0.0015, ap: -1 }), C_('לבקש סיוע מהעולם', { m: 0.001, ap: -2, rep: -1 })] },
+  { id: 'flood', c: 'dom', w: 1.5, r: 'int', t: 'שיטפונות', x: 'גשמים חסרי תקדים הציפו כפרים ושכונות שלמות.', b: { gdp: -0.003 },
+    ch: [C_('פיצוי מלא לנפגעים', { m: -0.002, ap: 2 }), C_('לבנות סוללות הגנה', { m: -0.0025, gv: 0.001, gd: 1095 }), C_('מינימום הכרחי', { ap: -2 })] },
+  { id: 'fire', c: 'dom', w: 1.5, r: 'int', t: 'שריפת ענק', x: 'שריפה עצומה משתוללת ביערות ומתקרבת לערים.', b: { gdp: -0.002 },
+    ch: [C_('לקנות מטוסי כיבוי', { m: -0.0008, ap: 2 }), C_('לבקש מטוסים ממדינות שכנות', { rep: -1, ap: 1 }), C_('להסתדר עם מה שיש', { ap: -3, gdp: -0.002 })] },
+  { id: 'drought', c: 'dom', w: 1.2, r: 'int', t: 'בצורת', x: 'שנה שלישית ללא גשם. המאגרים ריקים והחקלאות קורסת.',
+    ch: [C_('מתקני התפלה', { m: -0.003, gv: 0.001, gd: 1095, ap: 1 }), C_('קיצוב מים', { ap: -2, gv: -0.003, gd: 365 }), C_('לייבא מזון ומים', { m: -0.001 })] },
+  { id: 'storm', c: 'dom', w: 1.2, r: 'int', t: 'סופה הרסנית', x: 'סופה עוצמתית הרסה גגות, קווי חשמל וכבישים.', b: { gdp: -0.002 },
+    ch: [C_('קרן חירום', { m: -0.0015, ap: 2 }), C_('ביטוח ממשלתי חדש', { m: -0.0006, at: 1, ad: 180 }), C_('שהעיריות יטפלו', { ap: -2 })] },
+  { id: 'epid', c: 'dom', w: 1.2, r: 'int', t: 'התפרצות מגפה', x: 'נגיף חדש מתפשט בבתי הספר ובבתי האבות.',
+    ch: [C_('סגר כללי', { gv: -0.01, gd: 120, ap: -2, rep: 1 }), C_('חיסונים ובדיקות', { m: -0.0015, ap: 1 }), C_('להמשיך כרגיל', { ap: -3, at: -2, ad: 90, pop: -0.0003 })] },
+  { id: 'locust', c: 'dom', w: c => c.poor ? 1.5 : 0, t: 'ארבה', x: 'נחילי ארבה השמידו חלק גדול מהיבול.', b: { gdp: -0.004 },
+    ch: [C_('ריסוס מהאוויר', { m: -0.0008, ap: 1 }), C_('לבקש סיוע מזון', { m: 0.0006, rep: -1 }), C_('לחכות', { ap: -3 })] },
+  { id: 'nucleak', c: 'dom', w: c => (c.rich || c.nukes ? 0.8 : 0), r: 'int', t: 'דליפה בכור', x: 'תקלה בכור גרעיני אזרחי גרמה לדליפת קרינה קטנה.',
+    ch: [C_('פינוי והודעה לעולם', { m: -0.0015, rep: 1, ap: -1 }), C_('להצניע את האירוע', { rep: -3, ap: -1 }), C_('לסגור את הכור לצמיתות', { m: -0.002, gv: -0.001, gd: 730, ap: 1, rep: 2 })] },
+  { id: 'oilspill', c: 'dom', w: c => c.sea ? 1 : 0, t: 'זיהום ים', x: 'מכלית נפט דלפה מול החופים. החופים שחורים מזפת.',
+    ch: [C_('ניקוי ממלכתי', { m: -0.001, ap: 1, rep: 1 }), C_('לתבוע את חברת הספנות', { m: 0.0005, ap: -1 }), C_('מתנדבים בלבד', { ap: -2, rep: -1 })] },
+  { id: 'datal', c: 'dom', w: 1.2, r: 'int', t: 'דליפת מידע ענקית', x: 'הפרטים האישיים של מיליוני אזרחים דלפו לרשת ממאגר ממשלתי.',
+    ch: [C_('פיצוי לאזרחים ושדרוג אבטחה', { m: -0.0008, ap: 1 }), C_('להאשים את ההאקרים', { ap: -2 }), C_('לפטר את ראש המערך', { ap: 1, rep: 0 })] },
+  /* ---------- economy and society ---------- */
+  { id: 'inflation', c: 'dom', w: c => (c.rec ? 1 : 2), r: 'fin', t: 'האינפלציה מזנקת', x: 'המחירים עלו ב-8% בחצי שנה. הבנק המרכזי מתלבט.',
+    ch: [C_('להעלות ריבית', { gv: -0.006, gd: 365, ap: -1 }), C_('פיקוח מחירים', { ap: 2, gv: -0.004, gd: 365, rep: -1 }), C_('קיצוץ בהוצאות', { m: 0.002, ap: -3 })] },
+  { id: 'crash', c: 'dom', w: 1.2, r: 'fin', t: 'קריסה בבורסה', x: 'הבורסה צנחה ב-20% ביום אחד. משקיעים בורחים.',
+    ch: [C_('חבילת חילוץ', { m: -0.004, ap: -1, gdp: 0.002 }), C_('לתת לשוק לתקן את עצמו', { gdp: -0.005, ap: -2 }), C_('לעצור את המסחר לשבוע', { gdp: -0.002, rep: -1 })] },
+  { id: 'bank', c: 'dom', w: 1, r: 'fin', t: 'בנק גדול קורס', x: 'אחד הבנקים הגדולים על סף פשיטת רגל. מיליוני חוסכים מודאגים.',
+    ch: [C_('הלאמה וחילוץ', { m: -0.003, ap: 1 }), C_('ערבות לחוסכים בלבד', { m: -0.001, gdp: -0.002 }), C_('לתת לו ליפול', { gdp: -0.005, ap: -3 })] },
+  { id: 'currency', c: 'dom', w: c => (c.poor || c.debt > 0.5 ? 2 : 0), r: 'fin', t: 'המטבע קורס', x: 'המטבע המקומי איבד שליש מערכו. היבוא מתייקר.',
+    ch: [C_('הלוואה מקרן המטבע', { m: 0.01, ap: -3, rep: -1, gv: -0.003, gd: 365 }), C_('להדפיס כסף', { ap: 1, gv: -0.006, gd: 365 }), C_('פיקוח על הון', { rep: -2, gdp: -0.002 })] },
+  { id: 'housing', c: 'dom', w: 2, r: 'int', t: 'משבר הדיור', x: 'מחירי הדירות הכפילו את עצמם. זוגות צעירים לא מצליחים לקנות בית.',
+    ch: [C_('בנייה ממשלתית מאסיבית', { m: -0.0025, ap: 3 }), C_('פיקוח על שכר הדירה', { ap: 2, gv: -0.002, gd: 365 }), C_('לא להתערב', { ap: -3, un: 0.5 })] },
+  { id: 'blackout', c: 'dom', w: 1.5, r: 'int', t: 'הפסקת חשמל ארצית', x: 'רשת החשמל קרסה ל-30 שעות. מפעלים נעצרו ומעליות נתקעו.', b: { gdp: -0.001 },
+    ch: [C_('לחדש את רשת החשמל', { m: -0.002, ap: 1, gv: 0.001, gd: 1095 }), C_('תיקון זמני', { ap: -2, at: -1, ad: 120 }), C_('להפריט את חברת החשמל', { m: 0.002, ap: -2 })] },
+  { id: 'crime', c: 'dom', w: 1.5, r: 'int', t: 'גל פשיעה', x: 'ירי ברחובות, סחיטה וגניבות: ארגוני הפשיעה מתחזקים.',
+    ch: [C_('עוד שוטרים ברחובות', { m: -0.001, ap: 2 }), C_('חוקים מחמירים', { ap: 1, rep: -2 }), C_('תוכניות חברתיות בשכונות', { m: -0.0012, at: 2, ad: 365 })] },
+  { id: 'braindrain', c: 'dom', w: 1.2, r: 'fin', t: 'בריחת מוחות', x: 'אלפי מהנדסים ורופאים עוזבים לחו״ל בגלל שכר נמוך.',
+    ch: [C_('מענקים לחוזרים', { m: -0.001, gv: 0.002, gd: 730 }), C_('הטבות מס לחברות טכנולוגיה', { m: -0.0006, gv: 0.0015, gd: 730 }), C_('לא לעשות כלום', { gv: -0.003, gd: 730 })] },
+  { id: 'immig', c: 'dom', w: 1.5, t: 'גל הגירה', x: 'עשרות אלפי מהגרים מבקשים להיכנס למדינה לעבודה.',
+    ch: [C_('לקלוט ולשלב', { m: -0.001, ap: -1, rep: 2, gv: 0.003, gd: 1095, pop: 0.003 }), C_('מכסות מוגבלות', { ap: 1, gv: 0.001, gd: 730, pop: 0.001 }), C_('לסגור את הגבולות', { ap: 2, rep: -3 })] },
+  { id: 'labor', c: 'dom', w: c => c.rich ? 1.5 : 0.5, r: 'fin', t: 'מחסור בעובדים', x: 'מפעלים ובתי חולים לא מוצאים עובדים. הייצור נפגע.',
+    ch: [C_('לייבא עובדים זרים', { gv: 0.003, gd: 730, ap: -1 }), C_('סבסוד רובוטים ואוטומציה', { m: -0.001, gv: 0.002, gd: 730 }), C_('להעלות שכר במגזר הציבורי', { m: -0.0012, ap: 2 })] },
+  { id: 'ai_jobs', c: 'dom', w: c => c.rich ? 1.5 : 0.6, r: 'fin', t: 'אוטומציה מחליפה עובדים', x: 'בינה מלאכותית מחליפה עשרות אלפי עובדי משרד. הם דורשים הגנה.',
+    ch: [C_('הסבה מקצועית במימון המדינה', { m: -0.0015, ap: 2, gv: 0.001, gd: 730 }), C_('מס על רובוטים', { m: 0.001, gv: -0.002, gd: 730 }), C_('לא להתערב', { ap: -2, gv: 0.002, gd: 730 })] },
+  { id: 'invest', c: 'dom', w: 1.5, r: 'fin', t: 'ענקית טכנולוגיה רוצה מפעל', x: 'חברה בינלאומית מציעה לבנות מפעל שבבים ענק — אם תקבל פטור ממס.',
+    ch: [C_('לתת פטור', { m: -0.001, gv: 0.004, gd: 1095, ap: 1 }), C_('לנהל משא ומתן', { gv: 0.002, gd: 1095 }), C_('לסרב', { ap: -1 })] },
+  { id: 'gas', c: 'dom', w: c => c.sea ? 1.2 : 0.4, r: 'fin', cd: 900, t: 'תגלית גז גדולה', x: 'נמצא מאגר גז טבעי ענק. מי יפיק אותו?',
+    ch: [C_('חברה ממשלתית', { m: -0.003, gv: 0.006, gd: 1095, ap: 2 }), C_('מכירת זיכיון לזרים', { m: 0.005, gv: 0.003, gd: 1095, ap: -1 }), C_('להשאיר באדמה (סביבה)', { rep: 3, ap: -1 })] },
+  { id: 'minerals', c: 'dom', w: 1, r: 'fin', o: 'big', cd: 900, t: 'מרבצי ליתיום', x: 'גיאולוגים מצאו מרבצי ליתיום ומתכות נדירות. כל המעצמות מתעניינות.',
+    ch: [C_(c => 'עסקה עם ' + c.on, { m: 0.004, ro: 15, gv: 0.003, gd: 1095 }), C_('לפתח לבד', { m: -0.002, gv: 0.005, gd: 1460 }), C_('מכרז פתוח לכולם', { m: 0.002, gv: 0.003, gd: 1095, rep: 1 })] },
+  { id: 'tech', c: 'dom', w: 1.2, r: 'int', t: 'פריצת דרך מדעית', x: 'חוקרים במדינה פיתחו טיפול חדשני שמושך תשומת לב עולמית.',
+    ch: [C_('מעבדה לאומית', { m: -0.0015, gv: 0.003, gd: 1095, ap: 1 }), C_('למכור את הפטנט', { m: 0.002 }), C_('לשתף חינם עם העולם', { rep: 4, ap: 1 })] },
+  { id: 'host', c: 'dom', w: c => (c.gdp > 300 ? 1 : 0), cd: 1500, r: 'int', t: 'לארח את המשחקים האולימפיים?', x: 'הוועד האולימפי מציע לנו לארח את המשחקים. יוקרה עצומה — ומחיר עצום.',
+    ch: [C_('להגיש מועמדות', { m: -0.004, ap: 3, rep: 3, gv: 0.002, gd: 730 }), C_('לוותר', {})] },
+  { id: 'sell_arms', c: 'intl', w: c => (power(P()) > 150 ? 1.5 : 0), r: 'def', o: 'buyer', t: 'בקשה לקנות נשק', x: c => c.on + ' מבקשת לקנות מאיתנו מערכות נשק מתקדמות.',
+    ch: [C_('למכור', { m: 0.002, ro: 10, rep: -2 }), C_('למכור רק נשק הגנתי', { m: 0.0008, ro: 5 }), C_('לסרב', { ro: -5, rep: 1 })] },
+  { id: 'arms_offer', c: 'intl', w: 1.5, r: 'def', o: 'seller', t: 'הצעת רכש בהנחה', x: c => c.on + ' מציעה לנו 12 מטוסי קרב בהנחה של 30% — מסירה תוך 8 חודשים.',
+    ch: [C_('לקנות', { cash: -0.67, ro: 8 }, { f: () => { S.p.queue.push({ k: 'air', n: 12, start: S.day, due: S.day + 243 }); PS().sp.buy += 0.67; }, need: () => !S.p.bankrupt }), C_('לסרב בנימוס', { ro: -2 })] },
+  /* ---------- good news at home (news only) ---------- */
+  { id: 'olymp', c: 'dom', w: 1.5, t: 'מדליית זהב אולימפית', n: c => 'מדליית זהב היסטורית ל' + c.he + ' באולימפיאדה! המדינה חוגגת.', e: { ap: 2 }, k: 'good' },
+  { id: 'wcup', c: 'dom', w: 1.2, t: 'הנבחרת בחצי הגמר', n: 'נבחרת הכדורגל הגיעה לחצי גמר המונדיאל. מיליונים חוגגים ברחובות.', e: { ap: 3, at: 1, ad: 60 }, k: 'good' },
+  { id: 'song', c: 'dom', w: 1, t: 'זכייה בתחרות שירים', n: c => 'זמרת מ' + c.he + ' זכתה בתחרות שירים בינלאומית. התיירות מזנקת.', e: { ap: 1, rep: 1 }, k: 'good' },
+  { id: 'nobel', c: 'dom', w: 0.8, t: 'פרס נובל', n: c => 'חוקרת מ' + c.he + ' זכתה בפרס נובל לכימיה.', e: { rep: 2, ap: 1 }, k: 'good' },
+  { id: 'tour', c: 'dom', w: 1.2, t: 'שיא בתיירות', n: 'שנת שיא בתיירות: המלונות מלאים והמסעדות עמוסות.', e: { gdp: 0.002 }, k: 'good' },
+  { id: 'bourse', c: 'dom', w: 1.2, t: 'הבורסה בשיא', n: 'הבורסה המקומית שוברת שיאים. הכנסות המדינה ממסים עולות.', e: { m: 0.0008, gdp: 0.002 }, k: 'good' },
+  { id: 'harvest', c: 'dom', w: 1, t: 'יבול שיא', n: 'שנת יבול שיא לחקלאות. מחירי המזון יורדים.', e: { ap: 1, gdp: 0.001 }, k: 'good' },
+  { id: 'oilfind', c: 'dom', w: 0.6, cd: 1500, t: 'נמצא נפט', n: 'נמצא שדה נפט חדש. חברות זרות עומדות בתור.', e: { gdp: 0.006, m: 0.001 }, k: 'good' },
+  { id: 'celeb', c: 'dom', w: 1, t: 'סערת סלבריטאים', n: 'כוכב קולנוע מקומי נעצר אחרי מסיבה פרועה. הרשתות לא מדברות על שום דבר אחר.', k: 'event' },
+  { id: 'viral', c: 'dom', w: 1, t: 'המטבח שלנו הפך ללהיט', n: c => 'המטבח של ' + c.he + ' הפך ללהיט ברשתות בעולם. מסעדות נפתחות בכל הבירות.', e: { rep: 1 }, k: 'good' },
+  { id: 'space_dom', c: 'dom', w: c => c.gdp > 400 ? 1 : 0, t: 'לוויין לאומי שוגר', n: c => c.he + ' שיגרה בהצלחה לוויין תקשורת מתוצרת מקומית.', e: { ap: 2, rep: 1 }, k: 'good' },
+  { id: 'parade', c: 'dom', w: c => c.dem ? 0 : 1, t: 'מצעד צבאי', n: 'מצעד צבאי ענק בבירה: טנקים, טילים ומטוסים מעל ההמונים.', e: { ap: 2, rep: -1, m: -0.0002 }, k: 'event' },
+  { id: 'birth', c: 'dom', w: 0.8, t: 'שיא ילודה', n: 'שיא ילודה: חדרי הלידה מלאים, והממשלה מבטיחה עוד גני ילדים.', e: { pop: 0.002 }, k: 'good' },
+  { id: 'heat', c: 'dom', w: 1, t: 'גל חום קיצוני', n: 'גל חום קיצוני: מערכת החשמל קורסת ובתי החולים מלאים.', e: { gdp: -0.001, ap: -1 }, k: 'bad' },
+  { id: 'bridge', c: 'dom', w: 1, t: 'גשר קרס', n: 'גשר מרכזי קרס בשעת עומס. התקשורת מאשימה הזנחה של שנים.', e: { ap: -1, gdp: -0.0005 }, k: 'bad' },
+  { id: 'acc_road', c: 'dom', w: 0.8, t: 'אסון דרכים', n: 'תאונת אוטובוס קשה גבתה חיי עשרות נוסעים. אבל לאומי.', e: { ap: -1 }, k: 'bad' },
+  { id: 'gen_resign', c: 'dom', w: c => c.war ? 1 : 0.4, t: 'הרמטכ״ל התפטר', n: 'הרמטכ״ל התפטר בעקבות מחלוקת עם הממשלה על ניהול הצבא.', e: { ap: -1 }, k: 'bad' },
+  /* ---------- the world ---------- */
+  { id: 'coup_ab', c: 'intl', w: 1.6, r: 'fo', o: 'weak', t: c => 'הפיכה ב' + c.on, go: c => worldCoup(c.o), x: c => 'הצבא ב' + c.on + ' הדיח את הממשלה ותפס את השלטון. העולם צריך להחליט איך להגיב.',
+    ch: [C_('להכיר בשלטון החדש', { ro: 10, rep: -2, rd: -2 }), C_('לגנות', { ro: -10, rep: 2 }), C_('להטיל סנקציות', { ro: -25, rep: 3, m: -0.0003 }, { f: c => { S.sanc[S.player + '>' + c.o] = 1; } })] },
+  { id: 'oil_up', c: 'intl', w: 1.5, r: 'fin', ok: c => !c.oil, t: 'מחירי הנפט זינקו', go: oilShock(1), x: 'מחירי הנפט זינקו ב-40% אחרי מתיחות במפרץ. הדלק מתייקר בכל העולם.',
+    ch: [C_('לשחרר את מאגרי החירום', { m: -0.001, ap: 1 }), C_('לסבסד את הדלק', { m: -0.002, ap: 2 }), C_('לגלגל לצרכנים', { ap: -3, gv: -0.003, gd: 180 })] },
+  { id: 'oil_upx', c: 'intl', w: 1.5, ok: c => c.oil, t: 'מחירי הנפט זינקו', go: oilShock(1), n: 'מחירי הנפט זינקו ב-40%. הקופה שלנו מתמלאת.', e: { m: 0.003, gdp: 0.005 }, k: 'good' },
+  { id: 'oil_dn', c: 'intl', w: 1.2, t: 'מחירי הנפט צנחו', go: oilShock(-1), n: c => 'מחירי הנפט צנחו בחדות. ' + (c.oil ? 'ההכנסות שלנו מהנפט נחתכות.' : 'הדלק זול יותר — טוב למשק שלנו.'), e: c => c.oil ? { gdp: -0.008, m: -0.002 } : { gdp: 0.002 }, k: c => c.oil ? 'bad' : 'good' },
+  { id: 'g_rec', c: 'intl', w: c => (S.recession ? 0 : 1), cd: 900, r: 'fin', t: 'מיתון עולמי', go: () => { S.recession = 8; }, x: 'בנק ענק קרס, הבורסות צונחות והסחר העולמי מתכווץ.', b: { gdp: -0.004 },
+    ch: [C_('חבילת תמריצים', { m: -0.006, ap: 2, gv: 0.01, gd: 240 }), C_('צנע וקיצוצים', { m: 0.002, ap: -3 }), C_('לחכות שזה יעבור', { ap: -1 })] },
+  { id: 'pandemic', c: 'intl', w: 0.6, cd: 1500, r: 'int', t: 'מגפה עולמית', go: () => { alive().forEach(id => { if (id !== S.player) S.c[id].gdp *= 0.985; }); S.recession = Math.max(S.recession, 4); }, x: 'נגיף חדש מתפשט בכל היבשות. ארגון הבריאות מכריז על מגפה עולמית.',
+    ch: [C_('סגר וסגירת גבולות', { gv: -0.015, gd: 180, ap: -1, rep: 1 }), C_('לקנות חיסונים מוקדם', { m: -0.003, ap: 2 }), C_('להשאיר את המשק פתוח', { ap: -2, pop: -0.001, rep: -2 })] },
+  { id: 'cyberwar', c: 'intl', w: 1, r: 'def', o: 'pw2', t: 'מלחמת סייבר בין מעצמות', go: c => addRel(c.o, c.o2, -10), x: c => c.on + ' ו' + c.on2 + ' תוקפות זו את זו ברשת. גם המערכות שלנו נפגעות בדרך.', b: { gdp: -0.001 },
+    ch: [C_('להשקיע בהגנת סייבר', { m: -0.001, ap: 1 }), C_(c => 'להצטרף להגנה של ' + c.on, { ro: 8, ro2: -10 }), C_('להישאר מחוץ לזה', {})] },
+  { id: 'refugee', c: 'intl', w: 1.5, r: 'fo', o: 'torn', t: c => 'משבר פליטים: ' + c.on, x: c => 'משבר הומניטרי ב' + c.on + ': מאות אלפים בורחים, והאו״ם מבקש מכל מדינה לקלוט.',
+    ch: [C_('לקלוט פליטים', { m: -0.001, ap: -2, rep: 5, ro: 6, pop: 0.001 }), C_('לממן מחנות באזור', { m: -0.0012, rep: 2 }), C_('לסגור את הגבול', { ap: 1, rep: -3 })] },
+  { id: 'terror_ab', c: 'intl', w: 1.2, o: 'any', t: 'פיגוע בחו״ל', x: c => 'פיגוע טרור ב' + c.on + ' — בין ההרוגים גם תיירים מ' + c.he + '.',
+    ch: [C_('מטוס חילוץ ומשלחת רפואית', { m: -0.0002, ap: 2, ro: 4 }), C_('הודעת תנחומים', { ap: -1 })] },
+  { id: 'space_prog', c: 'intl', w: c => c.gdp > 1000 ? 1 : 0, cd: 1500, r: 'int', t: 'תוכנית חלל לאומית', x: 'המדענים מציעים לשלוח משימה לירח תוך חמש שנים. מירוץ החלל חזר.',
+    ch: [C_('לאשר', { m: -0.003, rep: 3, ap: 2, gv: 0.002, gd: 1095 }), C_('לוותר', {})] },
+  { id: 'climate', c: 'intl', w: 1.5, cd: 600, r: 'fo', t: 'פסגת האקלים', x: 'מנהיגי העולם מתכנסים לפסגת אקלים ודורשים התחייבות לקיצוץ בפליטות.',
+    ch: [C_('התחייבות לקיצוץ גדול', { gv: -0.002, gd: 1095, rep: 5, rd: 3 }), C_('התחייבות סמלית', { rep: 1 }), C_('לעזוב את הפסגה', { rep: -4, ap: 1 })] },
+  { id: 'sancwave', c: 'intl', w: 1.2, r: 'fo', o: 'pariah', go: c => sanctionWave(c.o), t: c => 'גל סנקציות על ' + c.on, x: c => 'הדמוקרטיות מטילות סנקציות על ' + c.on + '. גם מאיתנו מבקשים להצטרף.',
+    ch: [C_('להצטרף לסנקציות', { ro: -15, rd: 4, m: -0.001 }, { f: c => { S.sanc[S.player + '>' + c.o] = 1; } }), C_('להישאר בחוץ', { rd: -3, m: 0.0005 })] },
+  { id: 'ally_req', c: 'intl', w: 1, cd: 500, o: 'frna', t: c => 'הצעת ברית מ' + c.on, x: c => c.on + ' מציעה ברית הגנה הדדית: אם מישהו יתקוף צד אחד — השני יגן עליו.',
+    ch: [C_('לחתום על הברית', { ro: 15, rep: 1 }, { f: c => { setPact(c.o, S.player, 'alliance', true); addNews('נחתמה ברית הגנה בין ' + P().he + ' ל' + c.on + '.', 'good'); } }), C_('לסרב בנימוס', { ro: -6 })] },
+  { id: 'un_vote', c: 'intl', w: 1.5, r: 'fo', o: 'pariah', t: 'הצבעה באו״ם', x: c => 'העצרת הכללית מצביעה על החלטה שמגנה את ' + c.on + '.',
+    ch: [C_('להצביע בעד', { ro: -8, rep: 2, rd: 2 }), C_('להימנע', {}), C_('להצביע נגד', { ro: 8, rep: -2, rd: -3 })] },
+  { id: 'tariffs', c: 'intl', w: 1.2, r: 'fin', o: 'bigtr', t: c => 'מכסים מ' + c.on, x: c => c.on + ' הטילה מכסים של 25% על הסחורות שלנו.',
+    ch: [C_('מכסים נגדיים', { ro: -12, ap: 2, gv: -0.002, gd: 365 }), C_('משא ומתן', { ro: 3, m: -0.0005 }), C_('לבלוע את זה', { gv: -0.003, gd: 365, ap: -1 })] },
+  { id: 'loan_req', c: 'intl', w: 1.2, r: 'fo', o: 'poorfr', t: c => c.on + ' מבקשת הלוואה', x: c => 'ממשלת ' + c.on + ' על סף קריסה כלכלית ומבקשת מאיתנו הלוואה בתנאים נוחים.',
+    ch: [C_('לתת הלוואה', { m: -0.0015, ro: 15, rep: 2 }), C_('הלוואה קטנה', { m: -0.0005, ro: 6 }), C_('לסרב', { ro: -5 })] },
+  { id: 'meddle', c: 'intl', w: c => c.dem ? 1.2 : 0, r: 'fo', o: 'riv', t: 'התערבות בבחירות', x: c => 'הוכחות מצטברות: ' + c.on + ' הפעילה רשתות בוטים כדי להשפיע על הבחירות אצלנו.',
+    ch: [C_('לגרש דיפלומטים ולהטיל סנקציות', { ro: -18, ap: 2 }, { f: c => { S.sanc[S.player + '>' + c.o] = 1; } }), C_('חקירה שקטה', { m: -0.0002, ap: 1 }), C_('להתעלם', { ap: -2 })] },
+  { id: 'mediate', c: 'intl', w: c => S.wars.some(w => !involvesPlayer(w) && w.pause === 0) ? 1.5 : 0, r: 'fo', o: 'aiwar', t: 'בקשה לתווך', x: c => c.on + ' ו' + c.on2 + ' במלחמה. מבקשים מאיתנו לתווך ביניהן.',
+    ch: [C_('לתווך', { m: -0.0003, rep: 3 }, { f: c => { const w = S.wars.find(v => inWar(v, c.o) && inWar(v, c.o2) && v.pause === 0); if (w && R() < 0.45) { w.pause = 183; addNews('בתיווך ' + P().he + ': הפסקת אש בין ' + nm(w.a) + ' ל' + nm(w.b) + '!', 'good'); fxToast('התיווך הצליח', { rep: 3 }); } else addNews('ניסיון התיווך שלנו בין ' + c.on + ' ל' + c.on2 + ' נכשל.', 'dip'); } }), C_('לא להתערב', {})] },
+  { id: 'chipban', c: 'intl', w: 1, r: 'fin', o: 'big', t: c => c.on + ' חוסמת ייצוא שבבים', x: c => c.on + ' אסרה למכור לנו שבבים מתקדמים.',
+    ch: [C_('לפתח תעשייה מקומית', { m: -0.003, gv: 0.002, gd: 1460 }), C_('לשדל ולהתחייב', { ro: 6, gv: -0.001, gd: 365 }), C_('להבריח דרך מדינה שלישית', { rep: -3, ro: -8 })] },
+  { id: 'boats', c: 'intl', w: c => c.sea ? 1.2 : 0, r: 'fo', t: 'סירות מהגרים', x: 'סירות עמוסות מהגרים מתקרבות לחופים שלנו. חלקן טובעות.',
+    ch: [C_('הצלה וקליטה', { rep: 3, m: -0.0005, ap: -1 }), C_('להחזיר אותן לים', { rep: -4, ap: 1 }), C_('הסכם עם מדינות המוצא', { m: -0.0008, rep: 1 })] },
+  { id: 'ai_treaty', c: 'intl', w: 0.8, cd: 1200, r: 'fo', t: 'אמנת בינה מלאכותית', x: 'מדינות העולם מציעות אמנה שמגבילה פיתוח של בינה מלאכותית מסוכנת.',
+    ch: [C_('לחתום', { rep: 3, gv: -0.001, gd: 730 }), C_('לסרב', { rep: -2, gv: 0.001, gd: 730 })] },
+  { id: 'net5g', c: 'intl', w: 1, r: 'fin', o: 'authbig', t: 'תשתית תקשורת זולה', x: c => 'חברה מ' + c.on + ' מציעה לבנות לנו רשת תקשורת בחצי מחיר. הדמוקרטיות מזהירות מריגול.',
+    ch: [C_('לקבל את ההצעה', { m: 0.001, ro: 10, rd: -5 }), C_('לסרב', { ro: -8, rd: 3, m: -0.001 })] },
+  { id: 'aid_offer', c: 'intl', w: c => c.poor ? 1.5 : 0, r: 'fo', o: 'big', t: c => 'סיוע מ' + c.on, x: c => c.on + ' מציעה חבילת סיוע לפיתוח — בתמורה לבסיס צבאי קטן אצלנו.',
+    ch: [C_('לקבל', { m: 0.004, ro: 12, rep: -1 }), C_('רק סיוע, בלי בסיס', { m: 0.001, ro: 2 }), C_('לסרב', { ro: -6, ap: 1 })] },
+  /* ---------- the world (news only) ---------- */
+  { id: 'tradewar', c: 'intl', w: 1.2, o: 'pw2', t: 'מלחמת סחר', go: c => { addRel(c.o, c.o2, -12); S.c[c.o].gdp *= 0.995; S.c[c.o2].gdp *= 0.995; }, n: c => 'מלחמת סחר: ' + c.on + ' ו' + c.on2 + ' מטילות מכסים זו על זו. השווקים בעולם נבהלים.', e: { gdp: -0.001 }, k: 'world' },
+  { id: 'nuke_test', c: 'intl', w: 0.8, o: 'nukeauth', t: 'ניסוי גרעיני', go: c => alive().forEach(x => { if (x !== c.o) addRel(x, c.o, -4); }), n: c => c.on + ' ביצעה ניסוי גרעיני תת-קרקעי. העולם מגנה.', k: 'world' },
+  { id: 'w_bord', c: 'intl', w: 1.5, o: 'aipair', go: c => addRel(c.o, c.o2, -8), n: c => 'תקרית ירי בגבול ' + c.on + '–' + c.on2 + '. שתי המדינות מאשימות זו את זו.', k: 'world' },
+  { id: 'w_summit', c: 'intl', w: 1.2, o: 'pw2', go: c => addRel(c.o, c.o2, 8), n: c => 'פסגה היסטורית: ראשי ' + c.on + ' ו' + c.on2 + ' נפגשו והסכימו להוריד את המתיחות.', k: 'world' },
+  { id: 'w_space', c: 'intl', w: 1, o: 'big', n: c => pick([c.on + ' הנחיתה רובוט על הירח.', c.on + ' שיגרה תחנת חלל חדשה.', 'אסטרונאוטים מ' + c.on + ' יצאו להליכת חלל ראשונה.']), k: 'world' },
+  { id: 'w_ship', c: 'intl', w: 1, t: 'תעלה חסומה', go: () => alive().forEach(x => { S.c[x].gdp *= 0.999; }), n: 'ספינת מכולות ענקית נתקעה בתעלה מרכזית. הסחר העולמי משתבש.', e: { gdp: -0.0005 }, k: 'world' },
+  { id: 'w_food', c: 'intl', w: 1, t: 'מחירי המזון בעולם עולים', go: () => alive().forEach(x => { const c = S.c[x]; if (x !== S.player && c.gdp / c.pop < 5) c.approval = clamp(c.approval - 4, 5, 95); }), n: 'מחירי החיטה והאורז בעולם זינקו. מחאות פרצו במדינות עניות.', e: c => c.poor ? { ap: -2 } : {}, k: 'world' },
+  { id: 'w_expo', c: 'intl', w: 0.8, o: 'big', n: c => 'תערוכת העולם נפתחה ב' + c.on + ' עם ביתנים מ-150 מדינות.', k: 'world' },
+  { id: 'w_meteor', c: 'intl', w: 0.4, o: 'any', n: c => 'מטאוריט התפוצץ בשמי ' + c.on + '. אין נפגעים, אבל הסרטונים מציפים את הרשת.', k: 'world' },
+  { id: 'w_arms', c: 'intl', w: 1.2, o: 'pw2', go: c => [c.o, c.o2].forEach(x => { const X = S.c[x]; X.defPct = Math.min(0.12, X.defPct * 1.08); tag(X, 'army', 300); }), n: c => 'מירוץ חימוש: ' + c.on + ' ו' + c.on2 + ' מגדילות את תקציבי הביטחון.', k: 'world' },
+  { id: 'w_cyber', c: 'intl', w: 1, o: 'any', go: c => { S.c[c.o].gdp *= 0.998; }, n: c => 'מתקפת כופרה השביתה את הנמלים של ' + c.on + ' לשלושה ימים.', k: 'world' },
+  { id: 'w_plague', c: 'intl', w: 0.8, o: 'poorany', go: c => { S.c[c.o].gdp *= 0.99; tag(S.c[c.o], 'disaster', 120); }, n: c => 'התפרצות כולרה ב' + c.on + '. ארגוני הסיוע מזהירים מאסון.', k: 'world' },
+  { id: 'w_protest', c: 'intl', w: 1.5, o: 'weak', go: c => { tag(S.c[c.o], 'protest', 60); S.c[c.o].approval = clamp(S.c[c.o].approval - 3, 5, 95); }, n: c => 'מחאות המוניות ב' + c.on + ' נגד השלטון. ' + pick(['המשטרה ירתה גז מדמיע.', 'האופוזיציה קוראת לשביתה כללית.', 'השלטון חסם את האינטרנט.']), k: 'world' },
+  { id: 'w_quake', c: 'intl', w: 1.5, o: 'any', go: c => { S.c[c.o].gdp *= 0.99; tag(S.c[c.o], 'disaster', 180); if (!atWar(c.o, S.player) && rel(c.o, S.player) > -60 && R() < 0.6) pushAid(c.o, 'רעידת האדמה', 0.01); }, n: c => 'רעידת אדמה קטלנית ב' + c.on + '. מאות הרוגים ואלפי עקורים.', k: 'world' },
+  /* ---------- the government itself ---------- */
+  { id: 'm_scandal', c: 'dom', o: 'min', w: () => govN() ? (anyCorrupt() ? 4 : 0.8) : 0, t: c => 'שערוריה: ' + c.mt, x: c => 'תחקיר עיתונאי חושף: ' + c.mt + ' ' + c.mn + (c.mc ? c.v(' לקח כספים מהקופה הציבורית.', ' לקחה כספים מהקופה הציבורית.') : c.v(' העסיק', ' העסיקה') + ' קרובי משפחה בלשכה.'),
+    ch: [C_(c => 'לפטר את ' + c.mn, { ap: 2 }, { f: c => fireMin(c.mr, true) }), C_(c => 'לגבות את ' + c.mn, { ap: -3, rep: -1 }), C_('ועדת בדיקה', { m: -0.0001, ap: -1 }, { f: c => { if (c.mc && R() < 0.6) { fireMin(c.mr, true); addNews('ועדת הבדיקה מצאה אשמה: ' + c.mn + ' ' + c.v('פוטר', 'פוטרה') + '.', 'bad'); } } })] },
+  { id: 'm_resign', c: 'dom', o: 'min', cd: 600, w: () => govN() ? 0.45 : 0, t: c => c.mt + ' ' + c.v('התפטר', 'התפטרה'), go: c => fireMin(c.mr, true, true),
+    n: c => c.mt + ' ' + c.mn + ' ' + c.v('הודיע', 'הודיעה') + ' על התפטרות ' + pick(['מסיבות אישיות.', 'בעקבות מחלוקת עם ראש הממשלה.', 'כדי להתמודד בבחירות.']) + ' התפקיד פנוי — אפשר למנות מחליף בלשונית ממשלה.', e: { ap: -1 }, k: 'bad' },
+  { id: 'm_pop', c: 'dom', o: 'min', w: () => govN() ? 1.2 : 0, t: c => c.mt + ' ' + c.v('אהוב', 'אהובה') + ' על הציבור', go: c => { const m = minOf(c.mr); if (m) m.pop = clamp(m.pop + 15, 5, 95); }, n: c => c.mt + ' ' + c.mn + ' ' + c.v('זוכה', 'זוכה') + ' לשבחים בסקרים. הממשלה נהנית מזה.', e: { ap: 2 }, k: 'good' },
+  { id: 'm_clash', c: 'dom', o: 'min2', w: () => govN() >= 2 ? 1 : 0, t: 'ריב בממשלה', x: c => c.mt + ' ו' + c.mt2 + ' תוקפים זה את זה בתקשורת. הממשלה נראית מפולגת.',
+    ch: [C_(c => 'לגבות את ' + c.mt, { ap: -1 }, { f: c => fireMin(c.mr2, true) }), C_(c => 'לגבות את ' + c.mt2, { ap: -1 }, { f: c => fireMin(c.mr, true) }), C_('להשכין שלום ביניהם', { ap: -2 })] }
+];
+const EVI = {}; EV.forEach(e => { EVI[e.id] = e; });
+// everything an event needs to know about the player's situation
+function evCtx(x) {
+  const c = P(), p = S.p, debt = p.treasury < 0 ? -p.treasury / c.gdp : 0, pc = c.gdp / Math.max(0.01, c.pop);
+  const t = mainTid(S.player);
+  const ctx = { he: c.he, gdp: c.gdp, dem: c.gov === 'democracy', auth: c.gov === 'authoritarian', war: activeWars(S.player) > 0, debt, rec: S.recession > 0, oil: OIL.has(S.player),
+    rich: pc > 30, poor: pc < 6, sea: t ? tp(t).sea.length > 0 : true, nukes: c.nukes > 0, ap: c.approval, rep: p.rep, tr: p.treasury };
+  Object.assign(ctx, x || {});
+  ctx.on = ctx.o ? nm(ctx.o) : ''; ctx.on2 = ctx.o2 ? nm(ctx.o2) : '';
+  if (ctx.mr) { const m = minOf(ctx.mr); ctx.mn = m ? m.n : ''; ctx.mt = mTitle(ctx.mr, m); ctx.mg = m ? m.g : 'm'; ctx.mc = !!(m && m.tr === 'corrupt'); }
+  if (ctx.mr2) { const m = minOf(ctx.mr2); ctx.mt2 = mTitle(ctx.mr2, m); }
+  ctx.v = (a, b) => ctx.mg === 'f' ? b : a;
+  return ctx;
+}
+function effAdd(a, b) {
+  const o = Object.assign({}, a || {});
+  for (const k in b || {}) { if (k === 'mil') o.mil = Object.assign({}, o.mil || {}, b.mil); else if (typeof b[k] === 'number') o[k] = (o[k] || 0) + b[k]; else o[k] = b[k]; }
+  return o;
+}
+const sgnPct = v => '⁦' + (v > 0 ? '+' : '−') + (Math.abs(v) * 100).toFixed(Math.abs(v) >= 0.01 ? 0 : 1) + '%⁩';
+const durTxt = d => d >= 60 ? '⁦' + Math.round(d / DPM) + '⁩ חודשים' : '⁦' + d + '⁩ ימים';
+// the preview line of a choice (shown on its button)
+function evPrev(e, c) {
+  const me = P(), o = { ap: e.ap, rep: e.rep, rel: {} }, notes = [];
+  const money_ = (e.m || 0) * me.gdp + (e.cash || 0);
+  if (money_ < 0) o.cost = -money_; else if (money_ > 0) notes.push('קופה +' + money(money_));
+  if (e.ro && c.o) o.rel[c.o] = e.ro; if (e.ro2 && c.o2) o.rel[c.o2] = e.ro2;
+  if (e.gdp) notes.push('כלכלה ' + isoNums(sgnPct(e.gdp)));
+  if (e.gv) notes.push('צמיחה ' + isoNums(sgnPct(e.gv)) + ' לשנה, ' + isoNums(durTxt(e.gd || 365)));
+  if (e.at) notes.push('העם ' + sgn(e.at) + ' בהדרגה');
+  if (e.rd) notes.push('הדמוקרטיות ' + sgn(e.rd));
+  if (e.un) notes.push('כעס ברחוב');
+  if (e.mil) notes.push('אבדות בצבא');
+  if (e.pop > 0) notes.push('אוכלוסייה גדלה');
+  o.note = notes.join(' · ');
+  return o;
+}
+function evApply(e, c) {
+  const me = P(), p = S.p, out = [];
+  const money_ = (e.m || 0) * me.gdp + (e.cash || 0);
+  if (money_) { p.treasury += money_; out.push('קופה ' + (money_ >= 0 ? '+' : '−') + '⁦' + moneyTxt(Math.abs(money_)) + '⁩'); }
+  if (e.gdp) { me.gdp *= 1 + e.gdp; out.push('כלכלה ' + sgnPct(e.gdp)); }
+  if (e.gv) { (p.tg || (p.tg = [])).push({ v: e.gv, u: S.day + (e.gd || 365) }); out.push('צמיחה ' + sgnPct(e.gv)); }
+  if (e.at) { (p.tm || (p.tm = [])).push({ v: e.at, u: S.day + (e.ad || 180) }); out.push('העם ' + sgnT(e.at) + ' בהדרגה'); }
+  if (e.un) p.unrest += e.un;
+  if (e.mil) { for (const k in e.mil) hurtInv(me, e.mil[k], [k]); if (S.units) syncAllUnits(); out.push('אבדות בצבא'); }
+  if (e.pop) me.pop *= 1 + e.pop;
+  if (e.rd) { alive().forEach(id => { if (id !== S.player && id !== c.o && S.c[id].gov === 'democracy') addRel(id, S.player, e.rd); }); out.push('הדמוקרטיות ' + sgnT(e.rd)); }
+  const rl = {}; if (e.ro && c.o && S.c[c.o]) rl[c.o] = e.ro; if (e.ro2 && c.o2 && S.c[c.o2]) rl[c.o2] = e.ro2;
+  return applyFx({ ap: e.ap, rep: e.rep, rel: Object.keys(rl).length ? rl : null }).concat(out);
+}
+const evOk = (ch, c) => !ch.need || ch.need(c);
+// a minister picks the choice that suits his character (skill adds or removes noise)
+function evMinPick(m, e, c) {
+  const tr = m.tr, es = mSk(m), gdp = P().gdp;
+  const Wap = tr === 'popul' || tr === 'char' ? 2 : 1, Wrep = tr === 'dipl' ? 1.5 : 0.6, Wm = tr === 'frugal' ? 1.8 : tr === 'popul' ? 0.5 : 0.9;
+  let best = -1, bs = -1e9;
+  e.ch.forEach((ch, i) => {
+    if (!evOk(ch, c)) return;
+    const x = effAdd(e.b, ch.e), mon = ((x.m || 0) + (x.cash || 0) / gdp) * 1000;
+    let s = (x.ap || 0) * Wap + (x.rep || 0) * Wrep + (x.at || 0) * Math.min(1, (x.ad || 180) / 180) * Wap + mon * Wm + (x.gdp || 0) * 1000 * Wm +
+      (x.gv || 0) * (x.gd || 365) / 365 * 1000 * Wm + (x.ro || 0) * 0.05 + (x.rd || 0) * 0.15 - (x.un || 0) * 2 - (x.mil ? (tr === 'careful' ? 3 : 1) : 0);
+    if (tr === 'aggr') s -= (x.ro || 0) * 0.12;
+    if (tr === 'corrupt') s += mon * 0.5;
+    s += (R() - 0.5) * (6 - es) * 1.5;
+    if (s > bs) { bs = s; best = i; }
+  });
+  return best < 0 ? e.ch.length - 1 : best;
+}
+function evChoose(e, i, c, how) {
+  const ch = e.ch[i]; if (!ch) return;
+  const parts = evApply(effAdd(e.b, ch.e), c);
+  if (ch.f) ch.f(c);
+  const title = fnv(e.t, c), lbl = fnv(ch.l, c);
+  const neg = parts.some(t => /[−-]\d/.test(plainT(t))) && !parts.some(t => /\+\d/.test(plainT(t)));
+  if (how && how.m) {
+    logMin(how.r, 'החלטה בנושא "' + title + '": ' + lbl, parts.join(' · '), neg);
+    addNews(title + ': ' + mTitle(how.r, how.m) + ' ' + (how.m.g === 'f' ? 'החליטה' : 'החליט') + ' — ' + lbl + '.', 'event');
+  } else {
+    addNews(title + ': ' + (how ? 'הממשלה ' : '') + lbl + '.', 'event');
+    toast((how ? title + ' — ' : '') + lbl + (parts.length ? ': ' + parts.join(' · ') : ''), neg);
+  }
+}
+function evNews(e, c) {
+  const eff = fnv(e.e, c), parts = eff ? evApply(eff, c) : [];
+  const k = fnv(e.k, c) || 'world';
+  addNews(fnv(e.n || e.t, c), k);
+  if (parts.length) toast(fnv(e.t || e.n, c) + ': ' + parts.join(' · '), k === 'bad');
+}
+function pickMinRole(corruptFirst) {
+  const rs = MIN_ORDER.filter(minOf); if (!rs.length) return null;
+  const cr = rs.filter(r => minOf(r).tr === 'corrupt');
+  return corruptFirst && cr.length && R() < 0.75 ? pick(cr) : pick(rs);
+}
+// one event slot every 3–8 days: about every second one is a decision (at least 11 days apart), the rest are news
+function eventsDay() {
+  if (!S.player || !S.p || S.over) return;
+  const E = S.ev || (S.ev = { nx: S.day + 4, cd: {}, ld: S.day, n: 0, dn: 0 });
+  if (S.day < E.nx) return;
+  E.nx = S.day + 3 + Math.floor(R() * 6);
+  const dec = S.day - E.ld >= 11 && R() < 0.6;
+  const base = evCtx();
+  const pool = []; let tw = 0;
+  for (const e of EV) {
+    if (!!e.ch !== dec || (E.cd[e.id] || 0) > S.day) continue;
+    if (e.ok && !e.ok(base)) continue;
+    const w = fnv(e.w, base) || 0; if (w <= 0) continue;
+    pool.push([e, w]); tw += w;
+  }
+  if (!pool.length) return;
+  let x = R() * tw, e = pool[0][0];
+  for (const [q, w] of pool) { x -= w; if (x <= 0) { e = q; break; } }
+  const extra = {};
+  if (e.o === 'min' || e.o === 'min2') {
+    extra.mr = pickMinRole(e.id === 'm_scandal'); if (!extra.mr) return;
+    if (e.o === 'min2') { const o2 = MIN_ORDER.filter(r => minOf(r) && r !== extra.mr); if (!o2.length) return; extra.mr2 = pick(o2); }
+  } else if (e.o) {
+    const v = EVO[e.o](); if (Array.isArray(v)) { extra.o = v[0]; extra.o2 = v[1]; } else extra.o = v || null;
+    if (!extra.o && !e.oOpt) return;
+  }
+  const ctx = evCtx(extra);
+  E.cd[e.id] = S.day + (e.cd || 300); E.n++;
+  if (e.go) e.go(ctx);
+  if (!e.ch) { evNews(e, ctx); return; }
+  E.ld = S.day; E.dn++;
+  const m = e.r && minOn(e.r);
+  if (m) { evChoose(e, evMinPick(m, e, ctx), ctx, { m, r: e.r }); return; }
+  // too many dialogs waiting: the cautious default happens and it becomes news
+  if (S.pending.some(p => p.type === 'ev') || S.pending.length >= 2) { evChoose(e, e.ch.length - 1, ctx, { auto: 1 }); return; }
+  S.pending.push({ type: 'ev', id: e.id, x: extra });
+}
+// the dialog of a decision event
+function evDialog(p, after) {
+  const e = EVI[p.id]; if (!e) return false;
+  const ctx = evCtx(p.x);
+  if ((p.x.o && !(S.c[p.x.o] && S.c[p.x.o].alive)) || (p.x.mr && !minOf(p.x.mr))) return false;
+  const m = e.r && minOf(e.r);
+  const rec = m ? '<p class="sub">' + esc(mTitle(e.r, m)) + ' ' + esc(m.n) + ' ' + (m.g === 'f' ? 'ממליצה' : 'ממליץ') + ': <b>' + esc(fnv(e.ch[evMinPick(m, e, ctx)].l, ctx)) + '</b></p>' : '';
+  modal({ title: esc(fnv(e.t, ctx)), col: 1, html: '<div class="chips">' + (e.c === 'intl' ? chip('בעולם', 'blue') : chip('בבית', 'teal')) + '</div><p>' + esc(fnv(e.x, ctx)) + '</p>' + rec,
+    buttons: e.ch.map((ch, i) => {
+      const ok = evOk(ch, ctx);
+      if (!ok) return { label: fxBtn(esc(fnv(ch.l, ctx)), { note: 'לא אפשרי עכשיו' }), cls: 'off', keep: true, fn: () => toast('האפשרות הזו לא זמינה עכשיו', true) };
+      return { label: fxBtn(esc(fnv(ch.l, ctx)), evPrev(effAdd(e.b, ch.e), ctx)), fn: () => { evChoose(e, i, evCtx(p.x)); after(); } };
+    }) });
+  return true;
+}
+// temporary effects from events (approval target and growth for a while)
+const tmSum = a => { let s = 0; if (a) for (const x of a) if (x.u > S.day) s += x.v; return s; };
+
 /* ================= time ================= */
 let needMapRecolor = false;
 // one game day: money, fighting, mood and deliveries; a new month also runs the slower world logic
@@ -992,6 +1936,9 @@ function dayTick() {
   if (!S.over) unitsDay();
   if (!S.over) approvalStep();
   if (!S.over) deliveries();
+  if (!S.over) worldDay();
+  if (!S.over) govDay();
+  if (!S.over) eventsDay();
   S.day++;
   const m = monthOf(S.day);
   if (m !== S.turn && !S.over) monthTick(m);
@@ -1007,6 +1954,10 @@ function monthTick(m) {
   if (!S.over) randomEvents();
   if (!S.over) nukeProgram();
   if (!S.over) approvalMonthly();
+  if (!S.over) { govMonth(); worldRebels(); }
+  if (p.tm) p.tm = p.tm.filter(x => x.u > S.day);
+  if (p.tg) p.tg = p.tg.filter(x => x.u > S.day);
+  if (m % 3 === 0) worldSnap();
   S.turn = m;
   p.budget = p.bm; p.bm = null;
   p.gdpHist.push(c.gdp); if (p.gdpHist.length > 13) p.gdpHist.shift();
@@ -1108,7 +2059,7 @@ function nukeImpact(att, tgt, ai) {
 /* ================= save / load ================= */
 let WIPED = false;
 function save() { if (!S || !S.player || WIPED) return; try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { /* storage unavailable */ } }
-let OLD_SAVE_FOUND = false, UNITS_MIGRATED = false;
+let OLD_SAVE_FOUND = false, UNITS_MIGRATED = false, GOV_MIGRATED = false;
 function load() {
   // saves from the old turn-based version can't be continued: drop them and start fresh
   try { OLD_SAVE_KEYS.forEach(k => { if (localStorage.getItem(k)) { OLD_SAVE_FOUND = true; localStorage.removeItem(k); } }); } catch (e) { /* ignore */ }
@@ -1117,6 +2068,12 @@ function load() {
     S = o; BASE.clear(); rebuildOwn();
     // saves from before units existed: build the units from the inventory
     if (!Array.isArray(S.units)) { initUnits(); UNITS_MIGRATED = true; }
+    // saves from before the government and the living world: an empty government, fresh event clock
+    if (!S.p.gov) { S.p.gov = newGov(); GOV_MIGRATED = true; }
+    const g = S.p.gov; ['m', 'ovr', 'no', 'pt', 'tc', 'cand'].forEach(k => { if (!g[k] || typeof g[k] !== 'object') g[k] = {}; }); if (!Array.isArray(g.log)) g.log = [];
+    if (!Array.isArray(S.p.tm)) S.p.tm = []; if (!Array.isArray(S.p.tg)) S.p.tg = [];
+    if (!S.ev || typeof S.ev !== 'object') S.ev = { nx: S.day + 5, cd: {}, ld: S.day, n: 0, dn: 0 };
+    if (!S.wh) worldSnap();
     return true;
   } catch (e) { return false; }
 }
@@ -1657,6 +2614,8 @@ function unitBattle(w) {
   let dP = defStr(myInMe) + allyMe;
   let lm = 1;
   if (w.stance === 'attack') { aE *= 1.2; lm = 1.5; } else { aE *= 0.85; dP *= 1.15; lm = 0.7; }
+  // a skilled defence minister fights better (and a poor one worse)
+  const dm = minOf('def'); if (dm) { const k = 1 + (mSk(dm) - 3) * 0.04; aE *= k; dP *= k; }
   dE *= 1.3 + Math.max(0, fp) / 250; dP *= 1.3 + Math.max(0, -fp) / 250;
   aE *= 1 - Math.max(0, -fp) / 200; aP *= 1 - Math.max(0, fp) / 200;
   const rE = aE > 0 ? aE / (aE + dE + 1e-9) : 0, rP = aP > 0 ? aP / (aP + dP + 1e-9) : 0;
@@ -2209,7 +3168,8 @@ function orderTo(u, dest, mode) {
   const r = planMove(u, dest, mode);
   if (r.err) { toast(r.err, true); return false; }
   endMode();
-  const go = () => { commitMove(u, r); save(); if (u.o === S.player) selectUnit(u.id); };
+  // the player's own order: the defence minister leaves this unit alone for a month
+  const go = () => { commitMove(u, r); u.man = S.day + 30; save(); if (u.o === S.player) selectUnit(u.id); };
   if (r.needWar) confirmWar(r.needWar, go, uName(u));
   else go();
   return true;
@@ -2569,6 +3529,7 @@ function hideCard() { const el = $('#rcard'); if (el) el.className = ''; documen
 let tab = null;
 function renderAll() {
   if (!S || !S.player) return;
+  sancDirty();
   syncAllUnits();
   renderTop(); recolor(); if (tab) renderSheet();
   drawUnits();
@@ -2591,15 +3552,15 @@ function renderTop() {
   const bh = $('#tabhome'); if (bh) { const v = S.p.proj.length ? String(S.p.proj.length) : ''; if (bh.dataset.badge !== v) bh.dataset.badge = v; }
 }
 function openTab(t) {
-  tab = (tab === t && t !== 'country' && t !== 'unit' && t !== 'ulist' && t !== 'stats') ? null : t;
+  tab = (tab === t && t !== 'country' && t !== 'unit' && t !== 'ulist' && t !== 'stats' && t !== 'world') ? null : t;
   if (tab !== 'unit' && selUnit) { selUnit = null; unitsDirty = true; }
-  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === (tab === 'world' ? 'news' : tab)));
   $('#sheet').classList.toggle('open', !!tab);
   if (tab) renderSheet();
 }
 function renderSheet() {
   const el = $('#sheet-body'); if (!el) return;
-  const fn = { country: viewCountry, eco: viewEco, home: viewHome, mil: viewMil, wars: viewWars, news: viewNews, unit: viewUnit, ulist: viewUnitList, stats: viewStats }[tab];
+  const fn = { country: viewCountry, eco: viewEco, home: viewHome, gov: viewGov, mil: viewMil, wars: viewWars, news: viewNews, world: viewWorld, unit: viewUnit, ulist: viewUnitList, stats: viewStats }[tab];
   const h = fn ? fn() : '';
   if (el.__h !== h) { el.innerHTML = h; el.__h = h; }
 }
@@ -2656,6 +3617,7 @@ function viewCountry() {
   const d = adjacent(o, S.player) ? 'שכנה (גבול משותף)' : 'מרחק ' + num(dist(o, S.player)) + ' ק״מ';
   h += '<h2>' + esc(c.he) + (c.generated ? ' <small>(נתונים משוערים)</small>' : '') + '</h2><div class="chips">' + st.join('') + '</div>';
   h += relBar(r) + '<p class="sub">' + d + ' · יחס כוחות: ' + (power(P()) >= power(c) ? num(power(P()) / power(c), 1) + ' : 1 לטובתך' : '1 : ' + num(power(c) / power(P()), 1) + ' לטובתם') + '</p>' + statGrid(c);
+  h += aiNowHtml(c);
   if (!war) {
     h += '<h3>דיפלומטיה</h3><div class="btns">';
     const g = giftAmt(), gcd = cdLeft('gift:' + o);
@@ -2731,6 +3693,92 @@ function strikeSection(o, w) {
   return h;
 }
 
+/* ---- government: the ministers ---- */
+const STARS = n => '<span class="stars" aria-label="מיומנות ' + n + ' מתוך 5">' + '★'.repeat(n) + '<i>' + '★'.repeat(Math.max(0, 5 - n)) + '</i></span>';
+const POL_UI = {
+  def: [['st', 'גישה', [['def', 'הגנה'], ['bal', 'מאוזן'], ['atk', 'התקפה']]], ['buy', 'רכש נשק לבד', [[0, 'בלי'], [1, 'צנוע'], [2, 'נרחב']]], ['mob', 'מילואים בחירום', [[1, 'לגייס'], [0, 'לא לגייס']]]],
+  fin: [['goal', 'היעד', [['grow', 'צמיחה'], ['bal', 'איזון'], ['wel', 'רווחה']]]],
+  int: [['pri', 'מה לבנות קודם', [['people', 'העם'], ['growth', 'צמיחה'], ['green', 'ירוק']]]],
+  fo: [['rep', 'יעד מוניטין', [[50, '50'], [65, '65'], [80, '80']]], ['peace', 'שלום כשהמלחמה רעה', [[1, 'להציע'], [0, 'לא להציע']]]]
+};
+function minCard(r) {
+  const m = minOf(r), D = MIN_R[r];
+  if (!m) return '<div class="card mcard"><div class="mh"><b>' + D.he + '</b>' + chip('התפקיד פנוי') + '</div><div class="sub">' + D.d + '</div><div class="btns">' + btn('gappoint', 'מנה שר', 'primary', ' data-r="' + r + '"') + '</div></div>';
+  const T = TRAITS[m.tr], ap = minAp(m), last = G().log.find(x => x.r === r);
+  let h = '<div class="card mcard"><div class="mh"><b>' + esc(mTitle(r, m)) + '</b>' + STARS(m.sk) + '</div><div class="mn">' + esc(m.n) + '</div>';
+  h += '<div class="chips">' + chip(esc(T.he), m.tr === 'corrupt' ? 'red' : m.tr === 'aggr' || m.tr === 'popul' ? 'orange' : 'teal') + chip('העם ' + sgn(ap), ap >= 0.5 ? 'ok' : ap <= -0.5 ? 'bad' : '') + chip('פופולריות ' + pct(m.pop)) + chip(money(m.sal, true) + ' בשנה') + '</div>';
+  h += '<div class="sub">' + esc(T.d) + '. ' + D.d + '</div>';
+  h += '<div class="seg sm">' + [['1', 'פועל לבד'], ['0', 'רק ממליץ']].map(([v, l]) => '<button class="' + ((m.auto ? '1' : '0') === v ? 'on' : '') + '" data-act="gauto" data-r="' + r + '" data-v="' + v + '">' + l + '</button>').join('') + '</div>';
+  POL_UI[r].forEach(([k, lbl, opts]) => {
+    h += '<div class="pl"><small>' + lbl + '</small><div class="seg sm">' + opts.map(([v, l]) => '<button class="' + (String(m.pol[k]) === String(v) ? 'on' : '') + '" data-act="gpol" data-r="' + r + '" data-k="' + k + '" data-v="' + v + '">' + l + '</button>').join('') + '</div></div>';
+  });
+  if (last) h += '<div class="sub last"><small>' + dayHtml(last.d) + '</small> ' + isoNums(esc(last.t)) + '</div>';
+  h += '<div class="btns">' + btn('gappoint', 'החלף', '', ' data-r="' + r + '"') + btn('gfire', 'פטר', 'danger', ' data-r="' + r + '"') + '</div></div>';
+  return h;
+}
+function viewGov() {
+  const g = G();
+  let h = '<h2>ממשלה <small>' + num(govN()) + ' מתוך 4 שרים</small></h2>';
+  h += '<p class="sub">שר עם <b>"פועל לבד"</b> עושה את העבודה בעצמו לפי המדיניות שבחרת, ומדווח על כל צעד. החלטה שלך תמיד גוברת: שר לא נוגע במה ששינית בעצמך, ואף שר לא מכריז מלחמה.</p>';
+  h += '<div class="grid"><div><small>השפעת השרים על העם</small>' + sgn(govAp()) + '</div><div><small>שכר השרים בשנה</small>' + money(govSal()) + '</div></div>';
+  MIN_ORDER.forEach(r => { h += minCard(r); });
+  h += '<h3>דיווחי השרים</h3>' + (g.log.length ? '<ul class="news blog">' + g.log.slice(0, 20).map(x => '<li class="' + (x.bad ? 'bad' : 'good') + '"><small>' + dayHtml(x.d) + ' · ' + MIN_R[x.r].sh + '</small> ' + isoNums(esc(x.t)) + (x.fx ? ' <small>(' + isoNums(esc(x.fx)) + ')</small>' : '') + '</li>').join('') + '</ul>' : '<p class="sub">עוד אין דיווחים. מנה שרים כדי שיתחילו לעבוד.</p>');
+  return h;
+}
+function appointDialog(r) {
+  const l = candsFor(r), D = MIN_R[r], old = minOf(r);
+  const h = '<p class="sub">' + D.d + '</p><div class="btns col">' + l.map((m, i) => '<button class="b cand" data-hc="' + i + '"><span class="mh"><b>' + esc(m.n) + '</b>' + STARS(m.sk) + '</span><small class="cost">' + esc(TRAITS[m.tr].he) + ' — ' + esc(TRAITS[m.tr].d) + '<br>שכר ' + money(m.sal) + ' בשנה · העם ' + sgn(minAp(m)) + '</small></button>').join('') + '</div>' +
+    '<p class="sub">מיומנות גבוהה = החלטות טובות יותר ותוצאות טובות יותר (ושכר גבוה יותר). "מושחת" גונב מהקופה ועלול לגרום לשערוריה.' + (old ? ' פיטורי השר הנוכחי עולים חצי שנת שכר.' : '') + '</p>';
+  modal({ title: (old ? 'החלפת ' : 'מינוי: ') + D.he, html: h, buttons: [{ label: 'ביטול' }], onShow: () => document.querySelectorAll('[data-hc]').forEach(b => b.onclick = () => {
+    const m = l[+b.dataset.hc]; modalQ.shift(); $('#modal').classList.remove('open');
+    const pol = old ? Object.assign({}, old.pol) : null;
+    if (old) fireMin(r, true);
+    hireMin(r, m); if (pol) G().m[r].pol = pol;
+    toast(mTitle(r, G().m[r]) + ' ' + (m.g === 'f' ? 'מונתה' : 'מונה') + ': ' + m.n + ' (' + TRAITS[m.tr].he + ')');
+    save(); renderAll(); setTimeout(showModal, 30);
+  }) });
+}
+/* ---- the world: rankings, trends and what happens out there ---- */
+let wRank = 'g';
+const pctSg = v => '<span class="num" dir="ltr">' + (Math.abs(v) < 0.0005 ? '' : v > 0 ? '+' : '−') + Math.abs(v * 100).toFixed(1) + '%</span>';
+const monthName = day => { const q = dParts(day); return MONTHS[q.m] + ' ' + q.y; };
+function growthOf(id) {
+  if (id !== S.player) return S.c[id].g || 0;
+  const h = S.p.gdpHist; return h.length > 1 ? Math.pow(h[h.length - 1] / h[0], 12 / (h.length - 1)) - 1 : 0.026;
+}
+function newsSeg(on) { return '<div class="seg">' + [['news', 'מבזקים', 'gonews'], ['world', 'העולם', 'goworld']].map(([k, l, a]) => '<button class="' + (on === k ? 'on' : '') + '" data-act="' + a + '">' + l + '</button>').join('') + '</div>'; }
+function viewWorld() {
+  const r = ranks(), base = S.wh && S.wh.prev && S.wh.prev.d < S.day ? S.wh.prev : null, list = r[wRank], me = S.player;
+  let h = newsSeg('world') + '<h2>העולם <small>דירוג ומגמות</small></h2>';
+  h += '<div class="seg sm">' + [['g', 'כלכלה'], ['p', 'עוצמה צבאית'], ['r', 'מוניטין']].map(([k, l]) => '<button class="' + (wRank === k ? 'on' : '') + '" data-act="wrank" data-v="' + k + '">' + l + '</button>').join('') + '</div>';
+  const row = (id, i) => {
+    const c = S.c[id], pi = base ? base[wRank].indexOf(id) : -2, d = pi === -2 ? 0 : pi < 0 ? null : pi - i;
+    const tr = d == null ? '<span class="tr up">חדש</span>' : d > 0 ? '<span class="tr up">▲' + d + '</span>' : d < 0 ? '<span class="tr down">▼' + -d + '</span>' : '<span class="tr">–</span>';
+    const v = wRank === 'g' ? money(c.gdp, true) + ' <small class="' + (growthOf(id) < 0 ? 'down' : 'up') + '">' + pctSg(growthOf(id)) + '</small>' : wRank === 'p' ? num(power(c)) : num(repOf(id));
+    return '<button class="rkr' + (id === me ? ' me' : '') + '" data-act="wsel" data-id="' + id + '"><span class="n">' + num(i + 1) + '</span><b>' + (id === me ? '<span class="dot me"></span>' : '') + esc(c.he) + '</b><span class="v">' + v + '</span>' + tr + '</button>';
+  };
+  h += '<div class="rk">' + list.slice(0, 12).map(row).join('');
+  const mi = list.indexOf(me);
+  if (mi >= 12) h += row(me, mi); else if (mi < 0 && me) h += '<p class="sub">' + esc(P().he) + ' מחוץ ל-40 הראשונות.</p>';
+  h += '</div><p class="sub">▲▼ = שינוי בדירוג מאז ' + (base ? dayHtml(base.d) : 'הדירוג הקודם (מתעדכן כל שלושה חודשים)') + '. הקש על מדינה כדי לראות מה קורה בה.</p>';
+  const rec = alive().filter(id => S.c[id].cy && S.c[id].cy.k === 'rec').length;
+  h += '<h3>מצב העולם</h3><div class="grid g3"><div><small>מלחמות פעילות</small>' + num(S.wars.filter(w => w.pause === 0).length) + '</div><div><small>מדינות במיתון</small>' + num(rec) + '</div><div><small>הכלכלה העולמית</small>' + (S.recession ? '<span class="bad">מיתון</span>' : '<span class="ok">צומחת</span>') + '</div></div>';
+  const el = alive().filter(id => id !== me && S.c[id].el && S.c[id].el > S.day && S.c[id].el - S.day < 150 && notable(id)).sort((a, b) => S.c[a].el - S.c[b].el).slice(0, 5);
+  if (el.length) h += '<p class="sub">בחירות בקרוב: ' + el.map(id => esc(nm(id)) + ' (' + monthName(S.c[id].el) + ')').join(' · ') + '</p>';
+  const wn = S.news.filter(n => n.k === 'world').slice(0, 15);
+  h += '<h3>התפתחויות אחרונות</h3>' + (wn.length ? '<ul class="news blog">' + wn.map(n => '<li class="world"><small>' + dayHtml(n.t) + '</small> ' + esc(n.txt) + '</li>').join('') + '</ul>' : '<p class="sub">עוד אין חדשות מהעולם.</p>');
+  return h;
+}
+// what another country is busy with right now (shown in its card)
+function aiNowHtml(c) {
+  aiInit(c);
+  const tags = Object.keys(c.tg || {}).filter(k => c.tg[k] > S.day && TAG_HE[k]).map(k => chip(TAG_HE[k], TAG_CLS[k]));
+  const g = c.g || 0;
+  let h = '<h3>מה קורה שם</h3><p class="sub">' + (c.gov === 'authoritarian' ? vg(c, 'שליט', 'שליטה') : vg(c, 'מנהיג', 'מנהיגה')) + ': <b>' + esc(c.ld) + '</b> · צמיחה <span class="' + (g < 0 ? 'bad' : 'ok') + '">' + pctSg(g) + '</span>' +
+    (c.el && c.gov !== 'authoritarian' && c.el > S.day ? ' · בחירות ב' + monthName(c.el) : '') + '</p>';
+  return h + (tags.length ? '<div class="chips">' + tags.join('') + '</div>' : '<p class="sub">שגרה — אין אירועים מיוחדים.</p>');
+}
+
 /* ---- economy ---- */
 function viewEco() {
   const c = P(), p = S.p, b = p.budget, bd = budgetDay();
@@ -2751,7 +3799,7 @@ function viewEco() {
   if (b) h += '<h3>החודש שעבר</h3><table class="tbl">' +
     row('הכנסות ממסים', b.income) + row('רווחה', -b.welfare) + row('מנהלה ותשתיות', -b.admin) + row('ביטחון', -b.defense) +
     (b.war ? row('עלות מלחמות', -b.war) : '') + (b.interest ? row('ריבית על חוב', -b.interest) : '') + (b.upkeep ? row('אחזקת כוחות נוספים ומילואים', -b.upkeep) : '') +
-    (b.nuke ? row('תוכנית גרעין', -b.nuke) : '') + '<tr class="tot"><td>סה״כ</td><td>' + money(b.net) + '</td></tr></table>';
+    (b.nuke ? row('תוכנית גרעין', -b.nuke) : '') + (b.gov ? row('שכר השרים', -b.gov) : '') + '<tr class="tot"><td>סה״כ</td><td>' + money(b.net) + '</td></tr></table>';
   h += '<p class="sub">הכסף נכנס ויוצא כל יום. הסכמי סחר: ' + (tr.length ? tr.join(', ') : 'אין') + '<br>מטילות עליך סנקציות: ' + (sancBy.length ? sancBy.join(', ') : 'אף אחת') + '</p>';
   return h;
 }
@@ -2762,7 +3810,9 @@ function slider(k, label, v, mn, mx, hint) {
 }
 
 /* ---- home: domestic policy ---- */
-const projCost = k => PROJ[k].cost * P().gdp * Math.pow(1.5, S.p.built[k] || 0);
+// a skilled construction minister builds cheaper; a corrupt one takes a cut
+const projMul = () => { const m = minOf('int'); return m ? 1 - (mSk(m) - 3) * 0.04 + (m.tr === 'corrupt' ? 0.1 : 0) : 1; };
+const projCost = k => PROJ[k].cost * P().gdp * Math.pow(1.5, S.p.built[k] || 0) * projMul();
 const projMax = k => PROJ[k].max || 3;
 function viewHome() {
   const c = P(), p = S.p, T = approvalTarget();
@@ -2775,6 +3825,8 @@ function viewHome() {
   if (warWeariness() > 0) why.push('<li class="red">עייפות ממלחמה (' + num(warWeariness()) + '−)</li>');
   if (c.mob > 0) why.push('<li class="red">מילואים מגויסים — המשפחות רוצות אותם בבית</li>');
   if (p.apBonus) why.push('<li>פרויקטים שהושלמו (+' + num(p.apBonus) + ')</li>');
+  const ga = govAp(); if (Math.abs(ga) >= 0.5) why.push('<li' + (ga < 0 ? ' class="red"' : '') + '>השרים בממשלה (' + sgn(ga) + ')</li>');
+  const tm = tmSum(p.tm); if (Math.abs(tm) >= 0.5) why.push('<li' + (tm < 0 ? ' class="red"' : '') + '>אירועים אחרונים (' + sgn(tm) + ')</li>');
   if (p.unrest > 0.5) why.push('<li class="red">כעס מצטבר ברחוב</li>');
   if (sanctionHit(S.player) > 0.01) why.push('<li class="red">סנקציות פוגעות בכיס</li>');
   if (why.length) h += '<ul class="plain">' + why.join('') + '</ul>';
@@ -3039,8 +4091,8 @@ function viewStats() {
   return h;
 }
 function viewNews() {
-  if (!S.news.length) return '<p class="hint">אין חדשות עדיין.</p>';
-  let h = '<h2>מבזקי חדשות</h2><ul class="news">', last = null;
+  if (!S.news.length) return newsSeg('news') + '<p class="hint">אין חדשות עדיין.</p>';
+  let h = newsSeg('news') + '<h2>מבזקי חדשות</h2><ul class="news">', last = null;
   S.news.slice(0, 80).forEach(n => { const d = n.t >= 0 ? dayHtml(n.t) : ''; if (d !== last) { h += '<li class="nd">' + d + '</li>'; last = d; } h += '<li class="' + n.k + '">' + esc(n.txt) + '</li>'; });
   return h + '</ul>';
 }
@@ -3054,7 +4106,7 @@ function showModal() {
   const o = modalQ[0]; if (!o) { $('#modal').classList.remove('open'); return; }
   $('#m-title').innerHTML = o.title || '';
   $('#m-body').innerHTML = o.html || '';
-  const f = $('#m-foot'); f.innerHTML = '';
+  const f = $('#m-foot'); f.innerHTML = ''; f.className = o.col ? 'col' : '';
   (o.buttons || [{ label: 'סגור' }]).forEach(b => {
     const e = document.createElement('button'); e.className = 'b ' + (b.cls || ''); e.innerHTML = b.label;
     e.onclick = () => { if (b.keep && b.fn) { b.fn(); return; } modalQ.shift(); $('#modal').classList.remove('open'); if (b.fn) b.fn(); setTimeout(showModal, 30); };
@@ -3080,6 +4132,7 @@ function processPending() {
   const p = S.pending.shift();
   const w = p.wid != null ? S.wars.find(x => x.id === p.wid) : null;
   const after = () => { save(); renderAll(); setTimeout(processPending, 40); };
+  if (p.type === 'ev') { if (!evDialog(p, after)) processPending(); return; }
   if (p.type === 'win') { modal({ title: 'ניצחון!', html: '<p>' + p.txt + '</p><p>הניקוד שלך: ' + num(score()) + '. אפשר להמשיך לשחק.</p>', buttons: [{ label: 'המשך לשחק', cls: 'primary', fn: after }] }); return; }
   if (p.type === 'attacked') {
     if (!w) return processPending();
@@ -3095,7 +4148,7 @@ function processPending() {
   if (p.type === 'invaded') {
     if (!w) return processPending();
     const u = unitById(p.uid);
-    modal({ title: 'פלישה! ' + esc(nm(p.from)) + ' חצתה את הגבול', cls: 'danger', html: '<p>יחידות של <b>' + esc(nm(p.from)) + '</b> נכנסות לשטח ' + esc(P().he) + '.</p><ul class="plain"><li>כדי לעצור אותן — הזז לשם יחידות יבשה (חי״ר ושריון) ותן להן תמיכה מהאוויר.</li><li>אם לא נגן — האויב יכבוש עוד ועוד שטח.</li></ul>',
+    modal({ title: 'פלישה! ' + esc(nm(p.from)) + ' חצתה את הגבול', cls: 'danger', html: '<p>יחידות של <b>' + esc(nm(p.from)) + '</b> נכנסות לשטח ' + esc(P().he) + '.</p><ul class="plain"><li>כדי לעצור אותן — הזז לשם יחידות יבשה (חי״ר ושריון) ותן להן תמיכה מהאוויר.</li><li>אם לא נגן — האויב יכבוש עוד ועוד שטח.</li>' + (minOn('def') ? '<li><b>' + esc(mTitle('def', minOn('def'))) + ' כבר מזיז כוחות להגנה.</b></li>' : '') + '</ul>',
       buttons: [{ label: 'הראה לי', cls: 'primary', fn: () => { setSpeed(0); if (u) { const p2 = MAP_PROJ([u.dest ? u.dest[0] : u.lon, u.dest ? u.dest[1] : u.lat]); zoomToMapPt(p2, Math.max(curK, 8)); } after(); } }, { label: 'המשך', fn: after }] });
     return;
   }
@@ -3184,7 +4237,8 @@ function aiScore(type, ai) {
   const pw = power(M) / (power(A) + 1);
   const noise = (R() - 0.5) * 12;
   // world reputation matters: trusted leaders get deals, pariahs get refusals
-  const rp = (S.p.rep - 50) * (A.gov === 'democracy' ? 0.4 : 0.2);
+  const fo = minOf('fo');
+  const rp = (S.p.rep - 50) * (A.gov === 'democracy' ? 0.4 : 0.2) + (fo ? (mSk(fo) - 3) * 4 + (fo.tr === 'dipl' ? 6 : 0) : 0);
   const lowRep = S.p.rep < 30 ? 'המוניטין שלך בעולם נמוך מדי' : null;
   if (type === 'trade') return { ok: r + 15 + shared * 5 + rp - (sanc ? 60 : 0) - friendFoe + noise > 5, why: sanc ? 'יש ביניכם סנקציות' : lowRep || 'היחסים לא מספיק טובים' };
   if (type === 'nap') return { ok: r + 30 + rp + (pw > 1.5 ? 15 : 0) - friendFoe + noise > 10, why: lowRep || 'הם לא סומכים עליך' };
@@ -3221,13 +4275,9 @@ const ACT = {
   upg: d => { const k = d.k, c = P(); if ((c[k] || 0) >= 3 || S.p.queue.some(q => q.k === k)) return; const cost = upgCost(k); if (!spend(cost)) return;
     PS().sp.buy += cost; const days = k === 'mlv' ? 548 : 365; S.p.queue.push({ k, n: 1, start: S.day, due: S.day + days });
     toast('השדרוג התחיל: ' + money(cost).replace(/<[^>]+>/g, '') + ' · מוכן בעוד ' + Math.round(days / DPM) + ' חודשים'); renderAll(); },
-  mob: () => { const c = P(); if (c.res < 1 || cdLeft('mob')) return; const n = Math.min(c.res, Math.max(1, c.res * 0.5));
-    setCd('mob', 30); S.p.queue.push({ k: 'mobarrive', n, start: S.day, due: S.day + 3 }); c.res -= n;
-    fxToast('צו 8: ' + troopsPlain(n) + ' אנשי מילואים בדרך', { ap: activeWars(S.player) ? -2 : -5 }, true); addNews('הממשלה הוציאה צווי חירום: ' + troopsPlain(n) + ' אנשי מילואים גויסו.', 'war'); renderAll(); },
-  demob: () => { const c = P(); if (!(c.mob > 0)) return; const n = c.mob; c.inv.troops = Math.max(0, c.inv.troops - n); c.res += n; c.mob = 0;
-    fxToast('המילואימניקים חזרו הביתה', { ap: 2 }); addNews('אנשי המילואים שוחררו וחזרו לעבודה.', 'good'); renderAll(); },
-  build: d => { const k = d.k, D = PROJ[k]; if (!D || S.p.proj.some(q => q.k === k) || (S.p.built[k] || 0) >= projMax(k)) return; const cost = projCost(k); if (!spend(cost)) return;
-    S.p.proj.push({ k, start: S.day, due: S.day + D.days }); toast('הפרויקט "' + D.he + '" התחיל · יושלם בעוד ' + Math.round(D.days / DPM) + ' חודשים'); addNews('הממשלה השיקה פרויקט לאומי: ' + D.he + '.', 'good'); renderAll(); },
+  mob: () => { if (mobilize()) renderAll(); },
+  demob: () => { if (demobilize()) renderAll(); },
+  build: d => { if (startProj(d.k)) renderAll(); },
   crack: () => { if (!S.p.built.police || cdLeft('crack')) return; const c = P(); setCd('crack', 120); S.p.crack = 91; S.p.unrest = 0;
     fxToast('ההפגנות פוזרו בכוח', { ap: 5, rep: c.gov === 'democracy' ? -12 : -7 }, true); addNews('כוחות משטרה פיזרו את ההפגנות בכוח. ארגוני זכויות אדם בעולם מגנים.', 'bad');
     alive().forEach(id => { if (id !== S.player && S.c[id].gov === 'democracy') addRel(id, S.player, -3); }); renderAll(); },
@@ -3244,12 +4294,21 @@ const ACT = {
   uattack: () => attackDialog(unitById(selUnit)),
   ustrike: () => strikeDialog(unitById(selUnit), 'air'),
   umissile: () => strikeDialog(unitById(selUnit), 'mis'),
-  ustop: () => { const u = unitById(selUnit); if (!u) return; u.dest = null; u.via = null; u.mode = null; toast(uName(u) + ' עצרה'); save(); renderAll(); },
-  uret: () => { const u = unitById(selUnit); if (!u) return; sendHome(u); save(); renderAll(); },
+  ustop: () => { const u = unitById(selUnit); if (!u) return; u.dest = null; u.via = null; u.mode = null; u.man = S.day + 30; toast(uName(u) + ' עצרה'); save(); renderAll(); },
+  uret: () => { const u = unitById(selUnit); if (!u) return; sendHome(u); u.man = S.day + 30; save(); renderAll(); },
   udefend: () => { const u = unitById(selUnit); if (!u) return; const p = defendPt(u); if (!p) { sendHome(u); return; } orderTo(u, p, 'def'); },
   usplit: () => splitUnit(unitById(selUnit)),
   umerge: () => mergeUnit(unitById(selUnit)),
   mvcancel: () => { const id = uMode && uMode.uid; endMode(); if (id) selectUnit(id); },
+  /* government and the world */
+  gappoint: d => appointDialog(d.r),
+  gfire: d => { const m = minOf(d.r); if (!m) return; modal({ title: 'לפטר את ' + esc(m.n) + '?', html: '<p>' + esc(mTitle(d.r, m)) + ' ' + esc(m.n) + ' ' + (m.g === 'f' ? 'תפוטר' : 'יפוטר') + '. פיצויים: ' + money(m.sal * 0.5) + '. התפקיד יישאר פנוי עד שתמנה מחליף.</p>', buttons: [{ label: 'פטר', cls: 'danger', fn: () => { fireMin(d.r); save(); renderAll(); } }, { label: 'ביטול' }] }); },
+  gauto: d => { const m = minOf(d.r); if (!m) return; m.auto = d.v === '1'; toast(mTitle(d.r, m) + ': ' + (m.auto ? (m.g === 'f' ? 'פועלת לבד' : 'פועל לבד') : (m.g === 'f' ? 'רק ממליצה — ההחלטות שלך' : 'רק ממליץ — ההחלטות שלך'))); save(); renderSheet(); },
+  gpol: d => { const m = minOf(d.r); if (!m) return; m.pol[d.k] = isNaN(+d.v) ? d.v : +d.v; save(); renderSheet(); },
+  goworld: () => openTabFresh('world'),
+  gonews: () => openTabFresh('news'),
+  wrank: d => { wRank = d.v; renderSheet(); },
+  wsel: d => { const t = mainTid(d.id); if (!t) return; selected = t; recolor(); openTabFresh('country'); setTimeout(() => zoomToTid(t, 8), 60); },
   /* statistics and animations */
   stats: () => { hideCard(); openTabFresh('stats'); },
   rclose: () => hideCard(),
@@ -3320,20 +4379,48 @@ function mergeUnit(u) {
   toast(ms.length + ' יחידות אוחדו לתוך ' + uName(u));
   save(); selectUnit(u.id);
 }
-function buyUnits(k) {
-  const B = BUY[k], c = P(); if (!B) return;
-  const n = B.n * buyMul, cost = B.cost * buyMul;
-  if (!spend(cost)) return;
+function buyUnits(k) { if (buyPkg(k, buyMul)) renderAll(); }
+// order mul packages of one kind (the player's buttons and the defence minister)
+function buyPkg(k, mul, quiet) {
+  const B = BUY[k], c = P(); if (!B) return false;
+  if ((B.minGdp && c.gdp < B.minGdp) || (B.needMl && c.mlv < B.needMl)) return false;
+  const n = B.n * mul, cost = B.cost * mul;
+  if (!spend(cost)) return false;
   PS().sp.buy += cost;
   S.p.queue.push({ k, n, start: S.day, due: S.day + B.days });
-  const e = k === 'troops' ? { ap: -Math.min(3, buyMul) } : {};
-  fxToast('הוזמן: ' + (k === 'troops' ? num(n * 1000).replace(/<[^>]+>/g, '') + ' חיילים' : n + ' ' + B.unit) + ' · יגיע בעוד ' + Math.round(B.days / DPM) + ' חודשים', e);
-  renderAll();
+  const e = k === 'troops' ? { ap: -Math.min(3, mul) } : {};
+  if (quiet) applyFx(e);
+  else fxToast('הוזמן: ' + (k === 'troops' ? num(n * 1000).replace(/<[^>]+>/g, '') + ' חיילים' : n + ' ' + B.unit) + ' · יגיע בעוד ' + Math.round(B.days / DPM) + ' חודשים', e);
+  return true;
+}
+function mobilize(quiet) {
+  const c = P(); if (c.res < 1 || cdLeft('mob')) return false;
+  const n = Math.min(c.res, Math.max(1, c.res * 0.5)), e = { ap: activeWars(S.player) ? -2 : -5 };
+  setCd('mob', 30); S.p.queue.push({ k: 'mobarrive', n, start: S.day, due: S.day + 3 }); c.res -= n;
+  if (quiet) applyFx(e); else fxToast('צו 8: ' + troopsPlain(n) + ' אנשי מילואים בדרך', e, true);
+  addNews('הממשלה הוציאה צווי חירום: ' + troopsPlain(n) + ' אנשי מילואים גויסו.', 'war');
+  return true;
+}
+function demobilize(quiet) {
+  const c = P(); if (!(c.mob > 0)) return false;
+  const n = c.mob; c.inv.troops = Math.max(0, c.inv.troops - n); c.res += n; c.mob = 0;
+  if (quiet) applyFx({ ap: 2 }); else fxToast('המילואימניקים חזרו הביתה', { ap: 2 });
+  addNews('אנשי המילואים שוחררו וחזרו לעבודה.', 'good');
+  return true;
+}
+function startProj(k, quiet) {
+  const D = PROJ[k]; if (!D || S.p.proj.some(q => q.k === k) || (S.p.built[k] || 0) >= projMax(k)) return false;
+  const cost = projCost(k); if (!spend(cost)) return false;
+  S.p.proj.push({ k, start: S.day, due: S.day + D.days });
+  if (!quiet) toast('הפרויקט "' + D.he + '" התחיל · יושלם בעוד ' + Math.round(D.days / DPM) + ' חודשים');
+  addNews('הממשלה השיקה פרויקט לאומי: ' + D.he + '.', 'good');
+  return true;
 }
 function dipToggle(type, label, good, bad) {
   const o = selOwner(), C = S.c[o];
   if (hasPact(o, S.player, type)) {
     setPact(o, S.player, type, false);
+    G().no[type + ':' + o] = S.day + 365; // the foreign minister won't sign it again behind the player's back
     fxToast(label + ' עם ' + C.he + ' בוטל', { rep: bad.rep, rel: { [o]: bad.rel } }, true); addNews('ביטלנו את ה' + label + ' עם ' + C.he + '.', 'dip'); renderAll(); return;
   }
   if (cdLeft('dip:' + o)) return;
@@ -3477,6 +4564,14 @@ function confirmNuke(o) {
     { label: 'ביטול', cls: 'primary' }] });
 }
 function approvalQuick() { const c = P(); c.approval = clamp(c.approval + S.p.shock, 0, 100); S.p.shock = 0; }
+// how willing the enemy is to accept our terms (compared with 0 cease-fire … 60 annexation)
+function peaceW(w) {
+  const en = enemyLeaderFor(w, S.player), fp = mySideFront(w, S.player), age = S.turn - w.start, E = S.c[en];
+  const pr = power(P()) / (power(E) + 1);
+  let W = fp * 1.2 + age * 0.8 + clamp((pr - 1) * 10, -15, 25) + rel(en, S.player) / 5 + (100 - E.approval) / 10 + (S.p.rep - 50) / 5 + (R() - 0.5) * 20;
+  if (fp < 0) W += fp * 0.5;
+  return W;
+}
 function peaceDialog(wid) {
   const w = S.wars.find(x => x.id === wid); if (!w) return;
   const en = enemyLeaderFor(w, S.player), fp = mySideFront(w, S.player);
@@ -3488,10 +4583,7 @@ function peaceDialog(wid) {
   modal({ title: 'משא ומתן', html: h, buttons: [{ label: 'סגור' }], onShow: () => {
     document.querySelectorAll('[data-pk]').forEach(b => b.onclick = () => {
       const k = b.dataset.pk; modalQ.shift(); $('#modal').classList.remove('open');
-      const age = S.turn - w.start, E = S.c[en];
-      const pr = power(P()) / (power(E) + 1);
-      let W = fp * 1.2 + age * 0.8 + clamp((pr - 1) * 10, -15, 25) + rel(en, S.player) / 5 + (100 - E.approval) / 10 + (S.p.rep - 50) / 5 + (R() - 0.5) * 20;
-      if (fp < 0) W += fp * 0.5;
+      const W = peaceW(w);
       const need = { cease: 0, white: 10, repar: 35, terr: 40, annex: 60 }[k];
       if (W > need || (k === 'annex' && fp >= 90)) { applyPeace(w, k, S.player, en, Math.max(0, fp) / 200); toast(nm(en) + ' הסכימה!'); }
       else { toast(nm(en) + ' דחתה את ההצעה', true); addNews(nm(en) + ' דחתה את הצעת ה' + (k === 'cease' ? 'הפסקת אש' : 'שלום') + ' שלנו.', 'bad'); }
@@ -3527,12 +4619,17 @@ function showHelp() {
     '<li><b>שלום:</b> בלשונית מלחמות. ככל שאתה מנצח יותר, תוכל לדרוש יותר.</li>' +
     '<li><b>אבדות וסטטיסטיקות:</b> אחרי כל תקיפה (שלך או עליך) קופץ כרטיס "תוצאות התקיפה": הרוגים ופצועים — חיילים ואזרחים — ציוד שהושמד, עלות, ומה זה עשה לעם ולעולם. בלשונית מלחמות יש לכל מלחמה גרפים ויומן קרבות, ובתפריט ☰ ← "סטטיסטיקות" — כל המספרים שלך ושל העולם.</li>' +
     '<li><b>מחיר הדם:</b> חיילים שנהרגים מורידים את אהבת העם, ואזרחים שלנו שנהרגים — עוד יותר. אזרחים שאנחנו הורגים (בעיקר בטילים ובגרעין) פוגעים במוניטין בעולם.</li>' +
+    '<li><b>ממשלה (שרים):</b> בלשונית "ממשלה" ממנים ארבעה שרים — ביטחון, אוצר, בינוי ופנים, חוץ. לכל שר יש שם, מיומנות (★ 1–5), תכונה (זהיר, תוקפני, חסכן, פופוליסט, מושחת, דיפלומט...), שכר והשפעה על העם. בוחרים מתוך 3 מועמדים, ואפשר לפטר ולהחליף.</li>' +
+    '<li><b>"פועל לבד":</b> שר כזה עושה את העבודה במקומך: שר הביטחון מגן על הגבול, שולח כוחות לחזיתות ומחזיר יחידות פגועות (לפי הגישה — הגנה / מאוזן / התקפה), שר האוצר מכוון מס ורווחה לפי היעד, שר הבינוי בונה פרויקטים מכסף פנוי, ושר החוץ חותם על הסכמי סחר, שולח סיוע ומציע שלום כשהמלחמה רעה. אף שר לא מכריז מלחמה. כל צעד מופיע ב"דיווחי השרים" ובהודעה קטנה. "רק ממליץ" = השר רק נותן המלצה בדיאלוגים.</li>' +
+    '<li><b>ההחלטה שלך גוברת:</b> פקודה שנתת ליחידה — שר הביטחון לא נוגע בה חודש. שינית מס או תקציב ביטחון — השר לא משנה אותם שלושה חודשים. ביטלת הסכם — שר החוץ לא יחתום עליו מחדש.</li>' +
+    '<li><b>אירועים:</b> כל כמה שבועות קורה משהו — שביתות, הפגנות, שערוריות, אסונות, תגליות, הפיכות, משברי נפט, בקשות לברית ועוד. באירוע עם החלטה המשחק נעצר, ועל כל אפשרות כתוב מה היא תעשה. אם יש שר מתאים שפועל לבד — הוא מחליט בעצמו ומדווח.</li>' +
+    '<li><b>העולם חי:</b> מדינות אחרות צומחות ונכנסות למיתון, מגדילות צבא, בונות, עורכות בחירות (עם מנהיגים חדשים), עוברות הפיכות, חותמות על בריתות ומטילות סנקציות. בכרטיס של כל מדינה — "מה קורה שם", ובלשונית חדשות ← "העולם" — דירוג המדינות החזקות ומי עולה ויורד (▲▼).</li>' +
     '<li><b>אנימציות:</b> טילים, מטוסים, פיצוצים וקרבות מופיעים על המפה. בתפריט ☰ אפשר להפחית או לכבות אותן.</li>' +
     '<li><b>מדינות קטנות קשות יותר.</b> המשחק נשמר אוטומטית כל כמה שניות.</li></ul>' });
 }
 function showMenu() {
   const fxSeg = '<h3 class="mh">אנימציות (פיצוצים וקרבות)</h3><div class="seg">' + [['full', 'מלאות'], ['low', 'מופחתות'], ['off', 'כבויות']].map(([v, l]) => '<button class="' + (FXMODE === v ? 'on' : '') + '" data-act="fxmode" data-v="' + v + '">' + l + '</button>').join('') + '</div>';
-  modal({ title: 'תפריט', html: '<div class="btns col">' + btn('help', 'איך משחקים') + btn('stats', 'סטטיסטיקות ואבדות') + btn('centerme', 'מרכז את המפה על המדינה שלי') + btn('newgame', 'משחק חדש', 'danger') + '</div>' + fxSeg + '<p class="sub">"מופחתות" — רק פיצוץ קצר במקום הפגיעה, בלי הבזקים ורעידות. המשחק נשמר אוטומטית כל כמה שניות.</p>',
+  modal({ title: 'תפריט', html: '<div class="btns col">' + btn('help', 'איך משחקים') + btn('tab', 'ממשלה ושרים', '', ' data-tab="gov"') + btn('goworld', 'העולם — דירוג ומגמות') + btn('stats', 'סטטיסטיקות ואבדות') + btn('centerme', 'מרכז את המפה על המדינה שלי') + btn('newgame', 'משחק חדש', 'danger') + '</div>' + fxSeg + '<p class="sub">"מופחתות" — רק פיצוץ קצר במקום הפגיעה, בלי הבזקים ורעידות. המשחק נשמר אוטומטית כל כמה שניות.</p>',
     buttons: [{ label: 'סגור' }], onShow: () => document.querySelectorAll('#m-body .btns [data-act]').forEach(b => b.addEventListener('click', () => { modalQ.shift(); $('#modal').classList.remove('open'); setTimeout(showModal, 30); }, { once: true })) });
 }
 
@@ -3588,7 +4685,7 @@ function setSpeed(v) {
 }
 let sliderT0 = null;
 let lastT = 0, acc = 0, lastUi = 0, lastSheet = 0, lastSave = 0, uiBusy = 0;
-const LIVE_TABS = { eco: 1, home: 1, mil: 1, wars: 1, country: 1, news: 1, unit: 1, ulist: 1, stats: 1 };
+const LIVE_TABS = { eco: 1, home: 1, gov: 1, mil: 1, wars: 1, country: 1, news: 1, world: 1, unit: 1, ulist: 1, stats: 1 };
 function frame(t) {
   requestAnimationFrame(frame);
   const dt = lastT ? Math.min(0.25, (t - lastT) / 1000) : 0; lastT = t;
@@ -3646,6 +4743,10 @@ function boot() {
     save();
     const T = approvalTarget(), d = T - (sliderT0 == null ? T : sliderT0); sliderT0 = null;
     toast({ tax: 'מס', welfare: 'רווחה', defPct: 'תקציב ביטחון' }[k] + ' ⁦' + (S.p[k] * 100).toFixed(k === 'defPct' ? 1 : 0) + '%⁩: העם ' + (Math.abs(d) < 0.5 ? 'בלי שינוי' : sgnT(d) + ' בהדרגה') + ' (צפי ⁦' + Math.round(T) + '%⁩)', d < -0.5);
+    // the player's decision wins: the minister keeps his hands off this for three months
+    const r = k === 'defPct' ? 'def' : 'fin', m = minOn(r);
+    G().ovr[r] = S.day + 91;
+    if (m) setTimeout(() => toast(mTitle(r, m) + (m.g === 'f' ? ' לא תשנה את ' : ' לא ישנה את ') + (r === 'fin' ? 'המס והרווחה' : 'תקציב הביטחון') + ' בשלושת החודשים הקרובים'), 900);
   });
   // don't redraw the panel under the player's finger
   const sheet = $('#sheet');
@@ -3662,6 +4763,7 @@ function boot() {
     if (S.over) showGameOver();
     else toast('ברוך השב! המשחק מושהה — לחץ ×1 כדי להמשיך');
     if (UNITS_MIGRATED) setTimeout(() => toast('חדש: הצבא שלך מופיע על המפה כיחידות — הקש על סמל כדי לתת פקודה'), 600);
+    if (GOV_MIGRATED) setTimeout(() => toast('חדש: לשונית "ממשלה" — מנה שרים שיעבדו בשבילך'), 4000);
   } else {
     recolor(); initStart();
     if (OLD_SAVE_FOUND) setTimeout(() => toast('המשחק עודכן לזמן אמת — מתחילים משחק חדש'), 400);
@@ -3672,7 +4774,11 @@ function boot() {
   }, 300); });
   requestAnimationFrame(frame);
   window.__W26 = { get S() { return S; }, dayTick, FX: { enemyStrike, nukeImpact, showCard, hideCard, setFxMode, get n() { return FXL.length; }, get mode() { return FXMODE; }, PS, WST, warSt }, runDays: n => { for (let i = 0; i < n && !S.over; i++) dayTick(); renderAll(); }, declareWar, annex, power, rel, ACT, setSpeed, strike,
-    selectTid: t => { selected = t; recolor(); openTab('country'); }, zoomToTid, processPending, wipe,
+    selectTid: t => { selected = t; recolor(); openTab('country'); }, zoomToTid, processPending, wipe, openTab,
+    GOV: { minOf, candsFor, hireMin, fireMin, G, govAp, govSal,
+      autoAll: (pol) => { MIN_ORDER.forEach(r => { if (!minOf(r)) { const l = candsFor(r).slice().sort((a, b) => b.sk - a.sk); hireMin(r, l[0]); } const m = minOf(r); m.auto = true; if (pol && pol[r]) Object.assign(m.pol, pol[r]); }); } },
+    EVS: { EV, EVI, eventsDay, evCtx, evChoose, evDialog, worldCoup, rebel, ranks, worldSnap },
+    STATS: () => ({ ev: S.ev && S.ev.n, dec: S.ev && S.ev.dn, wc: S.wc || {}, log: S.p && S.p.gov ? S.p.gov.log.length : 0 }),
     U: { unitById, unitsOf, planMove, orderTo, commitMove, selectUnit, setMode, modeTap, syncAllUnits, buildItems, uStr, distToC, nearIn, tidAt, ownerAt, isSeaAt, snapSea, toScreen, drawUnits, zoomToMapPt, tp, mapProj: p => MAP_PROJ(p),
       get curK() { return curK; }, get uMode() { return uMode; }, get selUnit() { return selUnit; } } };
 }
