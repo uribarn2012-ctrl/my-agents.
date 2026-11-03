@@ -94,7 +94,7 @@ function daysTxt(d) { d = Math.max(1, Math.ceil(d)); return d >= 60 ? num(Math.r
 // troops / reserves are kept in thousands
 function troopsTxt(k) { const v = k * 1000; return v >= 1e6 ? num(v / 1e6, 2) + ' מיליון' : v >= 1e4 ? num(v / 1000) + ' אלף' : num(Math.round(v / 10) * 10); }
 // wrap signed numbers / percents inside Hebrew text so they keep their left-to-right shape
-const isoNums = t => String(t).replace(/[+−-]?\d[\d.,]*%?/g, m => '<span class="num" dir="ltr">' + m + '</span>');
+const isoNums = t => String(t).replace(/[+−-]?\$?\d[\d.,]*(?:%|[BMTK](?![A-Za-z]))?/g, m => '<span class="num" dir="ltr">' + m + '</span>');
 const cnt = v => num(Math.max(0, Math.floor(v + 1e-6)));
 // signed number for effect lines: +3 / −12
 function sgn(v) { const a = Math.abs(v); return '<span class="num" dir="ltr">' + (v > 0 ? '+' : v < 0 ? '−' : '±') + (a >= 1 || a === 0 ? Math.round(a) : a.toFixed(1)) + '</span>'; }
@@ -408,6 +408,7 @@ function addNews(txt, k) { S.news.unshift({ t: S.day, txt, k: k || 'event' }); i
 /* ================= casualties & statistics ================= */
 // one side's losses: soldiers killed / wounded, civilians killed / wounded, equipment lost, missiles fired, money spent, economic damage
 const EQ_K = ['tanks', 'afv', 'art', 'air', 'heli', 'ships', 'subs', 'carriers', 'msl'];
+const EQ_HE1 = { tanks: 'טנק', afv: 'נגמ״ש', art: 'תותח', air: 'מטוס קרב', heli: 'מסוק', ships: 'ספינה', subs: 'צוללת', carriers: 'נושאת מטוסים', msl: 'טיל' }, EQ_F1 = { ships: 1, subs: 1, carriers: 1 };
 const EQ_HE = { tanks: 'טנקים', afv: 'נגמ״שים', art: 'תותחים', air: 'מטוסי קרב', heli: 'מסוקים', ships: 'ספינות', subs: 'צוללות', carriers: 'נושאות מטוסים', msl: 'טילים' };
 const newCas = () => ({ sk: 0, sw: 0, ck: 0, cw: 0, eq: {}, mu: 0, sp: 0, dm: 0 });
 function addCas(a, b) {
@@ -519,7 +520,7 @@ function strikeRecord(o) {
 const KIND_HE = { air: 'תקיפה אווירית', mis: 'מטח טילים', nuke: 'תקיפה גרעינית', fac: 'תקיפה על מתקני הגרעין' };
 const nT = v => '⁦' + Math.round(v).toLocaleString('en-US') + '⁩';
 function eqTxt(eq, max) {
-  return EQ_K.filter(k => (eq[k] || 0) >= 0.5).sort((a, b) => eq[b] * unitPrice(b) - eq[a] * unitPrice(a)).slice(0, max || 9).map(k => nT(eq[k]) + ' ' + EQ_HE[k]).join(', ');
+  return EQ_K.filter(k => (eq[k] || 0) >= 0.5).sort((a, b) => eq[b] * unitPrice(b) - eq[a] * unitPrice(a)).slice(0, max || 9).map(k => Math.round(eq[k]) === 1 ? EQ_HE1[k] + (EQ_F1[k] ? ' אחת' : ' אחד') : nT(eq[k]) + ' ' + EQ_HE[k]).join(', ');
 }
 function strikeLine(r) {
   return (r.by === S.player ? '' : nm(r.by) + ': ') + KIND_HE[r.k] + (r.by === S.player ? ' שלנו' : '') + ' על ' + (r.cn ? r.cn + ' (' + nm(r.at) + ')' : nm(r.at)) + ' — ' + nT(killed(r.cas)) + ' הרוגים' + (eqTxt(r.cas.eq, 2) ? ', הושמדו ' + eqTxt(r.cas.eq, 2) : '');
@@ -1060,7 +1061,7 @@ const TRAITS = {
   aggr: { he: 'תוקפני', d: 'מעדיף כוח ולחץ', ap: 0, sc: 1 },
   frugal: { he: 'חסכן', d: 'חוסך כסף, שכר נמוך', ap: -0.5, sc: 0.6, sal: 0.7 },
   popul: { he: 'פופוליסט', d: 'מרצה את העם, פחות אכפת לו מהקופה', ap: 2, sc: 1.2 },
-  corrupt: { he: 'מושחת', d: 'גונב קצת מהקופה — סכנת שערוריה', ap: 0, sc: 4, steal: 1 },
+  corrupt: { he: 'מושחת', d: 'גונב קצת מהקופה — סכנת שערורייה', ap: 0, sc: 4, steal: 1 },
   dipl: { he: 'דיפלומט', d: 'מצוין ביחסים עם העולם', ap: 0.5, sc: 0.6 },
   pro: { he: 'מקצוען', d: 'עובד היטב (מיומנות +1)', ap: 0.5, sc: 0.5, sk: 1, sal: 1.2 },
   char: { he: 'כריזמטי', d: 'העם אוהב אותו', ap: 1.5, sc: 1 }
@@ -1274,9 +1275,15 @@ function minBuy(m) {
   const atw = activeWars(S.player) > 0;
   const share = (m.pol.buy === 2 ? 0.3 : 0.12) * (atw ? 1.5 : 1) * (m.tr === 'frugal' ? 0.6 : 1);
   const budget = (p.treasury - c.gdp * 0.02) * share; if (budget <= 0) return null;
-  const keys = ['tanks', 'air', 'art', 'heli', 'afv'].concat(c.mlv ? ['msl'] : [], c.inv0.ships > 0 ? ['ships'] : [], atw ? ['troops'] : []);
-  const k = keys.sort((a, b) => ((c.inv[a] || 0) + 1) / ((c.inv0[a] || 0) + 1) - ((c.inv[b] || 0) + 1) / ((c.inv0[b] || 0) + 1))[0];
-  const B = BUY[k], mul = Math.min(20, Math.floor(budget / B.cost)); if (mul < 1) return null;
+  // count what is already ordered and on its way, so he does not re-order the same thing every month
+  const onWay = {}; (p.queue || []).forEach(q => { if (BUY[q.k]) onWay[q.k] = (onWay[q.k] || 0) + q.n; });
+  const ratio = k => ((c.inv[k] || 0) + (onWay[k] || 0) + 1) / ((c.inv0[k] || 0) + 1);
+  const cap = atw ? 1.6 : 1.25;
+  const keys = ['tanks', 'air', 'art', 'heli', 'afv'].concat(c.mlv ? ['msl'] : [], c.inv0.ships > 0 ? ['ships'] : [], atw ? ['troops'] : []).filter(k => ratio(k) < cap);
+  if (!keys.length) return null;
+  const k = keys.sort((a, b) => ratio(a) - ratio(b))[0];
+  const room = Math.max(1, Math.ceil(((c.inv0[k] || 0) * cap - (c.inv[k] || 0) - (onWay[k] || 0)) / BUY[k].n));
+  const B = BUY[k], mul = Math.min(20, room, Math.floor(budget / B.cost)); if (mul < 1) return null;
   if (!buyPkg(k, mul, true)) return null;
   return 'רכש: ' + (k === 'troops' ? troopsPlain(B.n * mul) + ' חיילים' : '⁦' + B.n * mul + '⁩ ' + B.unit) + ' (' + '⁦' + moneyTxt(B.cost * mul) + '⁩)';
 }
@@ -1645,7 +1652,7 @@ const EV = [
     ch: [C_('תוכנית קיצוצים', { m: 0.004, ap: -4 }), C_('להעלות מסים זמנית', { m: 0.003, ap: -2, gv: -0.002, gd: 365 }), C_('להתעלם', { gv: -0.006, gd: 365 })] },
   { id: 'coup_plot', c: 'dom', w: c => (!c.dem && c.ap < 40 ? 3 : c.ap < 30 ? 1 : 0), r: 'def', t: 'מזימת הפיכה נחשפה', x: 'המודיעין חשף קבוצת קצינים שתכננה להפיל את השלטון.',
     ch: [C_('טיהור בצבא', { mil: { troops: 0.02 }, ap: 1, rep: -2 }), C_('העלאת שכר לקצינים', { m: -0.0015 }), C_('משפט פומבי', { ap: 2, rep: -1, un: 0.5 })] },
-  { id: 'assass', c: 'dom', w: 1.2, o: 'riv', oOpt: 1, t: 'ניסיון התנקשות', x: c => 'המאבטחים סיכלו ניסיון להתנקש בחייך באירוע פומבי. ' + (c.o ? 'החשד: יד של ' + c.on + '.' : 'המניע לא ברור.'),
+  { id: 'assass', c: 'dom', w: 1.2, o: 'riv', oOpt: 1, t: 'ניסיון התנקשות', x: c => 'המאבטחים סיכלו ניסיון להתנקש בחייך באירוע פומבי. ' + (c.o ? 'החשד: ידה של ' + c.on + '.' : 'המניע לא ברור.'),
     ch: [C_('נאום אחדות לאומית', { ap: 4 }), C_('מצב חירום וסמכויות מיוחדות', { ap: 2, rep: -3, un: 0.5 }), C_(c => c.o ? 'להאשים את ' + c.on : 'להאשים את האופוזיציה', { ap: 3, ro: -15, un: 0.5 })] },
   /* ---------- security ---------- */
   { id: 'terror', c: 'dom', w: c => c.war ? 3 : 1.5, r: 'def', t: 'פיגוע טרור', x: 'פיגוע בלב העיר: עשרות הרוגים ופצועים. המדינה בהלם והציבור דורש תגובה.', b: { ap: -1 },
@@ -1805,7 +1812,7 @@ const EV = [
   { id: 'w_protest', c: 'intl', w: 1.5, o: 'weak', go: c => { tag(S.c[c.o], 'protest', 60); S.c[c.o].approval = clamp(S.c[c.o].approval - 3, 5, 95); }, n: c => 'מחאות המוניות ב' + c.on + ' נגד השלטון. ' + pick(['המשטרה ירתה גז מדמיע.', 'האופוזיציה קוראת לשביתה כללית.', 'השלטון חסם את האינטרנט.']), k: 'world' },
   { id: 'w_quake', c: 'intl', w: 1.5, o: 'any', go: c => { S.c[c.o].gdp *= 0.99; tag(S.c[c.o], 'disaster', 180); if (!atWar(c.o, S.player) && rel(c.o, S.player) > -60 && R() < 0.6) pushAid(c.o, 'רעידת האדמה', 0.01); }, n: c => 'רעידת אדמה קטלנית ב' + c.on + '. מאות הרוגים ואלפי עקורים.', k: 'world' },
   /* ---------- the government itself ---------- */
-  { id: 'm_scandal', c: 'dom', o: 'min', w: () => govN() ? (anyCorrupt() ? 4 : 0.8) : 0, t: c => 'שערוריה: ' + c.mt, x: c => 'תחקיר עיתונאי חושף: ' + c.mt + ' ' + c.mn + (c.mc ? c.v(' לקח כספים מהקופה הציבורית.', ' לקחה כספים מהקופה הציבורית.') : c.v(' העסיק', ' העסיקה') + ' קרובי משפחה בלשכה.'),
+  { id: 'm_scandal', c: 'dom', o: 'min', w: () => govN() ? (anyCorrupt() ? 4 : 0.8) : 0, t: c => 'שערורייה: ' + c.mt, x: c => 'תחקיר עיתונאי חושף: ' + c.mt + ' ' + c.mn + (c.mc ? c.v(' לקח כספים מהקופה הציבורית.', ' לקחה כספים מהקופה הציבורית.') : c.v(' העסיק', ' העסיקה') + ' קרובי משפחה בלשכה.'),
     ch: [C_(c => 'לפטר את ' + c.mn, { ap: 2 }, { f: c => fireMin(c.mr, true) }), C_(c => 'לגבות את ' + c.mn, { ap: -3, rep: -1 }), C_('ועדת בדיקה', { m: -0.0001, ap: -1 }, { f: c => { if (c.mc && R() < 0.6) { fireMin(c.mr, true); addNews('ועדת הבדיקה מצאה אשמה: ' + c.mn + ' ' + c.v('פוטר', 'פוטרה') + '.', 'bad'); } } })] },
   { id: 'm_resign', c: 'dom', o: 'min', cd: 600, w: () => govN() ? 0.45 : 0, t: c => c.mt + ' ' + c.v('התפטר', 'התפטרה'), go: c => fireMin(c.mr, true, true),
     n: c => c.mt + ' ' + c.mn + ' ' + c.v('הודיע', 'הודיעה') + ' על התפטרות ' + pick(['מסיבות אישיות.', 'בעקבות מחלוקת עם ראש הממשלה.', 'כדי להתמודד בבחירות.']) + ' התפקיד פנוי — אפשר למנות מחליף בלשונית ממשלה.', e: { ap: -1 }, k: 'bad' },
@@ -1853,7 +1860,7 @@ function evPrev(e, c) {
 function evApply(e, c) {
   const me = P(), p = S.p, out = [];
   const money_ = (e.m || 0) * me.gdp + (e.cash || 0);
-  if (money_) { p.treasury += money_; out.push('קופה ' + (money_ >= 0 ? '+' : '−') + '⁦' + moneyTxt(Math.abs(money_)) + '⁩'); }
+  if (money_) { p.treasury += money_; out.push('קופה ' + '⁦' + (money_ >= 0 ? '+' : '−') + moneyTxt(Math.abs(money_)) + '⁩'); }
   if (e.gdp) { me.gdp *= 1 + e.gdp; out.push('כלכלה ' + sgnPct(e.gdp)); }
   if (e.gv) { (p.tg || (p.tg = [])).push({ v: e.gv, u: S.day + (e.gd || 365) }); out.push('צמיחה ' + sgnPct(e.gv)); }
   if (e.at) { (p.tm || (p.tm = [])).push({ v: e.at, u: S.day + (e.ad || 180) }); out.push('העם ' + sgnT(e.at) + ' בהדרגה'); }
@@ -4064,7 +4071,7 @@ function cardHtml(r) {
   const o = r.own || {}, bits = [];
   if (r.k === 'mis' && o.mu) bits.push((mine ? 'שוגרו ' : 'הם שיגרו ') + num(o.mu) + ' טילים');
   if (r.k === 'air' && r.used) bits.push((mine ? 'יצאו לתקיפה ' : 'תקפו ') + num(r.used) + ' מטוסים');
-  if (o.eq && o.eq.air) bits.push(mine ? '<span class="bad">נפלו ' + num(o.eq.air) + ' מטוסים שלנו</span>' : 'יירטנו ' + num(o.eq.air) + ' מטוסים שלהם');
+  if (o.eq && o.eq.air) bits.push(mine ? '<span class="bad">' + (Math.round(o.eq.air) === 1 ? 'נפל מטוס אחד שלנו' : 'נפלו ' + num(o.eq.air) + ' מטוסים שלנו') + '</span>' : (Math.round(o.eq.air) === 1 ? 'יירטנו מטוס אחד שלהם' : 'יירטנו ' + num(o.eq.air) + ' מטוסים שלהם'));
   if (mine && o.sp) bits.push('עלות ' + money(o.sp));
   if (C.dm >= 0.001) bits.push((r.at === S.player ? 'נזק כלכלי לנו ' : 'נזק כלכלי להם ') + money(C.dm));
   if (bits.length) h += '<div class="rc-l">' + bits.join(' · ') + '</div>';
@@ -4298,7 +4305,7 @@ function viewGov() {
 function appointDialog(r) {
   const l = candsFor(r), D = MIN_R[r], old = minOf(r);
   const h = '<p class="sub">' + D.d + '</p><div class="btns col">' + l.map((m, i) => '<button class="b cand" data-hc="' + i + '"><span class="mh"><b>' + esc(m.n) + '</b>' + STARS(m.sk) + '</span><small class="cost">' + esc(TRAITS[m.tr].he) + ' — ' + esc(TRAITS[m.tr].d) + '<br>שכר ' + money(m.sal) + ' בשנה · העם ' + sgn(minAp(m)) + '</small></button>').join('') + '</div>' +
-    '<p class="sub">מיומנות גבוהה = החלטות טובות יותר ותוצאות טובות יותר (ושכר גבוה יותר). "מושחת" גונב מהקופה ועלול לגרום לשערוריה.' + (old ? ' פיטורי השר הנוכחי עולים חצי שנת שכר.' : '') + '</p>';
+    '<p class="sub">מיומנות גבוהה = החלטות טובות יותר ותוצאות טובות יותר (ושכר גבוה יותר). "מושחת" גונב מהקופה ועלול לגרום לשערורייה.' + (old ? ' פיטורי השר הנוכחי עולים חצי שנת שכר.' : '') + '</p>';
   modal({ title: (old ? 'החלפת ' : 'מינוי: ') + D.he, html: h, buttons: [{ label: 'ביטול' }], onShow: () => document.querySelectorAll('[data-hc]').forEach(b => b.onclick = () => {
     const m = l[+b.dataset.hc]; modalQ.shift(); $('#modal').classList.remove('open');
     const pol = old ? Object.assign({}, old.pol) : null;
@@ -4698,7 +4705,7 @@ function showModal() {
 // stacked floating toasts (several actions in a row stay readable)
 function toast(txt, bad) {
   const box = $('#toasts'); if (!box) return;
-  const t = document.createElement('div'); t.className = 'toast' + (bad ? ' bad' : ''); t.textContent = txt;
+  const t = document.createElement('div'); t.className = 'toast' + (bad ? ' bad' : ''); t.innerHTML = isoNums(esc(String(txt).replace(/[⁦⁩]/g, '')));
   box.appendChild(t);
   while (box.children.length > 3) box.firstChild.remove();
   requestAnimationFrame(() => t.classList.add('show'));
@@ -5133,7 +5140,7 @@ function strike(o, kind, uid, ci) {
     retal = R() < Math.min(0.95, retaliateChance(o) + (cx ? 0.2 : 0));
   }
   const r = strikeRecord({ k: kind, by: S.player, at: o, cas: loss, own, fx, unit: su ? uName(su) : null, war: !!w, used, lost, sanc: sancN, ci: cx ? cx.id : null, cn: cx ? cityName(cx) : null, cd: cdInc });
-  addNews(what + (w ? '' : ' (בלי הכרזת מלחמה)') + (cx ? ' (' + E.he + ')' : ' ב' + E.he) + ': ' + nT(killed(loss)) + ' הרוגים' + (eqTxt(loss.eq, 3) ? ', הושמדו ' + eqTxt(loss.eq, 3) : '') + (lost ? '. איבדנו ' + lost + ' מטוסים' : '') + '.' + (sancN ? ' ' + sancTxt(sancN) + '.' : ''), 'war');
+  addNews(what + (w ? '' : ' (בלי הכרזת מלחמה)') + (cx ? ' (' + E.he + ')' : ' ב' + E.he) + ': ' + nT(killed(loss)) + ' הרוגים' + (eqTxt(loss.eq, 3) ? ', הושמדו ' + eqTxt(loss.eq, 3) : '') + (lost ? (lost === 1 ? '. איבדנו מטוס אחד' : '. איבדנו ' + lost + ' מטוסים') : '') + '.' + (sancN ? ' ' + sancTxt(sancN) + '.' : ''), 'war');
   if (sancN) toast(sancTxt(sancN), true);
   if (retal) {
     const nw = declareWar(o, S.player, { provoked: true, joinAtt: true, noRally: true });
