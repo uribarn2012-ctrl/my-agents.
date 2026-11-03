@@ -395,6 +395,133 @@ function neighborsOf(a) {
 /* ================= news ================= */
 function addNews(txt, k) { S.news.unshift({ t: S.day, txt, k: k || 'event' }); if (S.news.length > 200) S.news.length = 200; }
 
+/* ================= casualties & statistics ================= */
+// one side's losses: soldiers killed / wounded, civilians killed / wounded, equipment lost, missiles fired, money spent, economic damage
+const EQ_K = ['tanks', 'afv', 'art', 'air', 'heli', 'ships', 'subs', 'carriers', 'msl'];
+const EQ_HE = { tanks: 'טנקים', afv: 'נגמ״שים', art: 'תותחים', air: 'מטוסי קרב', heli: 'מסוקים', ships: 'ספינות', subs: 'צוללות', carriers: 'נושאות מטוסים', msl: 'טילים' };
+const newCas = () => ({ sk: 0, sw: 0, ck: 0, cw: 0, eq: {}, mu: 0, sp: 0, dm: 0 });
+function addCas(a, b) {
+  if (!a || !b) return a;
+  a.sk += b.sk || 0; a.sw += b.sw || 0; a.ck += b.ck || 0; a.cw += b.cw || 0; a.mu += b.mu || 0; a.sp += b.sp || 0; a.dm += b.dm || 0;
+  for (const k in b.eq || {}) a.eq[k] = (a.eq[k] || 0) + b.eq[k];
+  return a;
+}
+const killed = x => x ? (x.sk || 0) + (x.ck || 0) : 0;
+const SOLD_WR = 2.5; // wounded soldiers per soldier killed
+// soldiers taken out of action (thousands) = killed + wounded
+function troopCas(lostK, o) { const n = Math.max(0, lostK) * 1000, k = n / (1 + SOLD_WR); o.sk += k; o.sw += n - k; }
+// people per km² (civilian casualties depend on how crowded the target is)
+function density(id) { const c = S.c[id]; if (!c) return 50; let a = 0; tidsOf(id).forEach(t => { if (TERR[t]) a += TERR[t].km2; }); return c.pop * 1e6 / Math.max(500, a); }
+const densF = id => clamp(Math.sqrt(density(id) / 100), 0.15, 4);
+const invSnap = c => { const o = { gdp: c.gdp, pop: c.pop }; for (const k of INV_KEYS) o[k] = c.inv[k] || 0; return o; };
+// what a country lost since a snapshot (the same numbers that came off its inventory)
+function lossFrom(c, b) {
+  const o = newCas();
+  troopCas(b.troops - (c.inv.troops || 0), o);
+  let val = 0;
+  for (const k of EQ_K) { const d = b[k] - (c.inv[k] || 0); if (d > 1e-6) { o.eq[k] = d; val += d * unitPrice(k); } }
+  o.dm = Math.max(0, b.gdp - c.gdp) + val;
+  return o;
+}
+function civCas(o, n, wr) { n = Math.max(0, n); o.ck += n; o.cw += n * (wr || 3); }
+function PS() {
+  if (!S.ps) S.ps = { suf: newCas(), cau: newCas(), strikes: 0, struck: 0, done: [], log: [], sp: { def: 0, war: 0, buy: 0, strike: 0 } };
+  return S.ps;
+}
+const WST = () => S.wst || (S.wst = newCas()); // everything lost in the world since the game started
+function warSt(w) { return w.st || (w.st = { A: newCas(), B: newCas(), h: [], lg: [], wk: [0, 0] }); }
+function warLog(w, txt) { const st = warSt(w); st.lg.unshift({ d: S.day, t: txt }); if (st.lg.length > 14) st.lg.length = 14; }
+// add one day's (or one strike's) losses to a war, the world totals and the player's totals
+function recordWar(w, lA, lB) {
+  const st = warSt(w);
+  addCas(st.A, lA); addCas(st.B, lB); addCas(WST(), lA); addCas(WST(), lB);
+  st.wk[0] += killed(lA); st.wk[1] += killed(lB);
+  if (S.player && inWar(w, S.player)) {
+    const mine = w.A.includes(S.player);
+    addCas(PS().cau, mine ? lB : lA);
+  }
+}
+// sample the war for the charts (occupation and dead over time)
+function warSample(w) {
+  const st = warSt(w);
+  st.h.push([S.day, Math.round(w.f), Math.round(killed(st.A)), Math.round(killed(st.B))]);
+  if (st.h.length > 120) st.h = st.h.filter((x, i) => i % 2 === 0 || i === st.h.length - 1);
+}
+// a line in the battle log once a week while there is fighting
+function weekLog(w) {
+  const st = warSt(w), a = st.wk[0], b = st.wk[1]; st.wk = [0, 0];
+  if (a + b < 1 || !S.player || !inWar(w, S.player)) return;
+  const meA = w.A.includes(S.player), my = meA ? a : b, th = meA ? b : a;
+  warLog(w, 'שבוע של קרבות: ' + nT(my) + ' הרוגים בצד שלנו, ' + nT(th) + ' בצד האויב');
+}
+// one day of fighting with its losses counted: inventory before and after, civilians where the fighting is
+function countedBattle(w, fn) {
+  const A = w.A.slice(), B = w.B.slice();
+  const parts = A.concat(B).filter(m => S.c[m] && S.c[m].alive);
+  const snaps = parts.map(m => invSnap(S.c[m]));
+  const fA = w.f;
+  fn();
+  const lA = newCas(), lB = newCas();
+  let mine = null;
+  parts.forEach((m, i) => {
+    const l = lossFrom(S.c[m], snaps[i]);
+    addCas(A.includes(m) ? lA : lB, l);
+    if (m === S.player) mine = l;
+  });
+  // civilians are caught in the fighting on the land being fought over
+  const sk = lA.sk + lB.sk; if (sk <= 0) return;
+  const ru = w.ru && (w.a === S.player || w.b === S.player) ? w.ru : null;
+  let onA = fA < 0 ? 1 : fA > 0 ? 0 : 0.5;
+  if (ru) { const me = w.A.includes(S.player), inE = ru.aE > 0 || ((me ? w.f : -w.f) > 0), inP = ru.aP > 0 || ((me ? w.f : -w.f) < 0); const tE = inE ? 1 : 0, tP = inP ? 1 : 0; if (tE + tP) onA = (me ? tP : tE) / (tE + tP); }
+  const civ = (side, share) => { if (share <= 0) return 0; const lead = side === 'A' ? w.a : w.b; const n = sk * 0.3 * share * densF(lead) * (0.6 + R() * 0.8); civCas(side === 'A' ? lA : lB, n, 3); return n; };
+  const cA = civ('A', onA), cB = civ('B', 1 - onA);
+  recordWar(w, lA, lB);
+  battleFloat(w, killed(lA) + killed(lB));
+  if (S.player && inWar(w, S.player)) {
+    const meA = w.A.includes(S.player), myCiv = meA ? cA : cB, theirCiv = meA ? cB : cA, lead = w.a === S.player || w.b === S.player;
+    if (mine) addCas(PS().suf, mine);
+    if (lead) {
+      // our own civilians only count where the fighting is on our soil (allies' civilians are theirs)
+      const civMe = (meA ? onA : 1 - onA) > 0 ? myCiv : 0;
+      civCas(PS().suf, civMe, 3); S.p.civLost = (S.p.civLost || 0) + civMe;
+      S.p.civKill = (S.p.civKill || 0) + theirCiv;
+    }
+    if (mine) { const mc = monthCas(); mc.sk += mine.sk; mc.ck += lead ? myCiv : 0; }
+  }
+}
+const monthCas = () => S.p.mc || (S.p.mc = { sk: 0, ck: 0, ap: 0, rep: 0 });
+// a strike (air, missiles, nuclear) with everything it did: kept for the result card, the stats screen and the war log
+function strikeRecord(o) {
+  const r = Object.assign({ d: S.day, cas: newCas(), own: newCas(), fx: [] }, o);
+  const pl = S.player;
+  if (r.by === pl) { PS().strikes++; addCas(PS().cau, r.cas); addCas(PS().suf, r.own); PS().sp.strike += r.own.sp || 0; }
+  if (r.at === pl) { PS().struck++; addCas(PS().suf, r.cas); }
+  addCas(WST(), r.cas); addCas(WST(), r.own);
+  const w = S.wars.find(x => (x.A.includes(r.by) && x.B.includes(r.at)) || (x.B.includes(r.by) && x.A.includes(r.at)));
+  if (w) {
+    const st = warSt(w), byA = w.A.includes(r.by);
+    addCas(byA ? st.B : st.A, r.cas); addCas(byA ? st.A : st.B, r.own);
+    warLog(w, strikeLine(r));
+  }
+  if (r.by === pl || r.at === pl) { const L = PS().log; L.unshift(r); if (L.length > 25) L.length = 25; }
+  return r;
+}
+const KIND_HE = { air: 'תקיפה אווירית', mis: 'מטח טילים', nuke: 'תקיפה גרעינית', fac: 'תקיפה על מתקני הגרעין' };
+const nT = v => '⁦' + Math.round(v).toLocaleString('en-US') + '⁩';
+function eqTxt(eq, max) {
+  return EQ_K.filter(k => (eq[k] || 0) >= 0.5).sort((a, b) => eq[b] * unitPrice(b) - eq[a] * unitPrice(a)).slice(0, max || 9).map(k => nT(eq[k]) + ' ' + EQ_HE[k]).join(', ');
+}
+function strikeLine(r) {
+  return (r.by === S.player ? '' : nm(r.by) + ': ') + KIND_HE[r.k] + (r.by === S.player ? ' שלנו' : '') + ' על ' + nm(r.at) + ' — ' + nT(killed(r.cas)) + ' הרוגים' + (eqTxt(r.cas.eq, 2) ? ', הושמדו ' + eqTxt(r.cas.eq, 2) : '');
+}
+// archive a war the player fought in, for the stats screen
+function archiveWar(w, res) {
+  if (!S.player || !inWar(w, S.player) || w._arch) return;
+  w._arch = 1;
+  const st = warSt(w), meA = w.A.includes(S.player);
+  PS().done.push({ en: enemyLeaderFor(w, S.player), s: w.startDay, e: S.day, res, my: st[meA ? 'A' : 'B'], th: st[meA ? 'B' : 'A'] });
+}
+
 /* ================= wars ================= */
 const inWar = (w, x) => w.A.includes(x) || w.B.includes(x);
 function atWar(x, y) { return S.wars.some(w => (w.A.includes(x) && w.B.includes(y)) || (w.B.includes(x) && w.A.includes(y))); }
@@ -411,6 +538,7 @@ function declareWar(att, def, opt) {
   if (!S.c[att] || !S.c[def] || atWar(att, def)) return null;
   const w = { id: S.wid++, a: att, b: def, A: [att], B: [def], f: 0, start: S.turn, startDay: S.day, pause: 0, stance: 'attack', last: 0, ms: 0 };
   S.wars.push(w);
+  warSample(w);
   needMapRecolor = true;
   if (!opt.provoked) noteGrievance(att, def);
   if (def === S.player && S.p && !opt.silent) {
@@ -449,7 +577,8 @@ function declareWar(att, def, opt) {
   }
   return w;
 }
-function endWar(w) {
+function endWar(w, res) {
+  if (S.player && inWar(w, S.player)) { const fp = mySideFront(w, S.player); archiveWar(w, res || (fp >= 40 ? 'won' : fp <= -40 ? 'lost' : 'peace')); }
   S.wars = S.wars.filter(x => x !== w);
   addRel(w.a, w.b, 60); // from -100 back to hostile
   S.pending = S.pending.filter(p => !p.wid || p.wid !== w.id || p.type === 'attacked');
@@ -530,6 +659,7 @@ function annex(win, lose) {
   if (!W || !L || !L.alive) return;
   tidsOf(lose).slice().forEach(t => S.owner[t] = win);
   L.alive = false; L.annexedBy = win;
+  S.wars.forEach(w => { if ((w.a === lose || w.b === lose) && S.player && inWar(w, S.player)) archiveWar(w, inWar(w, win) && (w.A.includes(win) === w.A.includes(S.player)) ? 'won' : 'lost'); });
   W.pop += L.pop * 0.85; W.gdp += L.gdp * 0.5; W.nukes += Math.floor(L.nukes * 0.5); W.inv.troops += L.inv.troops * 0.05;
   S.wars.filter(w => w.a === lose || w.b === lose).forEach(w => S.wars = S.wars.filter(x => x !== w));
   S.wars.forEach(w => { w.A = w.A.filter(x => x !== lose); w.B = w.B.filter(x => x !== lose); });
@@ -582,10 +712,20 @@ function budgetDay() {
   b.net = b.income - b.welfare - b.admin - b.defense - b.war - b.interest - b.upkeep - b.nuke;
   return b;
 }
+function casMonthToast() {
+  const mc = S.p.mc; S.p.mc = null; if (!mc) return;
+  if (mc.sk >= 1 || mc.ck >= 1) {
+    const t = 'אבדות החודש: ' + nT(mc.sk) + ' חיילים' + (mc.ck >= 1 ? ' ו-' + nT(mc.ck) + ' אזרחים' : '') + ' שלנו נהרגו' + (mc.ap >= 0.5 ? ' · העם ' + sgnT(-mc.ap) : '');
+    toast(t, true); addNews(t + '.', 'bad');
+  }
+  if (mc.rep >= 0.5) { const t = 'אזרחים שנהרגו מהאש שלנו: העולם ' + sgnT(-mc.rep); toast(t, true); }
+}
 function playerEconomy() {
   const c = P(), p = S.p;
   const b = budgetDay();
   p.treasury += b.net; p.lastDay = b;
+  const sp = PS().sp; sp.def += b.defense + b.upkeep + b.nuke; sp.war += b.war;
+  warsOf(S.player).forEach(w => { if (w.pause > 0) return; const en = enemyLeaderFor(w, S.player); warSt(w)[w.A.includes(S.player) ? 'A' : 'B'].sp += 0.002 * power(c) * commit(S.player, w) / Math.sqrt(proj(S.player, en)) / DPM; });
   const bm = p.bm || (p.bm = {});
   for (const k in b) bm[k] = (bm[k] || 0) + b[k];
   // growth (yearly rate applied daily)
@@ -650,7 +790,11 @@ function approvalTarget() {
 function approvalStep() {
   const c = P(), p = S.p;
   const casK = p.cas; p.casTotal += casK; p.cas = 0;
-  if (casK > 0) p.shock -= Math.min(0.4, 25 * casK / Math.max(0.5, c.pop));
+  const mc = monthCas();
+  if (casK > 0) { const d = Math.min(0.4, 25 * casK / Math.max(0.5, c.pop)); p.shock -= d; mc.ap += d; }
+  // our civilians killed hurt even more than soldiers; civilians we kill hurt our standing in the world
+  if (p.civLost > 0) { const d = Math.min(0.6, 60 * p.civLost / 1000 / Math.max(0.5, c.pop)); p.shock -= d; mc.ap += d; p.civLost = 0; }
+  if (p.civKill > 0) { const d = Math.min(0.3, p.civKill / 4000); p.rep = clamp(p.rep - d, 0, 100); mc.rep += d; p.civKill = 0; }
   const T = approvalTarget();
   c.approval = clamp(c.approval + (T - c.approval) * 0.12 / DPM + p.shock, 0, 100);
   p.shock = 0; p.unrest = Math.max(0, p.unrest - 0.01);
@@ -820,8 +964,11 @@ function nukeProgram() {
     if (np.disc && R() < 0.04) {
       const strikers = ['840', '376'].filter(s => S.c[s] && S.c[s].alive && s !== S.player && !isAlly(s, S.player));
       if (strikers.length) {
-        const s = pick(strikers); np.m = Math.max(0, np.m - 8); hurtInv(c, 0.03, ['air', 'msl']); p.shock += 2; noteGrievance(s, S.player);
+        const s = pick(strikers), b0 = invSnap(c); np.m = Math.max(0, np.m - 8); hurtInv(c, 0.03, ['air', 'msl']); hurtInv(c, 0.002, ['troops']); p.shock += 2; noteGrievance(s, S.player);
+        const loss = lossFrom(c, b0); civCas(loss, Math.round(5 + R() * 40), 3);
+        const r = strikeRecord({ k: 'fac', by: s, at: S.player, cas: loss, own: newCas(), war: atWar(s, S.player), used: 24 });
         addNews(nm(s) + ' תקפה מהאוויר את מתקני הגרעין שלנו! התוכנית נסוגה ב-8 חודשים.', 'bad');
+        const lp = launchPt(s, 'air', S.player); fxStrike('air', lp, targetPt(S.player, lp), 24, r);
       }
     }
     if (np.m >= 36) {
@@ -840,7 +987,8 @@ function dayTick() {
   playerEconomy();
   aiEconomy();
   if (S.units && !S.over) syncAllUnits();
-  S.wars.slice().forEach(w => { if (S.wars.includes(w) && !S.over) battle(w); });
+  S.wars.slice().forEach(w => { if (S.wars.includes(w) && !S.over) countedBattle(w, () => battle(w)); });
+  if (S.day % 7 === 0) S.wars.forEach(w => { warSample(w); weekLog(w); });
   if (!S.over) unitsDay();
   if (!S.over) approvalStep();
   if (!S.over) deliveries();
@@ -851,7 +999,9 @@ function dayTick() {
 function monthTick(m) {
   const p = S.p, c = P();
   S.wars.forEach(frontNews);
+  casMonthToast();
   if (S.recession > 0) S.recession--;
+  if (S.scorch && S.scorch.some(x => x.d <= S.day)) { S.scorch = S.scorch.filter(x => x.d > S.day); scorchDirty = true; }
   aiDiplomacy();
   if (!S.over) aiWars();
   if (!S.over) randomEvents();
@@ -911,12 +1061,27 @@ function score() {
 function gameOver(reason, txt) { S.over = { reason, txt }; addNews('סוף המשחק: ' + txt, 'bad'); }
 
 /* ================= nuclear ================= */
+// people killed by one nuclear strike on a country's biggest city: tens of thousands in a small country, up to ~1.5 million in a giant one
+function nukeDead(T) { return Math.round(Math.min(T.pop * 0.3, clamp(T.pop * 0.004 + 0.03, 0.01, 1.5) * (0.7 + R() * 0.6)) * 1e6); }
+function nukeHit(att, tgt) {
+  const T = S.c[tgt], before = invSnap(T), dead = nukeDead(T);
+  T.pop = Math.max(0.01, T.pop - dead / 1e6); T.gdp *= 0.65;
+  hurtInv(T, Math.min(0.3, 150 / Math.max(1, T.inv.troops)), ['troops']); hurtInv(T, 0.5, ['tanks', 'afv', 'art', 'air', 'heli', 'ships', 'subs', 'msl']);
+  const loss = lossFrom(T, before); civCas(loss, dead, 1.6);
+  const lp = launchPt(att, 'mis', tgt), pt = nukePt(tgt);
+  S.scorch = (S.scorch || []).filter(x => x.d > S.day).slice(-11); S.scorch.push({ p: pt, d: S.day + 240 }); scorchDirty = true;
+  const r = strikeRecord({ k: 'nuke', by: att, at: tgt, cas: loss, own: newCas() });
+  r._lp = lp; r._pt = pt;
+  return r;
+}
 function nukeImpact(att, tgt, ai) {
   const T = S.c[tgt], A = S.c[att];
-  T.pop *= 0.94; T.gdp *= 0.65; hurtInv(T, 0.3, ['troops']); hurtInv(T, 0.5, ['tanks', 'afv', 'art', 'air', 'heli', 'ships', 'subs', 'msl']); T.approval = clamp(T.approval - 20, 0, 100);
+  const r = nukeHit(att, tgt);
+  T.approval = clamp(T.approval - 20, 0, 100);
   noteGrievance(att, tgt);
-  if (att !== S.player && S.p) S.pending.push({ type: 'nukealert', att, tgt });
-  addNews('☢ ' + A.he + ' שיגרה נשק גרעיני על ' + T.he + '. העולם בהלם, מיליונים נפגעו.', 'war');
+  if (att !== S.player && S.p) S.pending.push({ type: 'nukealert', att, tgt, dead: r.cas.ck });
+  addNews('☢ ' + A.he + ' שיגרה נשק גרעיני על ' + T.he + ': ' + nT(r.cas.ck) + ' אזרחים ו-' + nT(r.cas.sk) + ' חיילים נהרגו. העולם בהלם.', 'war');
+  fxNuke(r._lp, r._pt, r);
   alive().forEach(id => {
     if (id === att) return;
     addRel(id, att, (isAlly(id, tgt) || id === tgt) ? -70 : -45);
@@ -926,15 +1091,18 @@ function nukeImpact(att, tgt, ai) {
   // retaliation
   const ret = alive().filter(id => id !== att && S.c[id].nukes > 0 && (id === tgt || isAlly(id, tgt)));
   if (ret.length && R() < (ret.includes(tgt) ? 0.95 : 0.75)) {
-    const r = ret.includes(tgt) ? tgt : pick(ret);
-    S.c[r].nukes--;
-    A.pop *= 0.92; A.gdp *= 0.6; hurtInv(A, 0.25, ['troops']); hurtInv(A, 0.4, ['tanks', 'afv', 'art', 'air', 'heli', 'ships', 'subs', 'msl']);
+    const rr = ret.includes(tgt) ? tgt : pick(ret);
+    S.c[rr].nukes--;
+    const r2 = nukeHit(rr, att);
+    hurtInv(A, 0.1, ['tanks', 'afv', 'art']);
     if (att === S.player) S.p.shock -= 35;
-    addNews('☢ תגובה גרעינית: ' + nm(r) + ' השיבה במכה גרעינית על ' + A.he + '.', 'war');
+    addNews('☢ תגובה גרעינית: ' + nm(rr) + ' השיבה במכה גרעינית על ' + A.he + ': ' + nT(r2.cas.ck) + ' אזרחים נהרגו.', 'war');
+    setTimeout(() => fxNuke(r2._lp, r2._pt, r2), 2600);
   }
   if (att === S.player) S.p.shock -= 20;
   if (tgt === S.player) S.p.shock -= 15;
   needMapRecolor = true;
+  return r;
 }
 
 /* ================= save / load ================= */
@@ -1289,6 +1457,8 @@ function syncUnits(cid) {
     S.units = S.units.filter(x => x !== u); us = us.filter(x => x !== u);
     if (selUnit === u.id) { selUnit = null; if (tab === 'unit') openTab(null); }
     if (cid === S.player) addNews(uName(u) + ' הושמדה / פורקה.', 'bad');
+    if (S.player && cid !== S.player) { const w = S.wars.find(v => inWar(v, cid) && inWar(v, S.player)); if (w) warLog(w, 'השמדנו את ' + uName(u) + ' של ' + nm(cid)); } else if (cid === S.player) { const w = S.wars.find(v => v.pause === 0 && inWar(v, S.player)); if (w) warLog(w, uName(u) + ' שלנו הושמדה'); }
+    if (uFought(u)) { fxBoom([u.lon, u.lat], 15 * fxZ(), { one: 1, dur: 1000 }); fxAdd({ k: 'spark', one: 1, p: [u.lon, u.lat], a: R() * 6, dur: 400 }); }
   });
   for (const u of us) for (const k in u.m) if (!(u.m[k] > 1e-9)) delete u.m[k];
 }
@@ -1452,6 +1622,7 @@ function hurtUnit(u, k, foeAdv) {
     if (key === 'troops') dead += lost;
   }
   if (u.o === S.player) S.p.cas += dead;
+  if (dead > 0.0004) markHit(u);
   return dead;
 }
 // the player's war, fought by the units on the map
@@ -1533,8 +1704,12 @@ function skirmishes() {
     const X = S.c[x], a = forcesIn(S.player, x, X.adv), d = hasUnits(x) ? forcesIn(x, x, M.adv) : null;
     const A = atkStr(a); if (!A) return;
     const D = (d ? defStr(d) : power(X) * 0.5) * 1.3, r = A / (A + D + 1e-9), L = 0.012 / DPM;
-    a.list.forEach(u => hurtUnit(u, L * (1 - r), X.adv));
-    if (d) d.list.forEach(u => hurtUnit(u, L * r, M.adv)); else hurtInv(X, L * r * 0.5, ['troops', 'tanks', 'afv', 'art']);
+    const w = S.wars.find(v => (v.A.includes(x) && v.B.includes(S.player)) || (v.B.includes(x) && v.A.includes(S.player)));
+    const go = () => {
+      a.list.forEach(u => hurtUnit(u, L * (1 - r), X.adv));
+      if (d) d.list.forEach(u => hurtUnit(u, L * r, M.adv)); else hurtInv(X, L * r * 0.5, ['troops', 'tanks', 'afv', 'art']);
+    };
+    if (w) countedBattle(w, go); else go();
   });
 }
 /* ---- enemy behaviour: defend, gather against invaders, sometimes counter-attack ---- */
@@ -1564,9 +1739,53 @@ function aiUnits() {
     home.sort((a, b) => uStr(b) - uStr(a)).forEach(u => { if (sent < theirs * (busy.length ? 0.25 : 0.45) && (domOf(u) === 'land' || (domOf(u) === 'air' && go.length))) { go.push(u); sent += uStr(u); } });
     if (!go.length) return;
     go.forEach(u => { const p = nearIn(S.player, [u.lon, u.lat]); if (!p) return; u.dest = p; u.mode = 'move'; u.slow = 1; u.ai = 'atk'; u.s0 = uStr(u); });
-    addNews('כוחות ' + nm(E) + ' חצו את הגבול ופלשו לשטחנו!', 'war');
+    addNews('כוחות ' + nm(E) + ' חצו את הגבול ופלשו לשטחנו!', 'war'); warLog(w, 'כוחות ' + nm(E) + ' פלשו לשטחנו');
     S.pending.push({ type: 'invaded', wid: w.id, from: E, uid: go[0].id });
   });
+}
+// enemies at war with us strike our bases and cities from the air and with missiles now and then
+function aiStrikes() {
+  warsOf(S.player).forEach(w => {
+    if (w.pause > 0 || !(w.a === S.player || w.b === S.player)) return;
+    const E = enemyLeaderFor(w, S.player), Ec = S.c[E]; if (!Ec || !Ec.alive) return;
+    const d = adjacent(E, S.player) ? 0 : dist(E, S.player);
+    const mis = Ec.mlv > 0 && Ec.inv.msl >= 10 && d <= MIS_RANGE[Ec.mlv], air = Ec.inv.air >= 8 && (d <= AIR_RANGE || Ec.inv.carriers >= 1);
+    if (!mis && !air) return;
+    if (R() > 0.012 * (Ec.gov === 'authoritarian' ? 1.4 : 1)) return;
+    enemyStrike(E, mis && (!air || R() < 0.55) ? 'mis' : 'air');
+  });
+}
+function enemyStrike(E, kind) {
+  const Ec = S.c[E], me = P(); if (!Ec || !Ec.alive || !me) return null;
+  const before = invSnap(me), dens = densF(S.player);
+  let used, frac, lost = 0, civ;
+  if (kind === 'air') {
+    used = clamp(Math.round(Ec.inv.air * 0.06), 4, 80);
+    frac = clamp(used * (Ec.q || 1) / (me.inv.air * 0.5 + me.inv.tanks * 0.03 + 40) * 0.1, 0.003, 0.08) * (1 - 0.15 * me.adv);
+    lost = Math.round(used * [0.003, 0.01, 0.025, 0.05][me.adv] * (0.5 + R())); Ec.inv.air = Math.max(0, Ec.inv.air - lost);
+    hurtInv(me, frac, ['air', 'heli', 'tanks', 'art', 'msl']); hurtInv(me, frac * 0.4, ['ships', 'afv']); hurtInv(me, frac * 0.15, ['troops']);
+    me.gdp *= 1 - frac * 0.04;
+    civ = used * 0.35 * dens * (0.4 + R() * 0.8);
+  } else {
+    used = clamp(Math.round(Ec.inv.msl * 0.08), 5, 150); Ec.inv.msl = Math.max(0, Ec.inv.msl - used);
+    const hits = used * (1 - [0, 0.25, 0.5, 0.75][me.adv]);
+    frac = clamp(hits / (hits + 300) * 0.2, 0.002, 0.05);
+    hurtInv(me, frac, ['air', 'art', 'msl', 'ships']); hurtInv(me, frac * 0.5, ['tanks']); hurtInv(me, frac * 0.2, ['troops']);
+    me.gdp *= 1 - frac * 0.08;
+    civ = hits * 0.8 * dens * (0.4 + R() * 0.8);
+  }
+  const loss = lossFrom(me, before); civCas(loss, Math.round(civ), 2.5 + R());
+  me.pop = Math.max(0.01, me.pop - loss.ck / 1e6);
+  S.p.cas += Math.max(0, before.troops - me.inv.troops);
+  const own = newCas(); if (kind === 'air') { if (lost) own.eq.air = lost; } else own.mu = used;
+  // dead civilians at home shake the public
+  const fx = applyFx({ ap: -Math.min(4, 0.5 + Math.sqrt(loss.ck) / 12) });
+  const r = strikeRecord({ k: kind, by: E, at: S.player, cas: loss, own, fx, war: true, used, lost });
+  addNews('אזעקה! ' + strikeLine(r) + '.', 'war');
+  const lp = launchPt(E, kind, S.player), pt = targetPt(S.player, lp);
+  fxStrike(kind, lp, pt, used, r);
+  if (S.units) syncAllUnits();
+  return r;
 }
 // once a day: move, fight, keep units equal to the inventory
 function unitsDay() {
@@ -1576,6 +1795,7 @@ function unitsDay() {
   S.units.forEach(u => { if (u.o === S.player && !u.dest && u.at && u.at !== S.player && !atWar(u.at, S.player) && !isAlly(u.at, S.player)) sendHome(u); });
   skirmishes();
   aiUnits();
+  aiStrikes();
   syncAllUnits();
 }
 
@@ -1600,6 +1820,7 @@ function initMap() {
     const el = gLand.append('path').attr('d', pathGen(f)).attr('data-t', t).node();
     (pathByTid[t] = pathByTid[t] || []).push(el);
   });
+  gScorch = gRoot.append('g').attr('class', 'scorch'); scorchDirty = true;
   gMarks = gRoot.append('g').attr('class', 'marks');
   // units: their own layer on top, not scaled with the map, so icons keep the same size on screen
   gUnits = svg.append('g').attr('class', 'units');
@@ -1622,6 +1843,7 @@ function initMap() {
     .on('zoom', ev => { gRoot.attr('transform', ev.transform); curT = ev.transform; if (Math.abs(ev.transform.k - curK) > 0.01) { curK = ev.transform.k; scaleMarks(); if (fanIds && Math.abs(curK / fanK - 1) > 0.25) fanIds = null; } drawUnits(); });
   svg.call(zoom).on('dblclick.zoom', null);
   MAP_PROJ = projection;
+  initFx();
   if (!(S && S.player) && W < 900) svg.call(zoom.transform, d3.zoomIdentity.translate(0, H * 0.22 - (topPad + H - botPad) / 2));
 }
 let MAP_PROJ = null;
@@ -1678,6 +1900,7 @@ function recolor() {
   }
   const mk = S && S.player ? S.player + ':' + warsOf(S.player).map(w => enemyLeaderFor(w, S.player)).join(',') : '';
   if (mk !== drawMarks.k) { drawMarks.k = mk; drawMarks(); }
+  if (scorchDirty) drawScorch();
   needMapRecolor = false; lastRecolor = performance.now();
 }
 function drawMarks() {
@@ -1748,6 +1971,7 @@ function uLabel(u) {
   }
   return '';
 }
+const uFought = u => !!(S.c[u.o] && warsOf(u.o).length);
 function uFighting(u) {
   if (u.dest) return false;
   if (domOf(u) === 'sea') return warsOf(u.o).some(w => { const en = enemyLeaderFor(w, u.o); return w.pause === 0 && S.c[en] && S.c[en].alive && distToC(en, [u.lon, u.lat]) < 600; });
@@ -1829,7 +2053,7 @@ const setA = (e, k, v) => { v = String(v); if (e.getAttribute(k) !== v) e.setAtt
 const showE = (e, on) => { const v = on ? '' : 'none'; if (e.style.display !== v) e.style.display = v; };
 function drawUnits() {
   if (!gIcons || !S || !S.units || !MAP_PROJ) return;
-  unitsDirty = false; lastUnitsDraw = performance.now();
+  unitsDirty = false; lastUnitsDraw = performance.now(); const now = lastUnitsDraw;
   // while choosing a destination our own icons let taps through to the map (enemy icons stay tappable as targets)
   gUnits.classed('picking', !!uMode);
   const items = buildItems(), seen = new Set();
@@ -1845,7 +2069,8 @@ function drawUnits() {
     // a stack shows infantry (with the total soldiers) when it has any, otherwise its strongest unit
     const P_ = g.__p, lead = multi ? (it.us.filter(u => (u.m.troops || 0) >= 1).sort((a, b) => b.m.troops - a.m.troops)[0] || it.us.slice().sort((a, b) => uStr(b) - uStr(a))[0]) : it.us[0];
     setA(g, 'transform', 'translate(' + it.x.toFixed(1) + ',' + it.y.toFixed(1) + ')');
-    setA(g, 'class', 'ui ' + (it.o === S.player ? 'me' : 'en') + (!multi && lead.id === selUnit ? ' sel' : ''));
+    const hit = hitUntil > now && it.us.some(u => (HIT.get(u.id) || 0) > now);
+    setA(g, 'class', 'ui ' + (it.o === S.player ? 'me' : 'en') + (!multi && lead.id === selUnit ? ' sel' : '') + (hit ? ' hit' : ''));
     setA(P_.use, 'href', '#ui-' + uIcon(lead));
     let lbl = uLabel(lead);
     if (multi) { const tr = it.us.reduce((s, u) => s + (u.m.troops || 0), 0); if (tr >= 1) lbl = kTxt(tr); }
@@ -1997,6 +2222,349 @@ function unitStrike(u, o, kind) {
     buttons: [{ label: 'תקוף', cls: 'danger', fn: () => strike(o, kind, u.id) }, { label: 'ביטול' }] });
 }
 
+/* ================= animations: strikes, explosions, battles ================= */
+// one canvas over the map; effects live in map coordinates (lon/lat) so they follow panning and zooming.
+// Nothing is drawn while no effect is running, and battle effects only appear while the clock runs.
+let fxCv = null, fxCx = null, fxDpr = 1, FXL = [], fxDirty = false, fxHold = 0, sitesT = 0, SITES = [], scorchDirty = true, gScorch = null, hitUntil = 0;
+const HIT = new Map(), FLT = new Map(), FX_MAX = 80;
+let FXMODE = (() => {
+  try { const v = localStorage.getItem('world2026_fx'); if (v === 'full' || v === 'low' || v === 'off') return v; } catch (e) { /* no storage */ }
+  try { return matchMedia('(prefers-reduced-motion: reduce)').matches ? 'low' : 'full'; } catch (e) { return 'full'; }
+})();
+function setFxMode(v) {
+  FXMODE = v; try { localStorage.setItem('world2026_fx', v); } catch (e) { /* no storage */ }
+  FXL = v === 'off' ? [] : v === 'low' ? FXL.filter(f => f.one) : FXL; fxDirty = true;
+}
+function initFx() {
+  if (fxCv) fxCv.remove();
+  fxCv = document.createElement('canvas'); fxCv.id = 'fxcv'; fxCv.setAttribute('aria-hidden', 'true');
+  $('#map').appendChild(fxCv);
+  fxDpr = Math.min(2, window.devicePixelRatio || 1);
+  fxCv.width = Math.round(W * fxDpr); fxCv.height = Math.round(H * fxDpr);
+  fxCx = fxCv.getContext('2d'); fxDirty = true;
+}
+const fxZ = () => clamp(0.8 + Math.log2(Math.max(1, curK)) * 0.11, 0.8, 1.45);
+// add an effect; ambient (battle) effects are dropped when there are already many, one-shot strike effects never are
+function fxAdd(e) {
+  if (FXMODE === 'off' || !fxCx) return null;
+  if (!e.one && (FXMODE !== 'full' || FXL.length > FX_MAX * 0.7)) return null;
+  if (FXL.length > FX_MAX * 1.5) { const i = FXL.findIndex(f => !f.one); FXL.splice(i >= 0 ? i : 0, 1); }
+  e.t0 = performance.now() + (e.delay || 0);
+  FXL.push(e); return e;
+}
+const jit = s => [(R() - 0.5) * 2 * s, (R() - 0.5) * 2 * s];
+const fxBoom = (p, r, o) => fxAdd(Object.assign({ k: 'boom', p, r, dur: 700 + r * 20, sm: r > 7 }, o || {}));
+function fxNum(p, n, o) { if (n < 0.5) return; fxAdd(Object.assign({ k: 'num', p, txt: '−' + Math.round(n).toLocaleString('en-US'), dur: 1900, col: '#ff6b6b' }, o || {})); }
+function fxPos(e, p) { const s = toScreen(p || e.p); return s ? [s[0] + (e.o ? e.o[0] : 0), s[1] + (e.o ? e.o[1] : 0)] : null; }
+// where a strike is launched from: the unit itself, the nearest unit that can do it, or the nearest part of the country
+function launchPt(owner, kind, tgt, su) {
+  if (su) return [su.lon, su.lat];
+  const mt = mainTid(owner), home = mt && TERR[mt] ? TERR[mt].c : [0, 0];
+  const ref = nearIn(tgt, home) || home;
+  const us = (S.units || []).filter(u => u.o === owner && (kind === 'air' ? (u.m.air || 0) >= 1 || (u.m.carriers || 0) >= 1 : (u.m.msl || 0) >= 1));
+  if (us.length) { const u = us.sort((a, b) => km([a.lon, a.lat], ref) - km([b.lon, b.lat], ref))[0]; return [u.lon, u.lat]; }
+  return nearIn(owner, ref) || home;
+}
+// what gets hit: enemy units in their own land if any, otherwise a place inside the country near the launcher
+function targetPt(o, lp) {
+  const eu = (S.units || []).filter(u => u.o === o && u.at === o && domOf(u) !== 'sea');
+  if (eu.length) { const u = eu.sort((a, b) => km([a.lon, a.lat], lp) - km([b.lon, b.lat], lp))[0]; return [u.lon, u.lat]; }
+  const pts = []; tidsOf(o).forEach(t => tp(t).in.forEach(p => pts.push(p)));
+  if (!pts.length) return TERR[mainTid(o)] ? TERR[mainTid(o)].c : lp;
+  pts.sort((a, b) => km(a, lp) - km(b, lp));
+  return pick(pts.slice(0, Math.min(6, pts.length)));
+}
+// the main city: the point of the main territory closest to its centre
+function nukePt(o) { const t = mainTid(o); if (!t) return [0, 0]; const c = TERR[t].c; return tp(t).in.slice().sort((a, b) => km(a, c) - km(b, c))[0] || c; }
+// bring a strike into view (keeps the zoom when possible) when it would happen off screen
+function fxReveal(a, b) {
+  if (!svg || uMode || !MAP_PROJ) return;
+  const [vx0, vy0, vx1, vy1] = visibleRect(), sb = toScreen(b), m = 30;
+  if (sb && sb[0] > vx0 + m && sb[0] < vx1 - m && sb[1] > vy0 + m && sb[1] < vy1 - m) return;
+  const pa = MAP_PROJ(a), pb = MAP_PROJ(b); if (!pa || !pb) return;
+  const dx = Math.abs(pa[0] - pb[0]), dy = Math.abs(pa[1] - pb[1]);
+  const k = clamp(Math.min(curK, 0.7 * (vx1 - vx0) / Math.max(1, dx), 0.7 * (vy1 - vy0) / Math.max(1, dy)), 1.2, 40);
+  zoomToMapPt([(pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2], k);
+}
+function holdFor(ms) { fxHold = Math.max(fxHold, performance.now() + ms); }
+// an air strike or missile salvo, ours or the enemy's, ending with the result card
+function fxStrike(kind, lp, tp_, used, r) {
+  const show = r.by === S.player || r.at === S.player;
+  const card = d => { if (show) setTimeout(() => showCard(r), d); };
+  if (FXMODE === 'off' || !fxCx) { card(0); return; }
+  if (r.by === S.player || performance.now() - (fxStrike.pan || 0) > 25000) { fxStrike.pan = performance.now(); fxReveal(lp, tp_); }
+  const z = fxZ(), kd = killed(r.cas), en = r.by !== S.player;
+  if (FXMODE === 'low') { fxBoom(tp_, 14 * z, { one: 1, delay: 450 }); fxNum(tp_, kd, { one: 1, delay: 650 }); card(900); holdFor(1200); return; }
+  const delay = 560; // let the camera arrive first
+  const a = toScreen(lp), b = toScreen(tp_), dpx = a && b ? Math.hypot(a[0] - b[0], a[1] - b[1]) : 300;
+  if (kind === 'air') {
+    const nj = clamp(Math.round(used / 12), 2, 4), leg = clamp(dpx / 260, 0.7, 1.6) * 1000, dur = leg * 2 / 0.9;
+    for (let i = 0; i < nj; i++) {
+      const last = i === nj - 1;
+      fxAdd({ k: 'jet', one: 1, p0: lp, p1: tp_, dur, delay: delay + i * 110, o: [(i % 2 ? 1 : -1) * Math.ceil(i / 2) * 9, Math.ceil(i / 2) * 7], en,
+        drop: () => { for (let j = 0; j < 3; j++) fxBoom(tp_, (8 + R() * 5) * z, { one: 1, o: jit(16 * z), delay: j * 120 }); if (last) fxNum(tp_, kd, { one: 1, delay: 300 }); } });
+    }
+    const hit = delay + (nj - 1) * 110 + dur * 0.5;
+    card(hit + 900); holdFor(Math.min(2500, hit + 1000));
+  } else {
+    const n = clamp(Math.round(used / 10), 2, 6), dur = clamp(dpx / 330, 0.8, 1.8) * 1000;
+    for (let i = 0; i < n; i++) {
+      const last = i === n - 1, o2 = jit(14 * z);
+      fxAdd({ k: 'arc', one: 1, p0: lp, p1: tp_, o0: jit(6), o1: o2, h: 0.32 + R() * 0.12, dur, delay: delay + i * 150, w: 2.4, trail: 1, col: en ? '#ff8a8a' : '#ffe9a8',
+        end: () => { fxBoom(tp_, 12 * z, { one: 1, o: o2 }); if (last) fxNum(tp_, kd, { one: 1, o: [0, -8] }); } });
+    }
+    const hit = delay + (n - 1) * 150 + dur;
+    card(hit + 600); holdFor(Math.min(2500, hit + 800));
+  }
+}
+function fxNuke(lp, pt, r) {
+  const show = r.by === S.player || r.at === S.player;
+  const card = d => { if (show) setTimeout(() => showCard(r), d); };
+  if (FXMODE === 'off' || !fxCx) { card(0); return; }
+  fxReveal(lp, pt);
+  const boom = () => {
+    fxAdd({ k: 'nuke', one: 1, p: pt, dur: 5200 });
+    fxNum(pt, killed(r.cas), { one: 1, delay: 900, dur: 2600, big: 1 });
+    if (FXMODE === 'full') {
+      const f = $('#flash'); if (f) { f.classList.remove('on'); void f.offsetWidth; f.classList.add('on'); }
+      const m = $('#map'); if (m) { m.classList.remove('shake'); void m.offsetWidth; m.classList.add('shake'); }
+    }
+  };
+  if (FXMODE === 'low') { boom(); card(1500); holdFor(2000); return; }
+  const a = toScreen(lp), b = toScreen(pt), dpx = a && b ? Math.hypot(a[0] - b[0], a[1] - b[1]) : 300, dur = clamp(dpx / 300, 0.9, 1.8) * 1000;
+  fxAdd({ k: 'arc', one: 1, p0: lp, p1: pt, h: 0.45, dur, delay: 560, w: 3.4, trail: 1, col: '#ffffff', end: boom });
+  card(560 + dur + 2200); holdFor(560 + dur + 3200);
+}
+// a unit took losses: its icon shakes and flashes red (at most every 1.2 s)
+function markHit(u) {
+  if (FXMODE !== 'full') return;
+  const now = performance.now(), h = HIT.get(u.id) || 0;
+  if (now - h < 1200) return;
+  HIT.set(u.id, now + 450); hitUntil = now + 450;
+}
+// a running count of the dead floats up from the fighting (not more than every ~1.5 s per war)
+function battleFloat(w, n) {
+  if (FXMODE !== 'full' || !(n > 0) || !MAP_PROJ) return;
+  const now = performance.now(), f = FLT.get(w.id) || { t: 0, n: 0 };
+  f.n += n; FLT.set(w.id, f);
+  const lead = S.player && (w.a === S.player || w.b === S.player);
+  if (now - f.t < (lead ? 1500 : 2600) || f.n < 1) return;
+  let p = null;
+  if (lead) {
+    const E = enemyLeaderFor(w, S.player);
+    const u = S.units.find(x => x.o === S.player && x.at === E && domOf(x) === 'land') || S.units.find(x => x.o === E && x.at === S.player && domOf(x) === 'land');
+    p = u && [u.lon, u.lat];
+  } else if (!involvesPlayer(w)) p = warMark(w);
+  f.t = now;
+  if (!p) return;
+  const s = toScreen(p);
+  if (s && s[0] > 0 && s[1] > 0 && s[0] < W && s[1] < H) fxNum(p, f.n, { o: [jit(10)[0], -14], col: lead ? '#ff9d9d' : '#ffc58a', sm: 1 });
+  f.n = 0;
+}
+// places where fighting is going on right now (only what is on screen)
+function fxSites() {
+  SITES = [];
+  if (!S.units) return;
+  const onScr = p => { const q = toScreen(p); return q && q[0] > -20 && q[1] > -20 && q[0] < W + 20 && q[1] < H + 20; };
+  for (const u of S.units) {
+    if (SITES.length >= 14) break;
+    if (u.dest) continue;
+    const p = [u.lon, u.lat];
+    if (!onScr(p) || !uFighting(u)) continue;
+    if (domOf(u) === 'sea') {
+      // where a fleet shoots at: the nearest enemy coast (remembered for a few seconds)
+      let c = SHIPT.get(u.id);
+      if (!c || c.lon !== u.lon || c.lat !== u.lat || S.day - c.d > 5) {
+        const en = warsOf(u.o).filter(w => w.pause === 0).map(w => enemyLeaderFor(w, u.o)).find(x => S.c[x] && S.c[x].alive && distToC(x, p) < 600);
+        let best = null, bd = 1e9; if (en) for (const t of tidsOf(en)) for (const q of tp(t).edge) { const d = km(q, p); if (d < bd) { bd = d; best = q; } }
+        c = { lon: u.lon, lat: u.lat, d: S.day, tgt: best }; SHIPT.set(u.id, c);
+      }
+      if (c.tgt) SITES.push({ p, ship: 1, tgt: c.tgt, en: u.o !== S.player });
+    } else {
+      let foe = null, fd = 1e9;
+      for (const e of S.units) { if (e.o === u.o || e.at !== u.at || domOf(e) !== 'land') continue; const d = Math.abs(e.lon - u.lon) + Math.abs(e.lat - u.lat); if (d < fd) { fd = d; foe = e; } }
+      SITES.push({ p, art: u.t === 'art' || (u.m.art || 0) >= 20, foe: foe ? [foe.lon, foe.lat] : null, en: u.o !== S.player });
+    }
+  }
+  S.wars.forEach(w => { if (SITES.length >= 14 || w.pause > 0 || involvesPlayer(w)) return; const mk = warMark(w); if (mk && onScr(mk)) SITES.push({ p: mk, ai: 1 }); });
+}
+const SHIPT = new Map();
+function fxAmbient(dt) {
+  const z = fxZ(), sp = clamp(0.75 + S.speed * 0.15, 0.9, 2) * dt;
+  for (const s of SITES) {
+    const rate = s.ai ? 0.8 : 1.5;
+    if (R() < rate * sp) fxBoom(s.p, (s.ai ? 4 : 5) * z + R() * 3, { o: jit((s.ai ? 9 : 13) * z), dur: 420 + R() * 300, sm: R() < 0.35 });
+    if (R() < (s.ai ? 1.2 : 2.6) * sp) fxAdd({ k: 'spark', p: s.p, o: jit(12 * z), a: R() * 6.283, dur: 230, en: s.en });
+    if (s.art && R() < 0.55 * sp) { const o1 = s.foe ? jit(8) : jit(30 * z), t = s.foe || s.p; fxAdd({ k: 'arc', p0: s.p, p1: t, o0: [0, -4], o1, h: 0.5, dur: 650, w: 1.6, col: '#ffd27a', end: () => fxBoom(t, 6 * z, { o: o1, dur: 500 }) }); }
+    if (s.ship && R() < 0.5 * sp) { const o1 = jit(8); fxAdd({ k: 'arc', p0: s.p, p1: s.tgt, o1, h: 0.25, dur: 700, w: 1.6, col: '#bfe4ff', end: () => fxBoom(s.tgt, 6 * z, { o: o1, dur: 520 }) }); }
+  }
+}
+function fxFrame(t, dt) {
+  if (!fxCx || !S || !S.player) return;
+  const run = S.speed > 0 && !modalOpen() && !S.over;
+  if (run && FXMODE === 'full') { if (t - sitesT > 450) { sitesT = t; fxSites(); } if (SITES.length) fxAmbient(dt); }
+  const trails = run && FXMODE === 'full' && S.units && S.units.some(u => u.dest);
+  if (!FXL.length && !trails) {
+    if (fxDirty) { fxCx.setTransform(1, 0, 0, 1, 0, 0); fxCx.clearRect(0, 0, fxCv.width, fxCv.height); fxDirty = false; }
+    return;
+  }
+  fxDraw(t, trails); fxDirty = true;
+}
+const circ = (c, s, r) => { c.beginPath(); c.arc(s[0], s[1], Math.max(0.1, r), 0, 6.2832); c.fill(); };
+const ring = (c, s, r) => { c.beginPath(); c.arc(s[0], s[1], Math.max(0.1, r), 0, 6.2832); c.stroke(); };
+function qPt(a, m, b, u) { const v = 1 - u; return [v * v * a[0] + 2 * v * u * m[0] + u * u * b[0], v * v * a[1] + 2 * v * u * m[1] + u * u * b[1]]; }
+function fxDraw(now, trails) {
+  const c = fxCx, z = fxZ();
+  c.setTransform(fxDpr, 0, 0, fxDpr, 0, 0); c.clearRect(0, 0, W, H);
+  c.lineCap = 'round'; c.lineJoin = 'round'; c.direction = 'ltr';
+  if (trails) {
+    // a short fading trail behind units on the move
+    c.lineWidth = 3;
+    for (const u of S.units) {
+      if (!u.dest || u.px == null) continue;
+      const a = toScreen([u.px, u.py]), b = toScreen(uPos(u)); if (!a || !b) continue;
+      const d = Math.hypot(b[0] - a[0], b[1] - a[1]); if (d < 3 || d > 400) continue;
+      const g = c.createLinearGradient(a[0], a[1], b[0], b[1]), col = u.o === S.player ? '245,179,1' : '255,107,107';
+      g.addColorStop(0, 'rgba(' + col + ',0)'); g.addColorStop(1, 'rgba(' + col + ',0.55)');
+      c.strokeStyle = g; c.globalAlpha = 1; c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke();
+    }
+  }
+  // effects added by callbacks during this pass land in the new FXL
+  const list = FXL, keep = []; FXL = [];
+  for (const e of list) {
+    if (now < e.t0) { keep.push(e); continue; }
+    const k = (now - e.t0) / e.dur;
+    if (k >= 1) { if (e.drop && !e.dropped) { e.dropped = 1; e.drop(); } if (e.end && !e.ended) { e.ended = 1; e.end(); } continue; }
+    keep.push(e);
+    c.globalAlpha = 1;
+    switch (e.k) {
+      case 'boom': {
+        const s = fxPos(e); if (!s) break; const r = e.r;
+        if (k < 0.3) { c.globalAlpha = 1 - k / 0.3; c.fillStyle = '#fff4c4'; circ(c, s, r * (0.55 + k * 1.8)); c.fillStyle = '#ff8c2a'; circ(c, s, r * (0.35 + k)); }
+        c.globalAlpha = 0.9 * (1 - k); c.strokeStyle = '#ffc56b'; c.lineWidth = 1.6; ring(c, s, r * (0.4 + 1.6 * k));
+        if (e.sm) { c.globalAlpha = 0.5 * (1 - k); c.fillStyle = '#5c6068'; for (let j = -1; j <= 1; j++) circ(c, [s[0] + j * r * 0.45, s[1] - r * (0.3 + 0.9 * k) - Math.abs(j) * r * 0.2], r * (0.3 + 0.45 * k)); }
+        break;
+      }
+      case 'spark': {
+        const s = fxPos(e); if (!s) break;
+        c.globalAlpha = 1 - k; c.strokeStyle = e.en ? '#ffb3b3' : '#fff0a8'; c.lineWidth = 1.3;
+        for (let j = 0; j < 3; j++) { const a = e.a + j * 2.1, l0 = 2 + 9 * k, l1 = l0 + 4; c.beginPath(); c.moveTo(s[0] + Math.cos(a) * l0, s[1] + Math.sin(a) * l0); c.lineTo(s[0] + Math.cos(a) * l1, s[1] + Math.sin(a) * l1); c.stroke(); }
+        break;
+      }
+      case 'arc': {
+        let a = toScreen(e.p0), b = toScreen(e.p1); if (!a || !b) break;
+        if (e.o0) a = [a[0] + e.o0[0], a[1] + e.o0[1]];
+        if (e.o1) b = [b[0] + e.o1[0], b[1] + e.o1[1]];
+        const d = Math.hypot(b[0] - a[0], b[1] - a[1]), m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2 - Math.max(18, d * e.h)];
+        const u = 0.6 * k + 0.4 * k * k; // speeds up on the way down
+        if (e.trail) {
+          const n = 9, u0 = Math.max(0, u - 0.35);
+          c.lineWidth = e.w * 0.9; c.strokeStyle = '#d9dde3';
+          let prev = qPt(a, m, b, u0);
+          for (let j = 1; j <= n; j++) { const q = qPt(a, m, b, u0 + (u - u0) * j / n); c.globalAlpha = 0.5 * j / n; c.beginPath(); c.moveTo(prev[0], prev[1]); c.lineTo(q[0], q[1]); c.stroke(); prev = q; }
+        }
+        const h = qPt(a, m, b, u);
+        c.globalAlpha = 0.35; c.fillStyle = e.col; circ(c, h, e.w * 2.2);
+        c.globalAlpha = 1; circ(c, h, e.w);
+        break;
+      }
+      case 'jet': {
+        let a = toScreen(e.p0), b = toScreen(e.p1); if (!a || !b) break;
+        a = [a[0] + e.o[0], a[1] + e.o[1]]; b = [b[0] + e.o[0] * 0.6, b[1] + e.o[1] * 0.6];
+        const d0 = Math.atan2(b[1] - a[1], b[0] - a[0]);
+        let p, dir;
+        if (k < 0.45) { const f = k / 0.45; p = [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]; dir = d0; }
+        else if (k < 0.55) {
+          const f = (k - 0.45) / 0.1, s2 = Math.sin(f * Math.PI) * 10;
+          dir = d0 + f * Math.PI; p = [b[0] + Math.cos(d0 + Math.PI / 2) * s2, b[1] + Math.sin(d0 + Math.PI / 2) * s2];
+          if (k >= 0.5 && e.drop && !e.dropped) { e.dropped = 1; e.drop(); }
+        } else { const f = (k - 0.55) / 0.45; p = [b[0] + (a[0] - b[0]) * f, b[1] + (a[1] - b[1]) * f]; dir = d0 + Math.PI; }
+        c.globalAlpha = k > 0.9 ? (1 - k) / 0.1 : 1;
+        c.save(); c.translate(p[0], p[1]); c.rotate(dir); c.scale(z, z);
+        c.fillStyle = e.en ? '#ffb0b0' : '#eef3f8'; c.strokeStyle = '#0b0f14'; c.lineWidth = 1;
+        c.beginPath(); c.moveTo(9, 0); c.lineTo(1, -2); c.lineTo(-2, -8); c.lineTo(-4, -8); c.lineTo(-3, -2); c.lineTo(-7, -2.5); c.lineTo(-8, -4.5); c.lineTo(-9, -4.5); c.lineTo(-8, 0);
+        c.lineTo(-9, 4.5); c.lineTo(-8, 4.5); c.lineTo(-7, 2.5); c.lineTo(-3, 2); c.lineTo(-4, 8); c.lineTo(-2, 8); c.lineTo(1, 2); c.closePath(); c.fill(); c.stroke();
+        c.restore();
+        break;
+      }
+      case 'nuke': {
+        const s = fxPos(e); if (!s) break; const Rr = 46 * z;
+        if (k < 0.1) { c.globalAlpha = 1 - k / 0.1; c.fillStyle = '#ffffff'; circ(c, s, Rr * (0.6 + k * 8)); }
+        if (k < 0.55) {
+          const f = 1 - k / 0.55;
+          c.globalAlpha = f * 0.8; c.strokeStyle = '#ffe1a8'; c.lineWidth = 3 * (1 - k) + 1; ring(c, s, Rr * (0.3 + 4.5 * k));
+          c.globalAlpha = f * 0.3; c.lineWidth = 8; ring(c, s, Rr * (0.2 + 4.2 * k));
+        }
+        const rise = Math.min(1, k / 0.3), fade = k > 0.65 ? 1 - (k - 0.65) / 0.35 : 1, top = [s[0], s[1] - Rr * 1.15 * rise];
+        c.globalAlpha = 0.9 * fade; c.fillStyle = '#7a5a48';
+        c.beginPath(); c.moveTo(s[0] - Rr * 0.12, s[1]); c.lineTo(top[0] - Rr * 0.08, top[1]); c.lineTo(top[0] + Rr * 0.08, top[1]); c.lineTo(s[0] + Rr * 0.12, s[1]); c.closePath(); c.fill();
+        c.fillStyle = '#8f7f76'; c.save(); c.translate(s[0], s[1]); c.scale(1, 0.35); circ(c, [0, 0], Rr * (0.35 + 0.4 * rise)); c.restore();
+        const cr = Rr * (0.22 + 0.3 * rise);
+        c.fillStyle = '#a3633b';
+        [[-1, 0.2], [1, 0.2], [0, -0.35], [-0.55, -0.15], [0.55, -0.15]].forEach(([dx, dy]) => circ(c, [top[0] + dx * cr * 0.95, top[1] + dy * cr], cr * 0.75));
+        c.fillStyle = k < 0.3 ? '#ffb347' : '#c9805a'; circ(c, [top[0], top[1] - cr * 0.1], cr * 0.6);
+        break;
+      }
+      case 'num': {
+        const s = fxPos(e); if (!s) break;
+        const fs = (e.big ? 20 : e.sm ? 11.5 : 14) * z;
+        c.globalAlpha = k < 0.7 ? 1 : 1 - (k - 0.7) / 0.3;
+        c.font = '800 ' + fs.toFixed(1) + 'px "Segoe UI",Arial,sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+        c.lineWidth = 3.5; c.strokeStyle = '#0b0f14'; const y = s[1] - 16 - 30 * k;
+        c.strokeText(e.txt, s[0], y); c.fillStyle = e.col; c.fillText(e.txt, s[0], y);
+        break;
+      }
+    }
+  }
+  c.globalAlpha = 1;
+  FXL = keep.concat(FXL);
+}
+// lasting burn marks where nuclear weapons hit (drawn on the map itself, so they scale with it)
+function drawScorch() {
+  if (!gScorch || !MAP_PROJ || !S) return;
+  scorchDirty = false;
+  gScorch.selectAll('*').remove();
+  (S.scorch || []).filter(x => x.d > S.day).forEach(x => {
+    const p = MAP_PROJ(x.p), q = MAP_PROJ([x.p[0] + 0.6, x.p[1]]); if (!p || !q) return;
+    const r = Math.max(1.5, Math.abs(q[0] - p[0]));
+    gScorch.append('circle').attr('cx', p[0]).attr('cy', p[1]).attr('r', r * 1.7).attr('fill', 'url(#scorchG)');
+    gScorch.append('circle').attr('cx', p[0]).attr('cy', p[1]).attr('r', r * 0.4).attr('fill', '#1a0d08').attr('opacity', 0.85);
+  });
+}
+/* ---- result card after a strike ---- */
+const plainT = t => String(t).replace(/[⁦⁩]/g, '');
+function cardHtml(r) {
+  const mine = r.by === S.player, C = r.cas;
+  const tl = r.k === 'nuke' ? (mine ? '☢ תוצאות התקיפה הגרעינית' : '☢ פיצוץ גרעיני') : mine ? 'תוצאות התקיפה' : r.at === S.player ? 'תקפו אותנו!' : 'תקיפה';
+  let h = '<div class="rc-h"><b>' + tl + '</b><button class="ic" data-act="rclose" aria-label="סגור">✕</button></div>';
+  h += '<div class="rc-s">' + esc(KIND_HE[r.k]) + (mine ? ' על ' + esc(nm(r.at)) : ' של ' + esc(nm(r.by)) + (r.at === S.player ? '' : ' על ' + esc(nm(r.at)))) +
+    (r.unit ? ' · ' + esc(r.unit) : '') + (mine && r.k !== 'nuke' && !r.war ? ' · בלי הכרזת מלחמה' : '') + ' · ' + dayHtml(r.d) + '</div>';
+  h += '<div class="rgrid"><div><small>חיילים הרוגים</small>' + num(C.sk) + '</div><div><small>חיילים פצועים</small>' + num(C.sw) + '</div>' +
+    '<div><small>אזרחים הרוגים</small><span class="' + (C.ck >= 1 ? 'bad' : '') + '">' + num(C.ck) + '</span></div><div><small>אזרחים פצועים</small>' + num(C.cw) + '</div></div>';
+  const eq = eqTxt(C.eq);
+  h += '<div class="rc-l"><b>' + (mine || r.at !== S.player ? 'הושמדו:' : 'נפגעו אצלנו:') + '</b> ' + (eq ? isoNums(plainT(eq)) : 'בסיסים ותשתיות, בלי ציוד משמעותי') + '</div>';
+  const o = r.own || {}, bits = [];
+  if (r.k === 'mis' && o.mu) bits.push((mine ? 'שוגרו ' : 'הם שיגרו ') + num(o.mu) + ' טילים');
+  if (r.k === 'air' && r.used) bits.push((mine ? 'יצאו לתקיפה ' : 'תקפו ') + num(r.used) + ' מטוסים');
+  if (o.eq && o.eq.air) bits.push(mine ? '<span class="bad">נפלו ' + num(o.eq.air) + ' מטוסים שלנו</span>' : 'יירטנו ' + num(o.eq.air) + ' מטוסים שלהם');
+  if (mine && o.sp) bits.push('עלות ' + money(o.sp));
+  if (C.dm >= 0.001) bits.push((r.at === S.player ? 'נזק כלכלי לנו ' : 'נזק כלכלי להם ') + money(C.dm));
+  if (bits.length) h += '<div class="rc-l">' + bits.join(' · ') + '</div>';
+  if (r.fx && r.fx.length) h += '<div class="chips">' + r.fx.map(t => chip(isoNums(esc(plainT(t))), /[−-]\d/.test(plainT(t)) ? 'bad' : 'ok')).join('') + '</div>';
+  if (r.retal) h += '<div class="warnbox">' + esc(nm(r.at)) + ' הגיבה והכריזה עלינו מלחמה!</div>';
+  if (r.sanc) h += '<div class="rc-l bad">' + esc(sancTxt(r.sanc)) + '</div>';
+  h += '<button class="lnk" data-act="stats">כל הסטטיסטיקות ←</button>';
+  return h;
+}
+function showCard(r) {
+  const el = $('#rcard'); if (!el || !S || !S.player) return;
+  el.innerHTML = cardHtml(r); el.className = 'on' + (r.at === S.player ? ' bad' : '');
+  document.body.classList.add('rc');
+  document.documentElement.style.setProperty('--rcH', el.offsetHeight + 'px');
+  clearTimeout(showCard.t); showCard.t = setTimeout(hideCard, r.k === 'nuke' ? 16000 : 11000);
+}
+function hideCard() { const el = $('#rcard'); if (el) el.className = ''; document.body.classList.remove('rc'); clearTimeout(showCard.t); }
+
 /* ================= UI ================= */
 let tab = null;
 function renderAll() {
@@ -2023,7 +2591,7 @@ function renderTop() {
   const bh = $('#tabhome'); if (bh) { const v = S.p.proj.length ? String(S.p.proj.length) : ''; if (bh.dataset.badge !== v) bh.dataset.badge = v; }
 }
 function openTab(t) {
-  tab = (tab === t && t !== 'country' && t !== 'unit' && t !== 'ulist') ? null : t;
+  tab = (tab === t && t !== 'country' && t !== 'unit' && t !== 'ulist' && t !== 'stats') ? null : t;
   if (tab !== 'unit' && selUnit) { selUnit = null; unitsDirty = true; }
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   $('#sheet').classList.toggle('open', !!tab);
@@ -2031,7 +2599,7 @@ function openTab(t) {
 }
 function renderSheet() {
   const el = $('#sheet-body'); if (!el) return;
-  const fn = { country: viewCountry, eco: viewEco, home: viewHome, mil: viewMil, wars: viewWars, news: viewNews, unit: viewUnit, ulist: viewUnitList }[tab];
+  const fn = { country: viewCountry, eco: viewEco, home: viewHome, mil: viewMil, wars: viewWars, news: viewNews, unit: viewUnit, ulist: viewUnitList, stats: viewStats }[tab];
   const h = fn ? fn() : '';
   if (el.__h !== h) { el.innerHTML = h; el.__h = h; }
 }
@@ -2371,7 +2939,7 @@ function warActions(w, compact, target) {
 }
 function viewWars() {
   const mine = warsOf(S.player);
-  let h = '<h2>המלחמות שלך</h2>';
+  let h = '<h2>המלחמות שלך</h2><div class="btns"><button class="b sm" data-act="stats">סטטיסטיקות ואבדות</button></div>';
   if (!mine.length) h += '<p class="hint">אתה לא במלחמה. כדי להכריז מלחמה או לתקוף — בחר מדינה במפה. שכנות קלות לתקוף; מדינות רחוקות יקרות וקשות.</p>';
   mine.forEach(w => {
     const en = enemyLeaderFor(w, S.player), side = w.A.includes(S.player) ? w.A : w.B, other = w.A.includes(S.player) ? w.B : w.A;
@@ -2379,14 +2947,95 @@ function viewWars() {
       '<p class="sub">מאז ' + (w.startDay != null && w.startDay >= 0 ? dayTxt(w.startDay) : dateTxt(w.start)) + ' · כוחנו: ' + num(power(P())) + ' · כוחם: ' + num(power(S.c[en])) +
       (other.length > 1 ? '<br>לצד האויב: ' + other.filter(x => x !== en).map(nm).join(', ') : '') +
       (side.length > 1 ? '<br>לצדנו: ' + side.filter(x => x !== S.player).map(nm).join(', ') : '') + '</p>' +
-      frontBars(w) + unitFront(w, en) + warActions(w) + '</div>';
+      frontBars(w) + warStatsHtml(w) + unitFront(w, en) + warActions(w) + '</div>';
   });
   const world = S.wars.filter(w => !involvesPlayer(w));
   if (world.length) {
     h += '<h3>מלחמות בעולם</h3>';
-    world.forEach(w => { h += '<div class="card"><b>' + esc(nm(w.a)) + '</b> נגד <b>' + esc(nm(w.b)) + '</b>' + (w.pause > 0 ? ' ' + chip('הפסקת אש', 'teal') : '') +
-      '<div class="sub">' + (w.f >= 0 ? nm(w.a) + ' מחזיקה ' + Math.round(w.f) + '% מ' + nm(w.b) : nm(w.b) + ' מחזיקה ' + Math.round(-w.f) + '% מ' + nm(w.a)) + '</div></div>'; });
+    world.forEach(w => { const st = warSt(w); h += '<div class="card"><b>' + esc(nm(w.a)) + '</b> נגד <b>' + esc(nm(w.b)) + '</b>' + (w.pause > 0 ? ' ' + chip('הפסקת אש', 'teal') : '') +
+      '<div class="sub">' + (w.f >= 0 ? esc(nm(w.a)) + ' מחזיקה ' + pct(w.f) + ' מ' + esc(nm(w.b)) : esc(nm(w.b)) + ' מחזיקה ' + pct(-w.f) + ' מ' + esc(nm(w.a))) +
+      '<br>הרוגים מאז תחילת המשחק: ' + num(killed(st.A) + killed(st.B)) + ' <small>(חיילים ' + num(st.A.sk + st.B.sk) + ' · אזרחים ' + num(st.A.ck + st.B.ck) + ')</small></div></div>'; });
   }
+  return h;
+}
+/* ---- statistics: war cards, charts and the stats screen ---- */
+const wstOpen = new Set();
+// small line chart (inline SVG, stretches to the card width)
+function lineChart(xs, series, lo, hi, zero) {
+  const Wc = 300, Hc = 80, pad = 6;
+  const X = x => (x - xs[0]) / Math.max(1, xs[xs.length - 1] - xs[0]) * Wc;
+  const Y = v => pad + (1 - (v - lo) / ((hi - lo) || 1)) * (Hc - pad * 2);
+  let h = '<svg class="chart" viewBox="0 0 ' + Wc + ' ' + Hc + '" preserveAspectRatio="none" aria-hidden="true">';
+  [0.25, 0.5, 0.75].forEach(f => { h += '<line x1="0" x2="' + Wc + '" y1="' + (pad + f * (Hc - pad * 2)).toFixed(1) + '" y2="' + (pad + f * (Hc - pad * 2)).toFixed(1) + '" class="gl"/>'; });
+  if (zero) h += '<line x1="0" x2="' + Wc + '" y1="' + Y(0).toFixed(1) + '" y2="' + Y(0).toFixed(1) + '" class="zl"/>';
+  series.forEach(s => {
+    const pts = s.v.map((v, i) => X(xs[i]).toFixed(1) + ',' + Y(v).toFixed(1)).join(' ');
+    if (s.area) h += '<polygon points="' + X(xs[0]).toFixed(1) + ',' + Y(0).toFixed(1) + ' ' + pts + ' ' + X(xs[xs.length - 1]).toFixed(1) + ',' + Y(0).toFixed(1) + '" fill="' + s.col + '" fill-opacity=".16"/>';
+    h += '<polyline points="' + pts + '" fill="none" stroke="' + s.col + '" stroke-width="2.2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>';
+  });
+  return h + '</svg>';
+}
+function warCharts(w) {
+  const st = warSt(w), meA = w.A.includes(S.player);
+  const hist = st.h.concat([[S.day, Math.round(w.f), Math.round(killed(st.A)), Math.round(killed(st.B))]]);
+  if (hist.length < 3 || hist[hist.length - 1][0] - hist[0][0] < 3) return '<p class="sub">הגרפים יופיעו אחרי כמה ימים של מלחמה.</p>';
+  const xs = hist.map(x => x[0]);
+  const fr = hist.map(x => meA ? x[1] : -x[1]), m = Math.max(10, ...fr.map(Math.abs));
+  const mine = hist.map(x => meA ? x[2] : x[3]), theirs = hist.map(x => meA ? x[3] : x[2]), top = Math.max(10, ...mine, ...theirs);
+  const ax = '<div class="ch-ax"><span>' + dayHtml(xs[0]) + '</span><span>היום</span></div>';
+  return '<div class="charts"><div class="chartbox"><div class="ch-t">שטח שנכבש <small>למעלה — בידינו, למטה — בידם</small></div>' + lineChart(xs, [{ v: fr, col: fr[fr.length - 1] >= 0 ? '#2fbf71' : '#e5383b', area: 1 }], -m, m, true) + ax + '</div>' +
+    '<div class="chartbox"><div class="ch-t">הרוגים מצטבר <small><i class="lg" style="background:#f5b301"></i>אצלנו <i class="lg" style="background:#ff6b6b"></i>אצלם</small></div>' + lineChart(xs, [{ v: mine, col: '#f5b301' }, { v: theirs, col: '#ff6b6b' }], 0, top * 1.08) + '<div class="ch-ax"><span>' + num(top) + ' מקסימום</span><span>היום</span></div></div></div>';
+}
+// table of losses for two sides
+function casTable(a, b, la, lb) {
+  const rowc = (l, x, y, cls) => '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + l + '</td><td>' + x + '</td><td>' + y + '</td></tr>';
+  let h = '<table class="tbl t3"><tr class="hd"><td></td><td>' + la + '</td><td>' + lb + '</td></tr>';
+  h += rowc('חיילים הרוגים', num(a.sk), num(b.sk)) + rowc('חיילים פצועים', num(a.sw), num(b.sw));
+  h += rowc('אזרחים הרוגים', num(a.ck), num(b.ck), 'civ') + rowc('אזרחים פצועים', num(a.cw), num(b.cw));
+  EQ_K.forEach(k => { if ((a.eq[k] || 0) >= 0.5 || (b.eq[k] || 0) >= 0.5) h += rowc(EQ_HE[k] + ' שהושמדו', cnt(a.eq[k] || 0), cnt(b.eq[k] || 0)); });
+  if (a.mu || b.mu) h += rowc('טילים ששוגרו', cnt(a.mu || 0), cnt(b.mu || 0));
+  if (a.sp || b.sp) h += rowc('כסף שהוצא', money(a.sp || 0, true), money(b.sp || 0, true));
+  if (a.dm || b.dm) h += rowc('נזק (ציוד וכלכלה)', money(a.dm || 0, true), money(b.dm || 0, true));
+  return h + '</table>';
+}
+function logList(lg, n) {
+  if (!lg || !lg.length) return '<p class="sub">עוד אין אירועים.</p>';
+  return '<ul class="news blog">' + lg.slice(0, n || 8).map(x => '<li><small>' + dayHtml(x.d) + '</small> ' + isoNums(esc(plainT(x.t))) + '</li>').join('') + '</ul>';
+}
+function warStatsHtml(w) {
+  const st = warSt(w), meA = w.A.includes(S.player), my = st[meA ? 'A' : 'B'], th = st[meA ? 'B' : 'A'], fp = mySideFront(w, S.player);
+  const days = S.day - (w.startDay != null ? w.startDay : 0);
+  let h = '<div class="wst"><div class="grid g3"><div><small>ימים במלחמה</small>' + num(days) + '</div><div><small>הרוגים אצלנו</small><span class="bad">' + num(killed(my)) + '</span></div><div><small>הרוגים אצלם</small>' + num(killed(th)) + '</div>' +
+    '<div><small>כבשנו משטחם</small>' + pct(Math.max(0, fp)) + '</div><div><small>הם כבשו משטחנו</small>' + pct(Math.max(0, -fp)) + '</div><div><small>ציוד שהשמדנו</small>' + num(EQ_K.reduce((s, k) => s + (th.eq[k] || 0), 0)) + '</div></div>';
+  h += warCharts(w);
+  const open = wstOpen.has(w.id);
+  h += '<button class="b sm" data-act="wst" data-w="' + w.id + '">' + (open ? 'הסתר פרטים' : 'טבלת אבדות ויומן קרבות') + '</button>';
+  if (open) h += casTable(my, th, 'אצלנו', 'אצלם') + '<p class="sub">פצועים: חיילים ≈ פי 2.5 מההרוגים, אזרחים ≈ פי 3. הספירה מתחילה ב-1 בינואר 2026.</p><h3>יומן קרבות</h3>' + logList(st.lg, 10);
+  return h + '</div>';
+}
+const RES_HE = { won: ['ניצחון', 'ok'], lost: ['הפסד', 'bad'], peace: ['שלום / תיקו', 'teal'], left: ['פרשנו', 'orange'] };
+function viewStats() {
+  const ps = PS(), done = ps.done, act = warsOf(S.player);
+  const cntR = r => done.filter(d => d.res === r).length;
+  const sp = ps.sp, spTot = sp.def + sp.war + sp.buy + sp.strike;
+  let h = '<h2>סטטיסטיקות <small>מאז ' + (S.p && S.p.startDay != null ? dayHtml(S.p.startDay) : 'תחילת המשחק') + '</small></h2>';
+  h += '<div class="grid g3"><div><small>מלחמות</small>' + num(done.length + act.length) + (act.length ? ' <small class="warn">(' + num(act.length) + ' פעילות)</small>' : '') + '</div>' +
+    '<div><small>ניצחונות</small><span class="ok">' + num(cntR('won')) + '</span></div><div><small>הפסדים</small><span class="' + (cntR('lost') ? 'bad' : '') + '">' + num(cntR('lost')) + '</span></div>' +
+    '<div><small>תקיפות שביצענו</small>' + num(ps.strikes) + '</div><div><small>תקיפות עלינו</small>' + num(ps.struck) + '</div><div><small>מדינות שסופחו</small>' + num(S.p.annexed.length) + '</div></div>';
+  h += '<h3>אבדות</h3>' + casTable(ps.cau, ps.suf, 'גרמנו לאויב', 'ספגנו');
+  h += '<p class="sub">"גרמנו" כולל את כל האבדות של הצד השני במלחמות שלנו. "ספגנו" — רק של ' + esc(P().he) + '.</p>';
+  h += '<h3>הוצאות צבאיות <small class="hint">' + money(spTot) + '</small></h3><table class="tbl">' + row('תקציב ביטחון ואחזקה', sp.def) + row('עלות המלחמות', sp.war) + row('רכש נשק, גיוס ושדרוגים', sp.buy) + row('תקיפות', sp.strike) + '<tr class="tot"><td>סה״כ</td><td>' + money(spTot) + '</td></tr></table>';
+  h += '<h3>תקיפות אחרונות</h3>';
+  h += ps.log.length ? '<div class="ulist">' + ps.log.slice(0, 8).map((r, i) => '<button data-act="rshow" data-i="' + i + '"><b>' + (r.at === S.player ? '<span class="bad">' + esc(nm(r.by)) + ' ← אנחנו</span>' : 'אנחנו ← ' + esc(nm(r.at))) + ' · ' + esc(KIND_HE[r.k]) + '</b><small>' + num(killed(r.cas)) + ' הרוגים · ' + dayHtml(r.d) + '</small></button>').join('') + '</div>' : '<p class="sub">עוד לא היו תקיפות.</p>';
+  if (done.length) {
+    h += '<h3>מלחמות שהסתיימו</h3>';
+    done.slice().reverse().slice(0, 10).forEach(d => { const [rl, rc] = RES_HE[d.res] || ['הסתיימה', '']; h += '<div class="card"><b>נגד ' + esc(nm(d.en)) + '</b> ' + chip(rl, rc) + '<div class="sub">' + num(Math.max(1, d.e - d.s)) + ' ימים · הרוגים: ' + num(killed(d.my)) + ' אצלנו, ' + num(killed(d.th)) + ' אצלם</div></div>'; });
+  }
+  // the world
+  const ws = S.wars.filter(w => w.pause === 0).map(w => ({ w, k: killed(warSt(w).A) + killed(warSt(w).B) })).sort((a, b) => b.k - a.k);
+  h += '<h3>העולם</h3><div class="box">הרוגים בכל המלחמות והתקיפות מאז תחילת המשחק: <b>' + num(killed(WST())) + '</b><br><small class="hint">חיילים ' + num(WST().sk) + ' · אזרחים ' + num(WST().ck) + ' · פצועים ' + num(WST().sw + WST().cw) + '</small></div>';
+  if (ws.length) h += '<div class="ulist">' + ws.map(({ w, k }) => { const st = warSt(w), my = involvesPlayer(w); return '<button data-act="gotowars"><b>' + (my ? '<span class="dot me"></span>' : '') + esc(nm(w.a)) + ' נגד ' + esc(nm(w.b)) + '</b><small>' + num(k) + ' הרוגים · אזרחים ' + num(st.A.ck + st.B.ck) + '</small></button>'; }).join('') + '</div>';
+  else h += '<p class="sub">אין מלחמות פעילות בעולם.</p>';
   return h;
 }
 function viewNews() {
@@ -2426,7 +3075,8 @@ function toast(txt, bad) {
 const fxBtn = (label, e) => label + (e && fxLine(e) ? '<small class="cost">' + fxLine(e) + '</small>' : '');
 // important events stop the clock and ask the player
 function processPending() {
-  if (!S.pending.length || S.over || modalOpen()) return;
+  // let a strike / explosion finish on screen before the next dialog covers the map
+  if (!S.pending.length || S.over || modalOpen() || performance.now() < fxHold) return;
   const p = S.pending.shift();
   const w = p.wid != null ? S.wars.find(x => x.id === p.wid) : null;
   const after = () => { save(); renderAll(); setTimeout(processPending, 40); };
@@ -2450,7 +3100,7 @@ function processPending() {
     return;
   }
   if (p.type === 'nukealert') {
-    modal({ title: '☢ פיצוץ גרעיני', cls: 'danger', html: '<p><b>' + esc(nm(p.att)) + '</b> שיגרה נשק גרעיני על <b>' + esc(nm(p.tgt)) + '</b>. מיליונים נפגעו והעולם בהלם.</p>' +
+    modal({ title: '☢ פיצוץ גרעיני', cls: 'danger', html: '<p><b>' + esc(nm(p.att)) + '</b> שיגרה נשק גרעיני על <b>' + esc(nm(p.tgt)) + '</b>. ' + (p.dead ? num(p.dead) + ' אזרחים נהרגו, ועוד רבים נפצעו.' : 'מיליונים נפגעו.') + ' העולם בהלם.</p>' +
       (p.tgt === S.player ? '<p class="warnbox">אנחנו המטרה! הכלכלה והצבא נפגעו קשות.</p>' : '<p class="sub">רוב העולם יטיל סנקציות על התוקפת. זה רגע טוב לחשוב על בריתות.</p>'), buttons: [{ label: 'המשך', cls: 'primary', fn: after }] });
     return;
   }
@@ -2505,14 +3155,14 @@ function applyPeace(w, kind, win, lose, share) {
     cede(win, lose, share);
     addNews(nm(lose) + ' ויתרה על ' + Math.round(share * 100) + '% משטחה ל' + nm(win) + '. נחתם הסכם שלום.', win === S.player ? 'good' : 'bad');
   } else if (kind === 'annex') {
-    endWar(w); annex(win, lose); return;
+    endWar(w, win === S.player ? 'won' : 'lost'); annex(win, lose); return;
   } else if (kind === 'cease') {
     w.pause = 183; if (pl) fxToast('הפסקת אש', { rep: 2 });
     addNews('הוסכם על הפסקת אש של חצי שנה עם ' + nm(enemyLeaderFor(w, S.player)) + '.', 'good'); return;
   } else addNews('נחתם הסכם שלום עם ' + nm(enemyLeaderFor(w, S.player)) + '. החיילים חוזרים הביתה.', 'good');
   // peace is good for the people and for the world's view of us
   if (pl) fxToast('הסכם שלום', { ap: 3, rep: kind === 'terr' && win === S.player ? 2 : 5 });
-  endWar(w);
+  endWar(w, kind === 'white' ? 'peace' : win === S.player ? 'won' : lose === S.player ? 'lost' : 'peace');
 }
 
 /* ================= player actions ================= */
@@ -2564,12 +3214,12 @@ const ACT = {
   missile: d => strike(d.o, 'mis'),
   nuke: d => confirmNuke(d.o),
   peace: d => peaceDialog(+d.w),
-  leave: d => { const w = S.wars.find(x => x.id === +d.w); if (!w) return; const lead = w.A.includes(S.player) ? w.a : w.b;
+  leave: d => { const w = S.wars.find(x => x.id === +d.w); if (!w) return; const lead = w.A.includes(S.player) ? w.a : w.b; archiveWar(w, 'left');
     w.A = w.A.filter(x => x !== S.player); w.B = w.B.filter(x => x !== S.player); fxToast('פרשנו מהמלחמה', { ap: 2, rep: -2, rel: { [lead]: -25 } }); addNews('פרשנו מהמלחמה מול ' + nm(enemyLeaderFor(w, lead)) + '.', 'dip'); needMapRecolor = true; renderAll(); },
   buymul: d => { buyMul = +d.v; renderSheet(); },
   buy: d => buyUnits(d.k),
   upg: d => { const k = d.k, c = P(); if ((c[k] || 0) >= 3 || S.p.queue.some(q => q.k === k)) return; const cost = upgCost(k); if (!spend(cost)) return;
-    const days = k === 'mlv' ? 548 : 365; S.p.queue.push({ k, n: 1, start: S.day, due: S.day + days });
+    PS().sp.buy += cost; const days = k === 'mlv' ? 548 : 365; S.p.queue.push({ k, n: 1, start: S.day, due: S.day + days });
     toast('השדרוג התחיל: ' + money(cost).replace(/<[^>]+>/g, '') + ' · מוכן בעוד ' + Math.round(days / DPM) + ' חודשים'); renderAll(); },
   mob: () => { const c = P(); if (c.res < 1 || cdLeft('mob')) return; const n = Math.min(c.res, Math.max(1, c.res * 0.5));
     setCd('mob', 30); S.p.queue.push({ k: 'mobarrive', n, start: S.day, due: S.day + 3 }); c.res -= n;
@@ -2599,7 +3249,13 @@ const ACT = {
   udefend: () => { const u = unitById(selUnit); if (!u) return; const p = defendPt(u); if (!p) { sendHome(u); return; } orderTo(u, p, 'def'); },
   usplit: () => splitUnit(unitById(selUnit)),
   umerge: () => mergeUnit(unitById(selUnit)),
-  mvcancel: () => { const id = uMode && uMode.uid; endMode(); if (id) selectUnit(id); }
+  mvcancel: () => { const id = uMode && uMode.uid; endMode(); if (id) selectUnit(id); },
+  /* statistics and animations */
+  stats: () => { hideCard(); openTabFresh('stats'); },
+  rclose: () => hideCard(),
+  rshow: d => { const r = PS().log[+d.i]; if (r) showCard(r); },
+  wst: d => { const id = +d.w; if (wstOpen.has(id)) wstOpen.delete(id); else wstOpen.add(id); renderSheet(); },
+  fxmode: d => { setFxMode(d.v); document.querySelectorAll('[data-act=fxmode]').forEach(b => b.classList.toggle('on', b.dataset.v === FXMODE)); toast({ full: 'אנימציות מלאות', low: 'אנימציות מופחתות', off: 'בלי אנימציות' }[FXMODE]); }
 };
 // where to stand to defend the homeland: the part of our land closest to the main enemy
 function defendPt(u) {
@@ -2668,6 +3324,7 @@ function buyUnits(k) {
   const B = BUY[k], c = P(); if (!B) return;
   const n = B.n * buyMul, cost = B.cost * buyMul;
   if (!spend(cost)) return;
+  PS().sp.buy += cost;
   S.p.queue.push({ k, n, start: S.day, due: S.day + B.days });
   const e = k === 'troops' ? { ap: -Math.min(3, buyMul) } : {};
   fxToast('הוזמן: ' + (k === 'troops' ? num(n * 1000).replace(/<[^>]+>/g, '') + ' חיילים' : n + ' ' + B.unit) + ' · יגיע בעוד ' + Math.round(B.days / DPM) + ' חודשים', e);
@@ -2727,31 +3384,39 @@ function strike(o, kind, uid) {
   const cost = strikeCost(kind);
   if (!spend(cost)) return;
   setCd(ck, kind === 'air' ? 14 : 20);
-  const before = {}; ['tanks', 'air', 'art', 'ships', 'troops'].forEach(k => before[k] = E.inv[k]);
-  let frac, lost = 0, used = 0;
+  const before = invSnap(E);
+  let frac, lost = 0, used = 0, civ = 0;
+  const dens = densF(o);
   if (kind === 'air') {
     used = su ? Math.min(sortie(), fl(su.m.air)) : sortie();
     frac = clamp(used * me.q / (E.inv.air * 0.5 + E.inv.tanks * 0.03 + 40) * 0.1, 0.004, 0.1) * (1 - 0.15 * E.adv);
     lost = Math.round(used * [0.003, 0.01, 0.025, 0.05][E.adv] * (0.5 + R()));
     me.inv.air = Math.max(0, me.inv.air - lost);
     if (su) su.m.air = Math.max(0, (su.m.air || 0) - lost);
-    hurtInv(E, frac, ['air', 'heli', 'tanks', 'art', 'msl']); hurtInv(E, frac * 0.4, ['ships', 'afv', 'troops']);
+    hurtInv(E, frac, ['air', 'heli', 'tanks', 'art', 'msl']); hurtInv(E, frac * 0.4, ['ships', 'afv']); hurtInv(E, frac * 0.15, ['troops']);
     E.gdp *= 1 - frac * 0.06;
+    // precision bombs on military targets: few civilians, more in crowded countries
+    civ = used * 0.25 * dens * (0.4 + R() * 0.8);
   } else {
     used = su ? Math.min(salvo(), fl(su.m.msl)) : salvo(); me.inv.msl = Math.max(0, me.inv.msl - used);
     if (su) su.m.msl = Math.max(0, (su.m.msl || 0) - used);
     const hits = used * (1 - [0, 0.25, 0.5, 0.75][E.adv]);
     frac = clamp(hits / (hits + 300) * 0.2, 0.002, 0.06);
-    hurtInv(E, frac, ['air', 'art', 'msl', 'ships']); hurtInv(E, frac * 0.5, ['tanks', 'troops']);
+    hurtInv(E, frac, ['air', 'art', 'msl', 'ships']); hurtInv(E, frac * 0.5, ['tanks']); hurtInv(E, frac * 0.2, ['troops']);
     E.gdp *= 1 - frac * 0.12;
+    // ballistic missiles are less precise: more civilians per hit
+    civ = hits * 0.7 * dens * (0.4 + R() * 0.8);
   }
-  const dmg = [];
-  if (before.air - E.inv.air >= 1) dmg.push(Math.round(before.air - E.inv.air) + ' מטוסים');
-  if (before.tanks - E.inv.tanks >= 1) dmg.push(Math.round(before.tanks - E.inv.tanks) + ' טנקים');
-  if (before.art - E.inv.art >= 1) dmg.push(Math.round(before.art - E.inv.art) + ' תותחים');
-  if (before.ships - E.inv.ships >= 1) dmg.push(Math.round(before.ships - E.inv.ships) + ' ספינות');
-  const dTxt = dmg.length ? 'הושמדו ' + dmg.slice(0, 3).join(', ') : 'נפגעו בסיסים ותשתיות';
+  const loss = lossFrom(E, before);
+  civCas(loss, Math.round(civ), 2.5 + R());
+  E.pop = Math.max(0.01, E.pop - loss.ck / 1e6);
+  const own = newCas(); own.sp = cost;
+  if (kind === 'air') { if (lost) { own.eq.air = lost; own.sk = Math.round(lost * 0.5); own.sw = Math.round(lost * 0.3); } } else own.mu = used;
+  // civilians we kill cost us in the world's eyes
+  const repCiv = -Math.min(8, Math.sqrt(loss.ck) / 8);
   const what = (kind === 'air' ? 'תקיפה אווירית' : 'מטח טילים') + (su ? ' (' + uName(su) + ')' : '');
+  const lp = launchPt(S.player, kind, o, su), tp_ = targetPt(o, lp);
+  let fx, sancN = 0, retal = false;
   if (w) {
     const eff = clamp(power(me) / (power(E) + power(me) + 1) * 2, 0.15, 1.5) * Math.sqrt(proj(S.player, o));
     const amt = kind === 'air' ? eff : 0.75;
@@ -2759,32 +3424,31 @@ function strike(o, kind, uid) {
     const ground = !(w.a === S.player || w.b === S.player) || forcesIn(S.player, o, E.adv).l > 0;
     if (ground) { if (w.A.includes(S.player)) w.f += amt; else w.f -= amt; w.f = clamp(w.f, -100, 100); }
     if (kind === 'mis') alive().forEach(id => { if (id !== S.player && id !== o && isAlly(id, o)) addRel(id, S.player, -3); });
-    addNews(what + ' ב' + E.he + ': ' + dTxt + (lost ? '. איבדנו ' + lost + ' מטוסים' : '') + '.', 'war');
-    toast(what + ' בוצעה: ' + dTxt + (lost ? ' · איבדנו ' + lost + ' מטוסים' : ''));
-    checkWarEnd(w);
+    fx = applyFx(repCiv <= -0.5 ? { rep: repCiv } : {});
   } else {
     // a stand-alone attack: the target, its friends and the world react
-    const e = { ap: preview.ap, rep: preview.rep, rel: preview.rel };
     alive().forEach(id => {
       if (id === S.player || id === o) return;
       if (isAlly(id, o)) addRel(id, S.player, kind === 'air' ? -15 : -12);
       else if (S.c[id].gov === 'democracy' && !justified(o)) addRel(id, S.player, -3);
     });
-    let sancN = 0;
     if (!justified(o)) alive().forEach(id => {
       const C = S.c[id]; if (id === S.player || id === o || C.gov !== 'democracy' || C.gdp < 50 || S.sanc[id + '>' + S.player]) return;
       if (rel(id, S.player) < -30 && R() < 0.3) { S.sanc[id + '>' + S.player] = 1; sancN++; }
     });
     S.p.lastStrike = { o, day: S.day };
-    addNews(what + ' שלנו ב' + E.he + ' (בלי הכרזת מלחמה): ' + dTxt + '.' + (sancN ? ' ' + sancTxt(sancN) + '.' : ''), 'war');
-    fxToast(what + ' ב' + E.he, e, true);
-    if (dmg.length || lost) toast(dTxt + (lost ? ' · איבדנו ' + lost + ' מטוסים' : ''));
-    if (sancN) toast(sancTxt(sancN), true);
-    if (R() < retaliateChance(o)) {
-      const nw = declareWar(o, S.player, { provoked: true, joinAtt: true, noRally: true });
-      if (nw) addNews(E.he + ' הגיבה לתקיפה והכריזה עלינו מלחמה!', 'war');
-    }
+    fx = applyFx({ ap: preview.ap, rep: preview.rep + repCiv, rel: preview.rel });
+    retal = R() < retaliateChance(o);
   }
+  const r = strikeRecord({ k: kind, by: S.player, at: o, cas: loss, own, fx, unit: su ? uName(su) : null, war: !!w, used, lost, sanc: sancN });
+  addNews(what + (w ? '' : ' (בלי הכרזת מלחמה)') + ' ב' + E.he + ': ' + nT(killed(loss)) + ' הרוגים' + (eqTxt(loss.eq, 3) ? ', הושמדו ' + eqTxt(loss.eq, 3) : '') + (lost ? '. איבדנו ' + lost + ' מטוסים' : '') + '.' + (sancN ? ' ' + sancTxt(sancN) + '.' : ''), 'war');
+  if (sancN) toast(sancTxt(sancN), true);
+  if (retal) {
+    const nw = declareWar(o, S.player, { provoked: true, joinAtt: true, noRally: true });
+    if (nw) { addNews(E.he + ' הגיבה לתקיפה והכריזה עלינו מלחמה!', 'war'); r.retal = true; }
+  }
+  if (w) checkWarEnd(w);
+  fxStrike(kind, lp, tp_, used, r);
   needMapRecolor = true;
   save(); renderAll();
 }
@@ -2803,8 +3467,8 @@ function confirmNuke(o) {
       if (!$('#nukeok') || !$('#nukeok').checked) { toast('סמן קודם שאתה מבין את ההשלכות', true); return; }
       modalQ.shift(); $('#modal').classList.remove('open');
       if (!S.c[o].alive || P().nukes <= 0) return;
-      P().nukes--; nukeImpact(S.player, o, false);
-      fxToast('☢ שיגור גרעיני', { rep: -50 }, true);
+      P().nukes--; const nr = nukeImpact(S.player, o, false);
+      nr.fx = applyFx({ rep: -50 });
       if (w && S.wars.includes(w)) { if (w.A.includes(S.player)) w.f += 35; else w.f -= 35; w.f = clamp(w.f, -100, 100); checkWarEnd(w); }
       else if (!w && S.c[o].alive && R() < 0.9) declareWar(o, S.player, { provoked: true, joinAtt: true, noRally: true });
       approvalQuick(); save(); renderAll();
@@ -2861,11 +3525,15 @@ function showHelp() {
     '<li><b>מלחמה:</b> כדי לכבוש שטח צריך להכניס כוחות יבשה (חי״ר ושריון) לתוך מדינת האויב. ארטילריה, מטוסים ומסוקים מחזקים אותם, וצי ליד החוף חוסם ומגן על הכוחות שחוצים את הים. בלי כוחות יבשה בפנים — אפשר רק לתקוף מהאוויר ובטילים. כבשת 100% — המדינה מסופחת. אבדות מורידות חיילים, טנקים ומטוסים מהיחידות שנלחמות.</li>' +
     '<li><b>האויב:</b> יחידות האויב בסמלים אדומים. הן מגינות, ולפעמים פולשות למדינה שלך — השאר כוח בבית! כשהמפה רחוקה, יחידות באותה מדינה מתאחדות לסמל אחד עם מספר; הקש עליו או הגדל את המפה כדי לראות כל יחידה. ⚔ = קרב בין מדינות אחרות.</li>' +
     '<li><b>שלום:</b> בלשונית מלחמות. ככל שאתה מנצח יותר, תוכל לדרוש יותר.</li>' +
+    '<li><b>אבדות וסטטיסטיקות:</b> אחרי כל תקיפה (שלך או עליך) קופץ כרטיס "תוצאות התקיפה": הרוגים ופצועים — חיילים ואזרחים — ציוד שהושמד, עלות, ומה זה עשה לעם ולעולם. בלשונית מלחמות יש לכל מלחמה גרפים ויומן קרבות, ובתפריט ☰ ← "סטטיסטיקות" — כל המספרים שלך ושל העולם.</li>' +
+    '<li><b>מחיר הדם:</b> חיילים שנהרגים מורידים את אהבת העם, ואזרחים שלנו שנהרגים — עוד יותר. אזרחים שאנחנו הורגים (בעיקר בטילים ובגרעין) פוגעים במוניטין בעולם.</li>' +
+    '<li><b>אנימציות:</b> טילים, מטוסים, פיצוצים וקרבות מופיעים על המפה. בתפריט ☰ אפשר להפחית או לכבות אותן.</li>' +
     '<li><b>מדינות קטנות קשות יותר.</b> המשחק נשמר אוטומטית כל כמה שניות.</li></ul>' });
 }
 function showMenu() {
-  modal({ title: 'תפריט', html: '<div class="btns col">' + btn('help', 'איך משחקים') + btn('centerme', 'מרכז את המפה על המדינה שלי') + btn('newgame', 'משחק חדש', 'danger') + '</div><p class="sub">המשחק נשמר אוטומטית כל כמה שניות.</p>',
-    buttons: [{ label: 'סגור' }], onShow: () => document.querySelectorAll('#m-body [data-act]').forEach(b => b.addEventListener('click', () => { modalQ.shift(); $('#modal').classList.remove('open'); setTimeout(showModal, 30); }, { once: true })) });
+  const fxSeg = '<h3 class="mh">אנימציות (פיצוצים וקרבות)</h3><div class="seg">' + [['full', 'מלאות'], ['low', 'מופחתות'], ['off', 'כבויות']].map(([v, l]) => '<button class="' + (FXMODE === v ? 'on' : '') + '" data-act="fxmode" data-v="' + v + '">' + l + '</button>').join('') + '</div>';
+  modal({ title: 'תפריט', html: '<div class="btns col">' + btn('help', 'איך משחקים') + btn('stats', 'סטטיסטיקות ואבדות') + btn('centerme', 'מרכז את המפה על המדינה שלי') + btn('newgame', 'משחק חדש', 'danger') + '</div>' + fxSeg + '<p class="sub">"מופחתות" — רק פיצוץ קצר במקום הפגיעה, בלי הבזקים ורעידות. המשחק נשמר אוטומטית כל כמה שניות.</p>',
+    buttons: [{ label: 'סגור' }], onShow: () => document.querySelectorAll('#m-body .btns [data-act]').forEach(b => b.addEventListener('click', () => { modalQ.shift(); $('#modal').classList.remove('open'); setTimeout(showModal, 30); }, { once: true })) });
 }
 
 /* ================= start screen ================= */
@@ -2920,13 +3588,13 @@ function setSpeed(v) {
 }
 let sliderT0 = null;
 let lastT = 0, acc = 0, lastUi = 0, lastSheet = 0, lastSave = 0, uiBusy = 0;
-const LIVE_TABS = { eco: 1, home: 1, mil: 1, wars: 1, country: 1, news: 1, unit: 1, ulist: 1 };
+const LIVE_TABS = { eco: 1, home: 1, mil: 1, wars: 1, country: 1, news: 1, unit: 1, ulist: 1, stats: 1 };
 function frame(t) {
   requestAnimationFrame(frame);
   const dt = lastT ? Math.min(0.25, (t - lastT) / 1000) : 0; lastT = t;
   if (!S || !S.player) return;
   let ticked = 0;
-  if (!S.over && S.speed > 0 && !modalOpen()) {
+  if (!S.over && S.speed > 0 && !modalOpen() && !S.pending.length) {
     acc += dt * S.speed;
     while (acc >= 1 && ticked < 8 && !S.over) {
       dayTick(); acc -= 1; ticked++;
@@ -2943,8 +3611,9 @@ function frame(t) {
   // the units layer is the only thing animated per frame (≈30 fps while units move)
   if (S.units && gIcons) {
     const moving = S.speed > 0 && !modalOpen() && S.units.some(u => u.dest || u.px !== u.lon || u.py !== u.lat);
-    if (unitsDirty || (ticked && t - lastUnitsDraw > 100) || (moving && t - lastUnitsDraw > 33)) drawUnits();
+    if (unitsDirty || (ticked && t - lastUnitsDraw > 100) || (moving && t - lastUnitsDraw > 33) || (hitUntil > t - 150 && t - lastUnitsDraw > 60)) drawUnits();
   }
+  fxFrame(t, dt);
   if (t - lastSave > 5000) { lastSave = t; save(); }
 }
 
@@ -3002,7 +3671,7 @@ function boot() {
     d3.select('#mapsvg').remove(); for (const k in pathByTid) delete pathByTid[k]; curK = 1; initMap(); drawMarks.k = null; recolor();
   }, 300); });
   requestAnimationFrame(frame);
-  window.__W26 = { get S() { return S; }, dayTick, runDays: n => { for (let i = 0; i < n && !S.over; i++) dayTick(); renderAll(); }, declareWar, annex, power, rel, ACT, setSpeed, strike,
+  window.__W26 = { get S() { return S; }, dayTick, FX: { enemyStrike, nukeImpact, showCard, hideCard, setFxMode, get n() { return FXL.length; }, get mode() { return FXMODE; }, PS, WST, warSt }, runDays: n => { for (let i = 0; i < n && !S.over; i++) dayTick(); renderAll(); }, declareWar, annex, power, rel, ACT, setSpeed, strike,
     selectTid: t => { selected = t; recolor(); openTab('country'); }, zoomToTid, processPending, wipe,
     U: { unitById, unitsOf, planMove, orderTo, commitMove, selectUnit, setMode, modeTap, syncAllUnits, buildItems, uStr, distToC, nearIn, tidAt, ownerAt, isSeaAt, snapSea, toScreen, drawUnits, zoomToMapPt, tp, mapProj: p => MAP_PROJ(p),
       get curK() { return curK; }, get uMode() { return uMode; }, get selUnit() { return selUnit; } } };

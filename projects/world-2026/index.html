@@ -190,7 +190,48 @@ ul.help li{margin:6px 0}
 .btns.buy .b{flex:1 1 150px}
 #m-foot{flex-wrap:wrap}#m-foot .b{flex:1 1 120px}
 
+/* animations layer, strike result card, statistics */
+#fxcv{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+#map.shake{animation:mshake .7s ease-out}
+@keyframes mshake{0%,100%{transform:none}15%{transform:translate(-6px,3px)}30%{transform:translate(5px,-4px)}45%{transform:translate(-4px,-2px)}60%{transform:translate(3px,3px)}80%{transform:translate(-1px,1px)}}
+#flash{position:fixed;inset:0;z-index:45;pointer-events:none;opacity:0;background:radial-gradient(circle at 50% 45%,#fffbe8 0,#ffe7a6 35%,#ffb45e88 70%,#ff8a2a00 100%)}
+#flash.on{animation:nflash 1.6s ease-out}
+@keyframes nflash{0%{opacity:0}6%{opacity:.95}100%{opacity:0}}
+.units .ui.hit{animation:uhit .45s ease-out}
+.units .ui.hit .bg{fill:#7a1418;fill-opacity:1}
+@keyframes uhit{0%,100%{translate:0 0}20%{translate:-3px 0}40%{translate:3px 1px}60%{translate:-2px -1px}80%{translate:2px 0}}
+#rcard{position:fixed;left:8px;right:8px;top:calc(var(--topH) + 6px + env(safe-area-inset-top));z-index:50;display:none;max-height:min(52vh,430px);overflow-y:auto;background:#121a24f7;border:1px solid #3b5577;border-radius:14px;padding:6px 10px 8px;box-shadow:0 10px 28px #000b;font-size:13.5px;line-height:1.5}
+#rcard.on{display:block;animation:rcin .25s ease-out}
+#rcard.bad{border-color:#a3323b;background:#22121af7}
+@keyframes rcin{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}
+.rc-h{display:flex;align-items:center;gap:8px}.rc-h b{flex:1;font-size:16px;color:var(--gold)}#rcard.bad .rc-h b{color:#ff8a8a}
+.rc-h .ic{height:30px;min-width:30px}
+.rc-s{color:var(--mut);font-size:12.5px;margin:1px 0 6px}
+.rgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin:4px 0}
+.rgrid>div{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:3px 5px;font-weight:700;font-size:14px;min-width:0}
+.rgrid small{display:block;color:var(--mut);font-weight:400;font-size:10.5px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rc-l{margin:4px 0}
+#rcard .chips{margin:4px 0 2px}#rcard .warnbox{margin:6px 0;padding:6px 8px}
+.lnk{background:none;border:0;color:#8fb8ff;font-weight:700;padding:6px 0 0;cursor:pointer;font-size:13px}
+body.rc #toasts{top:calc(var(--topH) + 14px + var(--rcH,0px) + env(safe-area-inset-top))}
+.b.sm{min-height:36px;padding:6px 10px;font-size:13px;flex:0 1 auto;margin:6px 0 2px}
+.wst{margin:6px 0}
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0}
+.chartbox{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px 6px 3px;min-width:0}
+.ch-t{font-size:12px;font-weight:700;line-height:1.3}.ch-t small{display:block;color:var(--mut);font-weight:400;font-size:10.5px}
+.ch-t i.lg{display:inline-block;width:9px;height:3px;border-radius:2px;vertical-align:middle;margin-inline-start:2px}
+svg.chart{display:block;width:100%;height:64px;margin-top:2px}
+svg.chart .gl{stroke:#263241;stroke-width:1;vector-effect:non-scaling-stroke}
+svg.chart .zl{stroke:#6b7a8c;stroke-width:1;stroke-dasharray:3 3;vector-effect:non-scaling-stroke}
+.ch-ax{display:flex;justify-content:space-between;font-size:10px;color:var(--mut)}
+.tbl.t3 td{text-align:center}.tbl.t3 td:first-child{text-align:start}.tbl.t3 td:last-child{text-align:center}
+.tbl.t3 tr.hd td{font-weight:700;color:var(--mut);font-size:12.5px}.tbl.t3 tr.civ td{color:#ffb3b3}
+ul.blog li{font-size:13px;padding:5px 8px}ul.blog li small{color:var(--mut);margin-inline-end:4px}
+h3.mh{margin:14px 0 4px;font-size:15px}
+@media (prefers-reduced-motion:reduce){#rcard.on{animation:none}}
+
 @media (min-width:900px){
+  #rcard{left:12px;right:auto;width:400px}
   #sheet{left:auto;right:12px;top:calc(var(--topH) + 10px);bottom:calc(var(--barH) + 10px);width:410px;max-height:none;border-radius:14px;border:1px solid var(--line);transform:translateX(120%)}
   #sheet.open{transform:none}
   #bar{left:50%;right:auto;transform:translateX(-50%);width:760px;bottom:10px;border:1px solid var(--line);border-radius:14px}
@@ -277,6 +318,7 @@ ul.help li{margin:6px 0}
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
   <defs>
+    <radialGradient id="scorchG"><stop offset="0" stop-color="#2a1208" stop-opacity=".95"/><stop offset=".45" stop-color="#5a2a10" stop-opacity=".7"/><stop offset=".8" stop-color="#ff7a1a" stop-opacity=".25"/><stop offset="1" stop-color="#ff7a1a" stop-opacity="0"/></radialGradient>
     <symbol id="ui-inf" viewBox="0 0 24 24" fill="currentColor"><path d="M7 9.2a5 5 0 0 1 10 0z"/><rect x="5.4" y="8.6" width="13.2" height="1.7" rx=".8"/><circle cx="12" cy="12.4" r="2.5"/><path d="M5.5 21.5c0-4.1 2.8-6.6 6.5-6.6s6.5 2.5 6.5 6.6z"/><path d="M18.6 6.5l1.5-.4 2.2 12.6-1.5.4z"/></symbol>
     <symbol id="ui-arm" viewBox="0 0 24 24" fill="currentColor"><rect x="1.5" y="14" width="21" height="6.5" rx="3.2"/><path d="M3.5 14l2.2-3.2h12.6l2.2 3.2z"/><path d="M7.5 10.8V8.2h7.8l1.6 2.6z"/><rect x="15" y="8.3" width="8" height="1.5" rx=".7"/><g fill="#0b0f14"><circle cx="5.5" cy="17.2" r="1.4"/><circle cx="9.8" cy="17.2" r="1.4"/><circle cx="14.2" cy="17.2" r="1.4"/><circle cx="18.5" cy="17.2" r="1.4"/></g></symbol>
     <symbol id="ui-art" viewBox="0 0 24 24" fill="currentColor"><path d="M8.2 14.6L20.6 4.2l1.3 1.6L9.6 16.4z"/><circle cx="9" cy="17" r="4.4"/><circle cx="9" cy="17" r="1.6" fill="#0b0f14"/><path d="M8 18.5L2.5 21.8l-.8-1.4 5.6-3.3z"/></symbol>
@@ -291,6 +333,8 @@ ul.help li{margin:6px 0}
 
 <div id="modal" class="modal"><div class="mbox"><h2 id="m-title"></h2><div id="m-body"></div><div id="m-foot"></div></div></div>
 <div id="toasts" aria-live="polite"></div>
+<div id="rcard" role="status" aria-live="polite"></div>
+<div id="flash"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
