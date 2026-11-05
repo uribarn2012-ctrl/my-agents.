@@ -357,6 +357,7 @@ body.desk #mvbar{left:12px;right:calc(var(--pw) + 24px);max-width:720px;margin:0
 body.desk #rcard{left:12px;width:420px}
 body.desk #start{top:90px}
 body.desk #tut-b{max-width:440px}
+@media (max-width: 600px) { [data-act="speed"][data-v="2"], [data-act="speed"][data-v="16"] { display: none; } }
 </style>
 </head>
 <body>
@@ -368,7 +369,7 @@ body.desk #tut-b{max-width:440px}
       <button class="ic" data-act="menu" aria-label="תפריט">☰</button>
       <div class="who"><b id="t-name"></b><span id="t-date"></span></div>
       <div id="speed" role="group" aria-label="מהירות הזמן">
-        <button data-act="speed" data-v="0" aria-label="עצור">⏸</button><button data-act="speed" data-v="1">×1</button><button data-act="speed" data-v="2">×2</button><button data-act="speed" data-v="4">×4</button><button data-act="speed" data-v="8">×8</button>
+        <button data-act="speed" data-v="0" aria-label="עצור">⏸</button><button data-act="speed" data-v="1">×1</button><button data-act="speed" data-v="2">×2</button><button data-act="speed" data-v="4">×4</button><button data-act="speed" data-v="8">×8</button><button data-act="speed" data-v="16">×16</button><button data-act="speed" data-v="32">×32</button>
       </div>
       <button class="ic urg" id="urgbtn" data-act="urgent" aria-label="מה דחוף">!</button>
       <button class="ic" data-act="help" aria-label="איך משחקים">?</button>
