@@ -3896,10 +3896,23 @@ function showKeys() {
 // letter keys by physical key (ev.code), so they work with a Hebrew keyboard layout too
 const KEY_TABS = { KeyC: 'country', KeyB: 'eco', KeyH: 'home', KeyG: 'gov', KeyM: 'mil', KeyR: 'wars', KeyN: 'news', KeyT: 'world', KeyI: 'urgent', KeyL: 'ulist', KeyY: 'stats' };
 const PAN = { KeyW: [0, 1], ArrowUp: [0, 1], KeyS: [0, -1], ArrowDown: [0, -1], KeyA: [1, 0], ArrowLeft: [1, 0], KeyD: [-1, 0], ArrowRight: [-1, 0] };
+// smooth keyboard panning: held keys move the map every frame, with a short ease-in
+const panKeys = new Set(); let panRaf = 0, panT = 0, panFast = false, panV = 0;
+function panStep(t) {
+  if (!panKeys.size || !svg) { panRaf = 0; panV = 0; if (svg) { zooming = false; drawCities(); } return; }
+  const dt = panT ? Math.min(0.05, (t - panT) / 1000) : 1 / 60; panT = t;
+  panV = Math.min(1, panV + dt * 6);   // reaches full speed in ~0.17s
+  let dx = 0, dy = 0; panKeys.forEach(c => { dx += PAN[c][0]; dy += PAN[c][1]; });
+  const n = Math.hypot(dx, dy) || 1, sp = (panFast ? 1500 : 650) * panV * dt / curK;
+  svg.call(zoom.translateBy, dx / n * sp, dy / n * sp);
+  panRaf = requestAnimationFrame(panStep);
+}
+document.addEventListener('keyup', ev => { panKeys.delete(ev.code); panFast = ev.shiftKey; });
+window.addEventListener('blur', () => panKeys.clear());
 function myUnits() { return (S.units || []).filter(u => u.o === S.player); }
 function deskKey(ev) {
   const c = ev.code;
-  if (PAN[c]) { ev.preventDefault(); const st = (ev.shiftKey ? 260 : 110) / curK; svg.call(zoom.translateBy, PAN[c][0] * st, PAN[c][1] * st); return true; }
+  if (PAN[c]) { ev.preventDefault(); panKeys.add(c); panFast = ev.shiftKey; if (!panRaf) { panT = 0; panRaf = requestAnimationFrame(panStep); } return true; }
   if (c === 'KeyE') { zoomBy(1.5); return true; }
   if (c === 'KeyQ') { zoomBy(1 / 1.5); return true; }
   if (c === 'KeyP') { setSpeed(S.speed ? 0 : (S.lastSpeed || 1)); return true; }
@@ -3998,7 +4011,7 @@ function initMap() {
   zoom = d3.zoom().scaleExtent([0.8, 60]).translateExtent([[-W, -H], [W * 2, H * 2]])
     .on('start', () => { zooming = true; hideTip(); })
     .on('zoom', ev => { gRoot.attr('transform', ev.transform); curT = ev.transform; if (Math.abs(ev.transform.k - curK) > 0.01) { curK = ev.transform.k; scaleMarks(); if (fanIds && Math.abs(curK / fanK - 1) > 0.25) fanIds = null; } drawUnits(); cityFollow(); })
-    .on('end', () => { zooming = false; if (!cityT0 || cityT0.x !== curT.x || cityT0.y !== curT.y || cityT0.k !== curT.k) drawCities(); });
+    .on('end', () => { if (panRaf) return; zooming = false; if (!cityT0 || cityT0.x !== curT.x || cityT0.y !== curT.y || cityT0.k !== curT.k) drawCities(); });
   svg.call(zoom).on('dblclick.zoom', null);
   MAP_PROJ = projection;
   deskMapHooks();
