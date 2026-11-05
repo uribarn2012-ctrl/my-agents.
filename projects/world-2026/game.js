@@ -2739,6 +2739,139 @@ function deliveries() {
     fxToast('הושלם: ' + D.he, e);
     return false;
   });
+  peaceDaily();
+}
+
+/* ================= peaceful play: diplomacy and development without war ================= */
+// country actions (on another country, at peace). cost = share of OUR GDP
+const PZ = {
+  visit:  { he: 'ביקור מדיני', d: 'נשיא/ראש הממשלה טס לביקור רשמי. משפר יחסים.', c: 0.0004, cd: 60, rel: 10, rep: 1, ap: 1 },
+  culture:{ he: 'חילופי תרבות וסטודנטים', d: 'סטודנטים, אמנים וספורטאים עוברים בין המדינות.', c: 0.0008, cd: 120, rel: 7, rep: 2 },
+  visa:   { he: 'ביטול אשרות כניסה', d: 'תיירים ואנשי עסקים נכנסים בלי ויזה. פעם אחת לכל מדינה.', c: 0, once: 1, rel: 6, ap: 1, g: 0.0004 },
+  invest: { he: 'השקעה בכלכלה שלהם', d: 'חברות שלנו בונות שם מפעלים. הכלכלה של שניכם גדלה.', c: 0.003, cd: 180, rel: 12, rep: 1, g: 0.0006, their: 0.004 },
+  loan:   { he: 'הלוואה בריבית', d: 'מלווים להם כסף. אחרי שנה מקבלים בחזרה עם 8% ריבית.', c: 0.004, cd: 365, rel: 10, rep: 1 },
+  arms:   { he: 'מכירת נשק', d: 'מוכרים להם ציוד צבאי. כסף ליחסים — אבל העולם פחות אוהב סוחרי נשק.', c: -0.002, cd: 180, rel: 9, rep: -2, needDef: 1 },
+  drill:  { he: 'תרגיל צבאי משותף', d: 'הצבאות מתאמנים יחד. מקרב — ומרגיז את היריבים שלהם.', c: 0.0005, cd: 180, rel: 9 },
+  mediate:{ he: 'תיווך שלום', d: 'מנסים לסיים את המלחמה שלהם. הצלחה = כבוד עולמי גדול.', c: 0.0005, cd: 90, needWar: 1 },
+};
+// national initiatives (Home tab). share of GDP, days until done, effects when done
+const INI = {
+  research: { he: 'מחקר ופיתוח', d: 'מעבדות, אוניברסיטאות והייטק. אפשר לבנות עד 5 שלבים.', c: 0.005, days: 270, max: 5, g: 0.003, ap: 1, rep: 1 },
+  space:    { he: 'תוכנית חלל', d: 'לוויינים, ואולי אדם על הירח. גאווה לאומית וכבוד בעולם.', c: 0.01, days: 540, max: 2, g: 0.002, ap: 4, rep: 6 },
+  olymp:    { he: 'מועמדות לאולימפיאדה', d: 'אם נבחר — חגיגה לאומית ותיירות. הסיכוי עולה עם המוניטין.', c: 0.012, days: 720, max: 1, bid: 1 },
+  peacek:   { he: 'כוחות שלום של האו״ם', d: 'שולחים חיילים לשמור על שקט באזורי סכסוך.', c: 0.002, days: 180, max: 9, rep: 6, ap: 1 },
+  climate:  { he: 'ברית אקלים', d: 'מחויבות לאנרגיה נקייה. העולם מעריך, התעשייה פחות.', c: 0.004, days: 365, max: 1, rep: 6, ap: 1, g: -0.001 },
+  tourism:  { he: 'קמפיין תיירות', d: 'פרסום בעולם. עובד טוב יותר כשהמוניטין גבוה.', c: 0.002, days: 180, max: 4, g: 0.002, tour: 1 },
+  soft:     { he: 'מעצמה רכה', d: 'סדרות, מוזיקה, ספורט ואוכל שלנו כובשים את העולם.', c: 0.003, days: 365, max: 3, rep: 5, relAll: 3, ap: 1 },
+  fund:     { he: 'קרן עושר לאומית', d: 'משקיעים בעולם ומקבלים רווחים כל שנה.', c: 0.02, days: 365, max: 2, g: 0.0035 },
+  summit:   { he: 'אירוח פסגה עולמית', d: 'מנהיגי העולם מגיעים אלינו. יחסים טובים עם המעצמות.', c: 0.003, days: 90, max: 9, rep: 7, relTop: 5 },
+  develop:  { he: 'סיוע לעולם המתפתח', d: 'בתי ספר, מים וחשמל במדינות עניות. כל אפריקה זוכרת.', c: 0.005, days: 120, max: 9, rep: 6, relAU: 7 },
+  reconcile:{ he: 'יוזמת פיוס עם יריבים', d: 'מושיטים יד לכל מי שכועס עלינו. חלק מהעם יגיד שזו חולשה.', c: 0.001, days: 30, max: 9, rep: 4, ap: -1, relBad: 10 },
+};
+const pzCost = k => Math.max(0, PZ[k].c) * P().gdp;
+const iniCost = k => INI[k].c * P().gdp;
+function pzFx(k, o) {
+  const D = PZ[k], e = { cost: pzCost(k) || 0, rel: { [o]: D.rel || 0 } };
+  if (D.rep) e.rep = D.rep; if (D.ap) e.ap = D.ap;
+  if (k === 'arms') e.note = 'רווח ' + money(-D.c * P().gdp);
+  if (k === 'loan') e.note = 'החזר ' + money(pzCost(k) * 1.08) + ' בעוד שנה';
+  if (k === 'mediate') e.note = 'סיכוי ' + pct(mediateChance(o) * 100);
+  if (D.g) e.note = (e.note ? e.note + ' · ' : '') + 'צמיחה ' + isoNums('+' + (D.g * 100).toFixed(2) + '%');
+  return e;
+}
+function aiWarOf(o) { return S.wars.find(w => inWar(w, o) && !inWar(w, S.player)); }
+function mediateChance(o) { const w = aiWarOf(o); if (!w) return 0; return clamp(0.15 + S.p.rep / 250 + (rel(o, S.player) + 100) / 600 + Math.min(0.2, (S.day - (w.start || S.day)) / 3000), 0.05, 0.85); }
+function peaceButtons(o) {
+  const p = S.p; p.visa = p.visa || {};
+  let h = '<h3>שלום ושיתוף פעולה</h3><div class="btns">';
+  for (const k in PZ) {
+    const D = PZ[k];
+    if (D.needWar && !aiWarOf(o)) continue;
+    if (D.needDef && (P().def || 0) < 1) continue;
+    if (D.once && p.visa[o]) continue;
+    const cd = cdLeft('pz' + k + ':' + o);
+    h += cd ? '<button class="b" disabled>' + D.he + cdNote(cd) + '</button>' : fbtn('pz', D.he, pzFx(k, o), 'good', false, ' data-k="' + k + '" title="' + esc(D.d) + '"');
+  }
+  return h + '</div>';
+}
+function doPz(k) {
+  const o = selOwner(), C = S.c[o], D = PZ[k]; if (!C || !D || atWar(o, S.player) || cdLeft('pz' + k + ':' + o)) return;
+  const cost = pzCost(k); if (cost && !spend(cost)) return;
+  if (D.cd) setCd('pz' + k + ':' + o, D.cd);
+  const e = { rel: { [o]: D.rel || 0 } }; if (D.rep) e.rep = D.rep; if (D.ap) e.ap = D.ap;
+  if (D.g) S.p.growthBonus = (S.p.growthBonus || 0) + D.g;
+  if (k === 'visa') S.p.visa[o] = 1;
+  if (k === 'invest') C.gdp *= 1 + D.their;
+  if (k === 'loan') (S.p.loans = S.p.loans || []).push({ o, amt: cost * 1.08, due: S.day + 365 });
+  if (k === 'arms') { S.p.treasury += -D.c * P().gdp; addInv(C, 0.03); }
+  if (k === 'drill') alive().forEach(id => { if (id !== o && id !== S.player && rel(id, o) < -40) addRel(id, S.player, -3); });
+  if (k === 'mediate') {
+    const w = aiWarOf(o);
+    if (w && R() < mediateChance(o)) {
+      const a = w.A[0], b = w.B[0];
+      addNews('בתיווך ' + P().he + ' נחתם הסכם שלום בין ' + nm(a) + ' ל' + nm(b) + '!', 'good');
+      applyPeace(w, 'white', a, b);
+      fxToast('התיווך הצליח! השלום נחתם', { rep: 10, ap: 3, rel: { [a]: 12, [b]: 12 } });
+    } else fxToast('התיווך נכשל — הצדדים עוד לא מוכנים', { rep: 1, rel: { [o]: 2 } });
+    renderAll(); return;
+  }
+  fxToast(D.he + ' עם ' + C.he, e);
+  addNews(D.he + ' עם ' + C.he + '.', 'dip');
+  renderAll();
+}
+function addInv(c, f) { if (!c.inv) return; ['troops', 'tanks', 'afv', 'art', 'air', 'heli'].forEach(k => { if (c.inv[k]) c.inv[k] *= 1 + f; }); }
+function iniSection() {
+  const p = S.p; p.ini = p.ini || []; p.iniL = p.iniL || {};
+  let h = '<h3>יוזמות שלום ופיתוח</h3><p class="sub">דרכים להתחזק בלי מלחמה: כלכלה, מדע, תרבות ודיפלומטיה.</p>';
+  for (const k in INI) {
+    const D = INI[k], lvl = p.iniL[k] || 0, run = p.ini.find(q => q.k === k);
+    h += '<div class="card"><b>' + D.he + '</b>' + (lvl ? ' ' + chip('×' + lvl, 'teal') : '') + '<div class="sub">' + esc(D.d) + '</div>';
+    if (run) { const done = clamp((S.day - run.start) / (run.due - run.start), 0, 1); h += '<div class="fl"><div class="prog g"><div style="width:' + (done * 100).toFixed(1) + '%"></div></div> <small>עוד ' + daysTxt(run.due - S.day) + '</small></div>'; }
+    else if (lvl >= D.max) h += '<div class="sub ok">הושלם</div>';
+    else {
+      const note = [D.g ? 'צמיחה ' + isoNums((D.g > 0 ? '+' : '') + (D.g * 100).toFixed(2) + '%') : '', D.bid ? 'סיכוי ' + pct(olympChance() * 100) : '', D.relAll ? 'כל המדינות ' + sgn(D.relAll) : '', D.relTop ? 'המעצמות ' + sgn(D.relTop) : '', D.relAU ? 'אפריקה ' + sgn(D.relAU) : '', D.relBad ? 'יריבים ' + sgn(D.relBad) : ''].filter(Boolean).join(' · ');
+      h += '<div class="btns">' + fbtn('ini', 'התחל · ' + daysTxt(D.days), { cost: iniCost(k), ap: D.ap, rep: D.rep, note }, 'good', false, ' data-k="' + k + '"') + '</div>';
+    }
+    h += '</div>';
+  }
+  return h;
+}
+const olympChance = () => clamp(0.1 + S.p.rep / 130 + P().gdp / 30000, 0.05, 0.8);
+function startIni(k) {
+  const D = INI[k], p = S.p; p.ini = p.ini || []; p.iniL = p.iniL || {};
+  if (!D || p.ini.some(q => q.k === k) || (p.iniL[k] || 0) >= D.max) return;
+  if (!spend(iniCost(k))) return;
+  p.ini.push({ k, start: S.day, due: S.day + D.days });
+  toast('היוזמה "' + D.he + '" התחילה · תסתיים בעוד ' + daysTxt(D.days));
+  addNews('הממשלה השיקה יוזמה: ' + D.he + '.', 'good'); renderAll();
+}
+function peaceDaily() {
+  const p = S.p; if (!p) return;
+  if (p.loans && p.loans.length) p.loans = p.loans.filter(l => {
+    if (S.day < l.due) return true;
+    if (S.c[l.o] && S.c[l.o].alive) { p.treasury += l.amt; fxToast(nm(l.o) + ' החזירה את ההלוואה: ' + money(l.amt), { rel: { [l.o]: 3 } }); }
+    else addNews('ההלוואה ל' + nm(l.o) + ' אבדה — המדינה כבר לא קיימת.', 'bad');
+    return false;
+  });
+  if (p.ini && p.ini.length) p.ini = p.ini.filter(q => {
+    if (S.day < q.due) return true;
+    const D = INI[q.k]; p.iniL = p.iniL || {}; p.iniL[q.k] = (p.iniL[q.k] || 0) + 1;
+    const e = {}; if (D.ap) e.ap = D.ap; if (D.rep) e.rep = D.rep;
+    let g = D.g || 0; if (D.tour && p.rep < 40) g /= 2;
+    if (D.bid) {
+      if (R() < olympChance()) { e.ap = 8; e.rep = 8; g = 0.004; addNews('ניצחנו! האולימפיאדה תתקיים אצלנו. חגיגות ברחובות.', 'good'); }
+      else { e.ap = -2; p.treasury += iniCost(q.k) * 0.4; p.iniL[q.k] = 0; addNews('המועמדות לאולימפיאדה הפסידה. חלק מהכסף חזר.', 'bad'); }
+    }
+    if (g) p.growthBonus = (p.growthBonus || 0) + g;
+    const others = alive().filter(id => id !== S.player);
+    if (D.relAll) others.forEach(id => addRel(id, S.player, D.relAll));
+    if (D.relTop) others.sort((a, b) => S.c[b].gdp - S.c[a].gdp).slice(0, 10).forEach(id => addRel(id, S.player, D.relTop));
+    if (D.relAU) others.filter(id => (S.c[id].blocs || []).includes('AU')).forEach(id => addRel(id, S.player, D.relAU));
+    if (D.relBad) others.filter(id => rel(id, S.player) < -30).forEach(id => addRel(id, S.player, D.relBad));
+    fxToast('הושלם: ' + D.he, e);
+    if (!D.bid) addNews('היוזמה "' + D.he + '" הושלמה.', 'good');
+    return false;
+  });
 }
 function checkWin() {
   const share = P().gdp / worldGdp();
@@ -5205,7 +5338,7 @@ function viewCountry() {
     h += scd ? '<button class="b" disabled>סנקציות' + cdNote(scd) + '</button>' :
       sanctions(S.player, o) ? fbtn('sanction', 'הסר סנקציות', { rel: { [o]: 6 } }) : fbtn('sanction', 'הטל סנקציות', { rep: sancRep(o), rel: { [o]: -20 } });
     h += fbtn('war', 'הכרז מלחמה', warFx(o), 'danger');
-    h += '</div>';
+    h += '</div>' + peaceButtons(o);
     h += strikeSection(o, null);
   } else {
     const w = S.wars.find(x => (x.A.includes(o) && x.B.includes(S.player)) || (x.B.includes(o) && x.A.includes(S.player)));
@@ -5447,7 +5580,7 @@ function viewHome() {
   h += '<h3>מה משפיע על המוניטין בעולם</h3><ul class="plain"><li>מוריד: תקיפות בלי סיבה, מלחמה בלי סיבה, הפרת הסכמים, נשק גרעיני, סיפוח, דיכוי הפגנות, סנקציות על מדינות חלשות.</li>' +
     '<li>מעלה: סיוע הומניטרי, עזרה באסונות, הסכמי שלום וסחר, קליטת פליטים, אנרגיה ירוקה.</li>' +
     '<li>מוניטין נמוך = יותר סנקציות, סירובים וקואליציות נגדך. גבוה = הסכמים קלים יותר ותמיכה.</li></ul>';
-  return h;
+  return h + iniSection();
 }
 
 /* ---- military ---- */
@@ -5952,6 +6085,8 @@ const ACT = {
   mob: () => { if (mobilize()) renderAll(); },
   demob: () => { if (demobilize()) renderAll(); },
   build: d => { if (startProj(d.k)) renderAll(); },
+  pz: d => doPz(d.k),
+  ini: d => startIni(d.k),
   crack: () => { if (!S.p.built.police || cdLeft('crack')) return; const c = P(); setCd('crack', 120); S.p.crack = 91; S.p.unrest = 0;
     fxToast('ההפגנות פוזרו בכוח', { ap: 5, rep: c.gov === 'democracy' ? -12 : -7 }, true); addNews('כוחות משטרה פיזרו את ההפגנות בכוח. ארגוני זכויות אדם בעולם מגנים.', 'bad');
     alive().forEach(id => { if (id !== S.player && S.c[id].gov === 'democracy') addRel(id, S.player, -3); }); renderAll(); },

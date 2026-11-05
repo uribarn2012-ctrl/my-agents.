@@ -2,6 +2,14 @@
 <html lang="he" dir="rtl">
 <head>
 <meta charset="utf-8">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0d1117">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="עולם 2026">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0b0f14">
 <title>עולם 2026</title>
@@ -455,14 +463,16 @@ body.desk #tut-b{max-width:440px}
 
 <div id="modal" class="modal"><div class="mbox"><h2 id="m-title"></h2><div id="m-body"></div><div id="m-foot"></div></div></div>
 <div id="toasts" aria-live="polite"></div>
-<div id="tip" role="tooltip"></div>
+<div id="tip" role="tooltip"></div>
+
 <div id="rcard" role="status" aria-live="polite"></div>
 <div id="flash"></div>
 <div id="tut" aria-live="polite"><div id="tut-ring"></div><div id="tut-b" role="dialog" aria-label="הדרכה"></div></div>
 
-<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+<script src="vendor/d3.min.js"></script>
+<script src="vendor/topojson-client.min.js"></script>
 <script src="world.js"></script>
 <script src="game.js"></script>
+<script>if ('serviceWorker' in navigator && location.protocol !== 'file:') addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));</script>
 </body>
 </html>
