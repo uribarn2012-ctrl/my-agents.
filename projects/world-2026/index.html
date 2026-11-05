@@ -301,6 +301,54 @@ h3.mh{margin:14px 0 4px;font-size:15px}
   #top .r2{max-width:640px}
   #start{left:auto;right:12px;top:110px;bottom:12px;height:auto;width:420px;border-radius:14px;border:1px solid var(--line)}
 }
+/* ===== desktop (body.desk = wide screen, set by game.js); the phone layout above is untouched ===== */
+:root{--pw:420px}
+#tip,#zctl{display:none}
+.cities .ci:hover text{fill:#fff}.cities .ci:hover .d{stroke:#fff}
+body.mv #mapsvg,body.mv .land path,body.mv .ceded path,body.mv .cities .ci{cursor:crosshair}
+#mapsvg:active{cursor:grabbing}
+#tip{position:fixed;left:0;top:0;z-index:58;pointer-events:none;background:#0b0f14f2;border:1px solid #3b5577;border-radius:10px;padding:7px 10px;font-size:13.5px;line-height:1.5;max-width:320px;box-shadow:0 8px 22px #000a;white-space:normal}
+#tip.on{display:block}
+#tip b{color:var(--gold);font-size:14.5px}#tip .tm{color:#c9d4df}#tip .th{color:var(--mut);font-size:12px;border-top:1px solid var(--line);margin-top:4px;padding-top:3px}
+#tip .chips{margin:3px 0 1px}#tip .uic{margin-inline-end:4px}
+kbd{display:inline-block;min-width:22px;padding:1px 6px;border:1px solid #3b5577;border-bottom-width:2px;border-radius:6px;background:#17212c;font-family:inherit;font-size:12.5px;font-weight:700;text-align:center;direction:ltr;unicode-bidi:isolate;white-space:nowrap}
+.keys td{padding:5px 2px;vertical-align:top}.keys td:first-child{white-space:nowrap;width:1%;padding-inline-end:12px}
+body.desk{font-size:16px;--topH:60px}
+body.desk #app.playing #top{display:flex;align-items:center;gap:14px;height:60px;padding:6px 12px}
+body.desk #top .r1{flex:none;height:46px;gap:8px}
+body.desk #top .who{flex:none;min-width:110px}
+body.desk #top .who b,body.desk #top .who b.long{font-size:17px;overflow:visible;letter-spacing:0}
+body.desk #top #t-date{font-size:13.5px;overflow:visible}
+body.desk #top .r2{flex:1;max-width:none;margin:0;gap:6px;min-width:0}
+body.desk #top .cell{padding:3px 8px}
+body.desk #top .cell small{font-size:12px;overflow:visible}
+body.desk #top .cell .v{font-size:16px;overflow:visible}
+body.desk #speed button{width:40px;height:34px;font-size:14px}
+body.desk .ic{height:34px;min-width:38px}
+body.desk #bar{left:auto;right:12px;top:calc(var(--topH) + 8px);bottom:auto;transform:none;width:var(--pw);border:1px solid var(--line);border-radius:14px 14px 0 0;padding:6px;z-index:31}
+body.desk:not(.sopen) #bar{border-radius:14px}
+body.desk .tabs button{height:40px;font-size:14px;letter-spacing:0}
+body.desk #sheet{top:calc(var(--topH) + 62px);bottom:12px;right:12px;width:var(--pw);border-radius:0 0 14px 14px;border-top:0}
+body.desk .grab{display:none}
+body.desk #sheet h2{font-size:21px}body.desk #sheet h3{font-size:16px}
+body.desk .b{font-size:15px}body.desk .b .cost{font-size:12.5px}
+body.desk .grid>div{font-size:15px}body.desk .grid small{font-size:12px}
+body.desk .sub{font-size:14px}body.desk ul.news li{font-size:15px}body.desk .chip{font-size:12.5px}
+body.desk .ulist button b{font-size:15px}body.desk .ulist button small{font-size:12.5px}
+body.desk .tbl{font-size:15px}
+body.desk .mbox{max-width:600px}body.desk #m-body{font-size:16px}body.desk #m-title{font-size:22px}
+body.desk #toasts{top:auto!important;bottom:16px;left:16px;transform:none;align-items:flex-start;max-width:min(560px,calc(100vw - var(--pw) - 80px))}
+body.desk .toast{text-align:start;font-size:14.5px}
+body.desk.rc #toasts .toast{display:block!important;white-space:normal;max-width:none;font-size:14.5px;padding:9px 14px}
+body.desk #legend{left:auto;right:16px;bottom:16px}
+body.desk.sopen #legend{right:calc(var(--pw) + 28px)}
+body.desk #app.playing #zctl{display:flex;position:fixed;bottom:16px;right:96px;z-index:15;gap:4px}
+body.desk.sopen #app.playing #zctl{right:calc(var(--pw) + 108px)}
+#zctl .ic{height:30px;min-width:32px;font-size:15px;padding:0 6px}
+body.desk #mvbar{left:12px;right:calc(var(--pw) + 24px);max-width:720px;margin:0 auto}
+body.desk #rcard{left:12px;width:420px}
+body.desk #start{top:90px}
+body.desk #tut-b{max-width:440px}
 </style>
 </head>
 <body>
@@ -365,7 +413,7 @@ h3.mh{margin:14px 0 4px;font-size:15px}
     <div class="sh-head"><span class="grab"></span><button class="ic" data-act="close" aria-label="סגור">✕</button></div>
     <div id="sheet-body"></div>
   </section>
-
+  <div id="zctl"><button class="ic" data-act="zin" title="הגדל (+)">+</button><button class="ic" data-act="zout" title="הקטן (−)">−</button><button class="ic" data-act="centerme" title="המדינה שלי (Home)">⌂</button><button class="ic" data-act="zworld" title="כל העולם">🌐</button></div>
   <nav id="bar">
     <div class="tabs">
       <button data-act="tab" data-tab="country">מדינה</button>
@@ -407,6 +455,7 @@ h3.mh{margin:14px 0 4px;font-size:15px}
 
 <div id="modal" class="modal"><div class="mbox"><h2 id="m-title"></h2><div id="m-body"></div><div id="m-foot"></div></div></div>
 <div id="toasts" aria-live="polite"></div>
+<div id="tip" role="tooltip"></div>
 <div id="rcard" role="status" aria-live="polite"></div>
 <div id="flash"></div>
 <div id="tut" aria-live="polite"><div id="tut-ring"></div><div id="tut-b" role="dialog" aria-label="הדרכה"></div></div>

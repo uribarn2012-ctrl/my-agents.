@@ -3826,6 +3826,88 @@ function nukeTargetCity(tgt) {
 // people killed by a nuclear blast on a city: a large share of a small city, a smaller share (but more people) of a giant one
 function nukeCityDead(T, x) { const P = x.pop; return Math.round(Math.min(T.pop * 0.3, P * clamp(0.22 / (1 + P / 8), 0.06, 0.25) * (0.8 + R() * 0.4), 2.6) * 1e6); }
 
+/* ================= desktop: mouse and keyboard (wide screens only; the phone layout is unchanged) ================= */
+const isDesk = () => innerWidth >= 1024;
+const PW = 420;
+function hideTip() { const t = $('#tip'); if (t) t.classList.remove('on'); }
+function relWordD(o) { const r = rel(S.player, o); return r >= 50 ? 'ידידותי' : r >= 15 ? 'חיובי' : r > -15 ? 'ניטרלי' : r > -50 ? 'מתוח' : 'עוין'; }
+function tipHtml(el) {
+  if (!S || !S.c) return '';
+  const uk = el.closest('[data-k]');
+  if (uk) {
+    const k = uk.getAttribute('data-k'), ids = k[0] === 'c' ? k.slice(1).split(',').map(Number) : [+k];
+    const us = ids.map(unitById).filter(Boolean); if (!us.length) return '';
+    if (us.length > 1) return '<b>' + num(us.length) + ' יחידות</b><div class="tm">' + esc(nm(us[0].o)) + '</div><div class="th">קליק לפרטים</div>';
+    const u = us[0];
+    return '<b>' + esc(uName(u)) + '</b><div class="tm">' + esc(nm(u.o)) + ' · כוח: ' + esc(uLabel(u)) + '</div><div class="tm">' + esc(uStateTxt(u)) + '</div>' +
+      (u.o === S.player ? '<div class="th">קליק לבחירה · אחר כך קליק ימני על היעד</div>' : '');
+  }
+  const ci = el.closest('[data-ci]');
+  if (ci && CITYI[ci.getAttribute('data-ci')]) {
+    const x = CITYI[ci.getAttribute('data-ci')], o = S.ct ? cst(x).o : landOf(x);
+    return '<b>' + esc(cityName(x)) + '</b><div class="tm">אוכלוסייה: ' + popTxt(x.pop) + '</div><div class="tm">בשליטת: ' + esc(o ? nm(o) : '—') + '</div>';
+  }
+  const t = el.getAttribute && el.getAttribute('data-t'), o = t && S.owner[t];
+  if (!o || !S.c[o]) return '';
+  if (!S.player) return '<b>' + esc(nm(o)) + '</b><div class="th">קליק כדי לבחור</div>';
+  if (o === S.player) return '<b>' + esc(nm(o)) + '</b><div class="tm">המדינה שלך</div>';
+  return '<b>' + esc(nm(o)) + '</b><div class="tm">יחסים: ' + relWordD(o) + ' (' + num(Math.round(rel(S.player, o))) + ')</div>' + (atWar(S.player, o) ? '<div class="tm" style="color:#ff9d9d">במלחמה איתך</div>' : '');
+}
+function deskMapHooks() {
+  document.body.classList.toggle('desk', isDesk());
+  svg.on('mousemove.desk', ev => {
+    if (!isDesk() || zooming) { hideTip(); return; }
+    const h = tipHtml(ev.target), tip = $('#tip'); if (!h) { hideTip(); return; }
+    tip.innerHTML = h; tip.classList.add('on');
+    const w = tip.offsetWidth, hh = tip.offsetHeight;
+    let x = ev.clientX + 16, y = ev.clientY + 18;
+    if (x + w > innerWidth - 8) x = ev.clientX - w - 12;
+    if (y + hh > innerHeight - 8) y = ev.clientY - hh - 12;
+    tip.style.transform = 'translate(' + Math.max(4, x) + 'px,' + Math.max(4, y) + 'px)';
+  }).on('mouseleave.desk', hideTip);
+  // right-click with one of my units selected = move / attack there (same logic as tapping the map in move mode)
+  svg.on('contextmenu.desk', ev => {
+    if (!isDesk()) return;
+    ev.preventDefault(); hideTip();
+    if (!S || !S.player) return;
+    if (!uMode) { const u = selUnit != null && unitById(selUnit); if (!u || u.o !== S.player) return; setMode('move', u.id); }
+    const uk = ev.target.closest && ev.target.closest('[data-k]'), ci = ev.target.closest && ev.target.closest('[data-ci]');
+    if (uk) { onUnitTap(uk.getAttribute('data-k')); return; }
+    if (ci && CITYI[ci.getAttribute('data-ci')]) { cityModeTap(CITYI[ci.getAttribute('data-ci')]); return; }
+    modeTap(evLonLat(ev), ev.target.getAttribute && ev.target.getAttribute('data-t'));
+  });
+}
+function zoomBy(f) { if (svg) svg.transition().duration(250).call(zoom.scaleBy, f); }
+function showKeys() {
+  const r = (k, t) => '<tr><td>' + k + '</td><td>' + t + '</td></tr>';
+  modal({ title: 'קיצורי מקלדת ועכבר', html: '<table class="keys">' +
+    r('<kbd>רווח</kbd>', 'עצור / המשך') + r('<kbd>1</kbd>–<kbd>4</kbd>', 'מהירות ×1 / ×2 / ×4 / ×8') +
+    r('<kbd>Esc</kbd>', 'ביטול בחירת יעד / סגירת חלון') + r('<kbd>+</kbd> <kbd>-</kbd>', 'זום') +
+    r('<kbd>Home</kbd>', 'מרכז על המדינה שלי') + r('<kbd>?</kbd>', 'הרשימה הזו') +
+    r('גלגלת', 'זום סביב העכבר') + r('ריחוף', 'פרטים על מדינה, עיר או יחידה') +
+    r('קליק ימני', 'כשיחידה שלך נבחרה — הזזה או תקיפה לשם') + '</table>', buttons: [{ label: 'סגור' }] });
+}
+document.addEventListener('keydown', ev => {
+  const tg = ev.target, tn = tg && tg.tagName;
+  if (tn === 'INPUT' || tn === 'TEXTAREA' || tn === 'SELECT' || (tg && tg.isContentEditable) || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  const k = ev.key, mOpen = $('#modal').classList.contains('open');
+  if (k === 'Escape') {
+    if (mOpen) { const b = [...document.querySelectorAll('#m-foot button')].find(b => /^(סגור|ביטול)$/.test(b.textContent.trim())); if (b) b.click(); }
+    else if (uMode) ACT.mvcancel();
+    else if ($('#sheet').classList.contains('open')) openTab(null);
+    hideTip(); return;
+  }
+  if (k === '?') { if (!mOpen) showKeys(); ev.preventDefault(); return; }
+  if (mOpen || !S || !S.player) return;
+  if (k === ' ') { ev.preventDefault(); setSpeed(S.speed ? 0 : (S.lastSpeed || 1)); }
+  else if (k >= '1' && k <= '4') setSpeed([1, 2, 4, 8][+k - 1]);
+  else if (k === '+' || k === '=') zoomBy(1.5);
+  else if (k === '-' || k === '_') zoomBy(1 / 1.5);
+  else if (k === 'Home') { ev.preventDefault(); ACT.centerme(); }
+  else return;
+  if (tn === 'BUTTON') tg.blur();
+});
+
 /* ================= map ================= */
 let svg, gRoot, gLand, gMarks, zoom, pathGen, curK = 1, W = 0, H = 0, selected = null;
 const pathByTid = {};
@@ -3836,7 +3918,7 @@ function initMap() {
   gRoot = svg.append('g');
   const projection = d3.geoNaturalEarth1();
   const visible = { type: 'FeatureCollection', features: FEATS.filter(f => !HIDDEN.has(f.properties.tid)) };
-  const topPad = 98, botPad = 72;
+  const DK = isDesk(), topPad = DK ? 72 : 98, botPad = DK ? 14 : 72;
   projection.fitExtent([[6, topPad], [W - 6, H - botPad]], visible);
   pathGen = d3.geoPath(projection); if (pathGen.digits) pathGen.digits(1);
   gRoot.append('path').datum({ type: 'Sphere' }).attr('class', 'sphere').attr('d', pathGen);
@@ -3885,11 +3967,12 @@ function initMap() {
     onUnitTap(g.getAttribute('data-k'));
   });
   zoom = d3.zoom().scaleExtent([0.8, 60]).translateExtent([[-W, -H], [W * 2, H * 2]])
-    .on('start', () => { zooming = true; })
+    .on('start', () => { zooming = true; hideTip(); })
     .on('zoom', ev => { gRoot.attr('transform', ev.transform); curT = ev.transform; if (Math.abs(ev.transform.k - curK) > 0.01) { curK = ev.transform.k; scaleMarks(); if (fanIds && Math.abs(curK / fanK - 1) > 0.25) fanIds = null; } drawUnits(); cityFollow(); })
     .on('end', () => { zooming = false; if (!cityT0 || cityT0.x !== curT.x || cityT0.y !== curT.y || cityT0.k !== curT.k) drawCities(); });
   svg.call(zoom).on('dblclick.zoom', null);
   MAP_PROJ = projection;
+  deskMapHooks();
   projCities();
   initFx();
   if (!(S && S.player) && W < 900) svg.call(zoom.transform, d3.zoomIdentity.translate(0, H * 0.22 - (topPad + H - botPad) / 2));
@@ -3898,6 +3981,7 @@ let MAP_PROJ = null;
 function visibleRect() {
   // part of the map not covered by bars / panels: [x0, y0, x1, y1]
   const startOpen = $('#start').classList.contains('open'), sheetOpen = $('#sheet').classList.contains('open');
+  if (isDesk()) return [0, (S && S.player) ? ($('#top').offsetHeight || 60) + 6 : 70, (startOpen || sheetOpen) ? W - PW - 24 : W, H - 12];
   const top = (S && S.player) ? 98 : 70;
   if (W >= 900) return [0, top, (startOpen || sheetOpen) ? W - 440 : W, H - 80];
   if (startOpen) return [0, top, W, H * 0.42];
@@ -4562,7 +4646,7 @@ const MODE_TXT = { move: 'הקש על היעד במפה', attack: 'הקש על �
 function setMode(kind, uid) {
   const u = unitById(uid); if (!u) return;
   uMode = { kind, uid };
-  $('#mv-txt').textContent = uName(u) + ': ' + MODE_TXT[kind];
+  $('#mv-txt').textContent = uName(u) + ': ' + MODE_TXT[kind] + (isDesk() ? ' (או קליק ימני · Esc לביטול)' : '');
   $('#mvbar').classList.add('on'); document.body.classList.add('mv');
   // close the panel but keep the unit selected, so the whole map is free for choosing
   tab = null; $('#sheet').classList.remove('open');
@@ -5834,6 +5918,10 @@ const ACT = {
   nstop: () => { S.p.nprog = null; addNews('תוכנית הגרעין הוקפאה.', 'dip'); renderAll(); },
   newgame: () => modal({ title: 'משחק חדש', html: '<p>המשחק הנוכחי יימחק. להמשיך?</p>', buttons: [{ label: 'כן, משחק חדש', cls: 'danger', fn: () => { wipe(); location.reload(); } }, { label: 'ביטול' }] }),
   startpick: () => beginGame(),
+  zin: () => zoomBy(1.6),
+  zout: () => zoomBy(1 / 1.6),
+  zworld: () => { if (svg) svg.transition().duration(600).call(zoom.transform, d3.zoomIdentity); },
+  kbhelp: () => showKeys(),
   centerme: () => S && S.player && zoomToTid(S.player, 10),
   legend: () => $('#legend').classList.toggle('open'),
   urgent: () => openTabFresh('urgent'),
@@ -6207,11 +6295,12 @@ function showHelp() {
     '<li><b>אירועים:</b> כל כמה שבועות קורה משהו — שביתות, הפגנות, שערוריות, אסונות, תגליות, הפיכות, משברי נפט, בקשות לברית ועוד. באירוע עם החלטה המשחק נעצר, ועל כל אפשרות כתוב מה היא תעשה. אם יש שר מתאים שפועל לבד — הוא מחליט בעצמו ומדווח.</li>' +
     '<li><b>העולם חי:</b> מדינות אחרות צומחות ונכנסות למיתון, מגדילות צבא, בונות, עורכות בחירות (עם מנהיגים חדשים), עוברות הפיכות, חותמות על בריתות ומטילות סנקציות. בכרטיס של כל מדינה — "מה קורה שם", ובלשונית חדשות ← "העולם" — דירוג המדינות החזקות ומי עולה ויורד (▲▼).</li>' +
     '<li><b>אנימציות:</b> טילים, מטוסים, פיצוצים וקרבות מופיעים על המפה. בתפריט ☰ אפשר להפחית או לכבות אותן.</li>' +
+    '<li><b>במחשב:</b> גלגלת = זום סביב העכבר, ריחוף = פרטים על מדינה, עיר או יחידה. כשיחידה שלך נבחרה — <b>קליק ימני</b> על המפה שולח אותה לשם (על אויב — תקיפה). רווח = עצור/המשך, <kbd>1</kbd>–<kbd>4</kbd> = מהירות, <kbd>Esc</kbd> = ביטול, <kbd>+</kbd>/<kbd>-</kbd> = זום, <kbd>Home</kbd> = המדינה שלי, <kbd>?</kbd> = כל הקיצורים.</li>' +
     '<li><b>מדינות קטנות קשות יותר.</b> המשחק נשמר אוטומטית כל כמה שניות.</li></ul>' });
 }
 function showMenu() {
   const fxSeg = '<h3 class="mh">אנימציות (פיצוצים וקרבות)</h3><div class="seg">' + [['full', 'מלאות'], ['low', 'מופחתות'], ['off', 'כבויות']].map(([v, l]) => '<button class="' + (FXMODE === v ? 'on' : '') + '" data-act="fxmode" data-v="' + v + '">' + l + '</button>').join('') + '</div>';
-  modal({ title: 'תפריט', html: '<div class="btns col">' + btn('help', 'איך משחקים') + btn('tutstart', 'הדרכה קצרה (7 צעדים)') + btn('tab', 'ממשלה ושרים', '', ' data-tab="gov"') + btn('goworld', 'העולם — דירוג ומגמות') + btn('stats', 'סטטיסטיקות ואבדות') + btn('centerme', 'מרכז את המפה על המדינה שלי') + btn('newgame', 'משחק חדש', 'danger') + '</div>' + fxSeg + '<p class="sub">"מופחתות" — רק פיצוץ קצר במקום הפגיעה, בלי הבזקים ורעידות. המשחק נשמר אוטומטית כל כמה שניות.</p>',
+  modal({ title: 'תפריט', html: '<div class="btns col">' + btn('help', 'איך משחקים') + btn('tutstart', 'הדרכה קצרה (7 צעדים)') + btn('tab', 'ממשלה ושרים', '', ' data-tab="gov"') + btn('goworld', 'העולם — דירוג ומגמות') + btn('stats', 'סטטיסטיקות ואבדות') + btn('centerme', 'מרכז את המפה על המדינה שלי') + (isDesk() ? btn('kbhelp', 'קיצורי מקלדת ועכבר (?)') : '') + btn('newgame', 'משחק חדש', 'danger') + '</div>' + fxSeg + '<p class="sub">"מופחתות" — רק פיצוץ קצר במקום הפגיעה, בלי הבזקים ורעידות. המשחק נשמר אוטומטית כל כמה שניות.</p>',
     buttons: [{ label: 'סגור' }], onShow: () => document.querySelectorAll('#m-body .btns [data-act]').forEach(b => b.addEventListener('click', () => { modalQ.shift(); $('#modal').classList.remove('open'); setTimeout(showModal, 30); }, { once: true })) });
 }
 
