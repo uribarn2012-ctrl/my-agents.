@@ -3884,8 +3884,37 @@ function showKeys() {
     r('<kbd>רווח</kbd>', 'עצור / המשך') + r('<kbd>1</kbd>–<kbd>4</kbd>', 'מהירות ×1 / ×2 / ×4 / ×8') +
     r('<kbd>Esc</kbd>', 'ביטול בחירת יעד / סגירת חלון') + r('<kbd>+</kbd> <kbd>-</kbd>', 'זום') +
     r('<kbd>Home</kbd>', 'מרכז על המדינה שלי') + r('<kbd>?</kbd>', 'הרשימה הזו') +
+    r('<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / חיצים', 'הזזת המפה (עם <kbd>Shift</kbd> — מהר)') + r('<kbd>Q</kbd> <kbd>E</kbd>', 'זום החוצה / פנימה') +
+    r('<kbd>P</kbd>', 'עצור / המשך') + r('<kbd>U</kbd> / <kbd>Tab</kbd>', 'היחידה הבאה שלי (קודם הפנויות; <kbd>Shift</kbd> — הקודמת)') +
+    r('<kbd>V</kbd>', 'הזז את היחידה שנבחרה (ואז קליק על היעד)') + r('<kbd>F</kbd>', 'מרכז על היחידה שנבחרה') + r('<kbd>X</kbd>', 'ביטול בחירה וסגירת הלוח') +
+    r('<kbd>C</kbd> <kbd>B</kbd> <kbd>H</kbd> <kbd>G</kbd> <kbd>M</kbd> <kbd>R</kbd> <kbd>N</kbd>', 'לשוניות: מדינה, כלכלה, בית, ממשלה, צבא, מלחמות, חדשות') +
+    r('<kbd>T</kbd> <kbd>I</kbd> <kbd>L</kbd> <kbd>Y</kbd>', 'העולם, מה דחוף, רשימת יחידות, סטטיסטיקות') +
+    r('דאבל־קליק', 'זום פנימה') +
     r('גלגלת', 'זום סביב העכבר') + r('ריחוף', 'פרטים על מדינה, עיר או יחידה') +
     r('קליק ימני', 'כשיחידה שלך נבחרה — הזזה או תקיפה לשם') + '</table>', buttons: [{ label: 'סגור' }] });
+}
+// letter keys by physical key (ev.code), so they work with a Hebrew keyboard layout too
+const KEY_TABS = { KeyC: 'country', KeyB: 'eco', KeyH: 'home', KeyG: 'gov', KeyM: 'mil', KeyR: 'wars', KeyN: 'news', KeyT: 'world', KeyI: 'urgent', KeyL: 'ulist', KeyY: 'stats' };
+const PAN = { KeyW: [0, 1], ArrowUp: [0, 1], KeyS: [0, -1], ArrowDown: [0, -1], KeyA: [1, 0], ArrowLeft: [1, 0], KeyD: [-1, 0], ArrowRight: [-1, 0] };
+function myUnits() { return (S.units || []).filter(u => u.o === S.player); }
+function deskKey(ev) {
+  const c = ev.code;
+  if (PAN[c]) { ev.preventDefault(); const st = (ev.shiftKey ? 260 : 110) / curK; svg.call(zoom.translateBy, PAN[c][0] * st, PAN[c][1] * st); return true; }
+  if (c === 'KeyE') { zoomBy(1.5); return true; }
+  if (c === 'KeyQ') { zoomBy(1 / 1.5); return true; }
+  if (c === 'KeyP') { setSpeed(S.speed ? 0 : (S.lastSpeed || 1)); return true; }
+  if (KEY_TABS[c]) { openTabFresh(KEY_TABS[c]); return true; }
+  if (c === 'KeyU' || c === 'Tab') {   // next / previous of my units (idle ones first)
+    ev.preventDefault();
+    const all = myUnits(); if (!all.length) return true;
+    const idle = all.filter(u => !u.dest), list = idle.length ? idle : all;
+    let i = list.findIndex(u => u.id === selUnit); i = (i + (ev.shiftKey ? -1 : 1) + list.length) % list.length;
+    selectUnit(list[i].id, true); return true;
+  }
+  if (c === 'KeyF') { const u = selUnit != null && unitById(selUnit); if (u) focusUnit(u, true); return true; }
+  if (c === 'KeyV' && selUnit != null) { const u = unitById(selUnit); if (u && u.o === S.player) { setMode('move', u.id); return true; } }
+  if (c === 'KeyX') { if (uMode) ACT.mvcancel(); selUnit = null; selected = null; openTab(null); recolor(); unitsDirty = true; drawUnits(); return true; }
+  return false;
 }
 document.addEventListener('keydown', ev => {
   const tg = ev.target, tn = tg && tg.tagName;
@@ -3904,7 +3933,7 @@ document.addEventListener('keydown', ev => {
   else if (k === '+' || k === '=') zoomBy(1.5);
   else if (k === '-' || k === '_') zoomBy(1 / 1.5);
   else if (k === 'Home') { ev.preventDefault(); ACT.centerme(); }
-  else return;
+  else if (!deskKey(ev)) return;
   if (tn === 'BUTTON') tg.blur();
 });
 
