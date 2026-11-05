@@ -837,7 +837,7 @@ function playerEconomy() {
   for (const k in b) bm[k] = (bm[k] || 0) + b[k];
   // growth (yearly rate applied daily)
   const wars = activeWars(S.player);
-  let g = 0.026 + (R() - 0.5) * 0.012 - (p.tax - 0.30) * 0.08 + (p.welfare - 0.15) * 0.03 - sanctionHit(S.player) * 0.05 - wars * 0.012 - (S.recession > 0 ? 0.03 : 0) + (p.growthBonus || 0);
+  let g = 0.026 + (R() - 0.5) * 0.012 - (p.tax - 0.30) * 0.08 + (p.welfare - 0.15) * 0.03 - sanctionHit(S.player) * 0.05 - wars * 0.012 - (S.recession > 0 ? 0.03 : 0) + (p.growthBonus || 0) + sectorG();
   let tr = 0; for (const k in S.pacts) if (S.pacts[k].trade && k.split('|').includes(S.player)) tr++;
   g += Math.min(0.02, tr * 0.004);
   // events that change growth for a while, and a skilled finance minister
@@ -890,7 +890,7 @@ function warWeariness() {
 function approvalTarget() {
   const c = P(), p = S.p;
   const wars = activeWars(S.player);
-  let T = 62 - (p.tax - 0.30) * 120 + (p.welfare - 0.15) * 150 - warWeariness() + (p.apBonus || 0) + govAp() + tmSum(p.tm);
+  let T = 62 - (p.tax - 0.30) * 120 + (p.welfare - 0.15) * 150 - warWeariness() + (p.apBonus || 0) + govAp() + tmSum(p.tm) + factionAp();
   if (!wars) T -= Math.max(0, p.defPct - 0.05) * 100 * 1.2;
   if (c.mob > 0) T -= Math.min(8, c.mob / Math.max(1, c.pop * 10) * 4);
   const debtRatio = p.treasury < 0 ? -p.treasury / c.gdp : 0;
@@ -2688,6 +2688,7 @@ function monthTick(m) {
   if (!S.over) randomEvents();
   if (!S.over) nukeProgram();
   if (!S.over) approvalMonthly();
+  if (!S.over && S.p) { econMonthly(); factionsMonthly(); unMonthly(); }
   if (!S.over) { govMonth(); worldRebels(); reconcileCities(); }
   if (p.tm) p.tm = p.tm.filter(x => x.u > S.day);
   if (p.tg) p.tg = p.tg.filter(x => x.u > S.day);
@@ -3004,6 +3005,175 @@ function claimMission(i) {
   if (r.cash) p.treasury += r.cash * P().gdp; if (r.tm) P().tm = (P().tm || 1) + r.tm;
   fxToast('פרס: ' + M.he, { ap: r.ap || 0, rep: r.rep || 0 });
   p.msDone[m.id] = (p.msDone[m.id] || 0) + 1; p.ms.splice(i, 1); missionsFill(); renderAll();
+}
+
+/* ================= economy sectors: invest, grow, earn every month ================= */
+const SECT = {
+  tech:    { he: 'הייטק', ic: '💻', d: 'סטארטאפים ותוכנה. צמיחה מהירה ומושך צעירים.', g: 0.0035 },
+  energy:  { he: 'אנרגיה', ic: '⚡', d: 'נפט, גז ושמש. הכנסה מייצוא, ומגן מפני משברי נפט.', g: 0.002, cash: 0.0009 },
+  industry:{ he: 'תעשייה', ic: '🏭', d: 'מפעלים. מייצרים ציוד צבאי בחינם כל חודש ומעסיקים עובדים.', g: 0.0025 },
+  agri:    { he: 'חקלאות', ic: '🌾', d: 'אוכל לעם. מגן מפני רעב ובצורת, והחקלאים מרוצים.', g: 0.001 },
+  tourism: { he: 'תיירות', ic: '🏖️', d: 'מלונות וחופים. מכניס יותר כסף ככה שהמוניטין גבוה יותר.', g: 0.0015 },
+  finance: { he: 'בנקים ופיננסים', ic: '🏦', d: 'בורסה ובנקים. מקטין את הריבית על החוב.', g: 0.002 },
+  arms:    { he: 'תעשייה ביטחונית', ic: '🛡️', d: 'פיתוח וייצוא נשק. כסף מייצוא ועוצמה לצבא.', g: 0.0015, cash: 0.0007 },
+};
+function secInit() {
+  const p = S.p, c = P(); if (p.sec) return;
+  const rich = c.gdp / Math.max(0.1, c.pop) > 25;
+  p.sec = { tech: rich ? 2 : 1, energy: 1, industry: 1, agri: rich ? 1 : 2, tourism: 1, finance: rich ? 2 : 1, arms: (c.def || 0) > 10 ? 2 : 1 };
+  p.secQ = []; p.secM = 0;
+}
+const secCost = k => 0.006 * P().gdp * (1 + (S.p.sec[k] || 0) * 0.6);
+const sectorG = () => { const p = S.p; if (!p || !p.sec) return 0; let g = 0; for (const k in SECT) g += SECT[k].g * ((p.sec[k] || 0) - 1); return g; };
+// money the sectors bring in this month (bn)
+function secIncome() {
+  const p = S.p, c = P(); if (!p.sec) return 0;
+  let m = 0; for (const k in SECT) if (SECT[k].cash) m += SECT[k].cash * p.sec[k] * c.gdp / 12;
+  m += 0.0012 * p.sec.tourism * (p.rep / 100) * c.gdp / 12;
+  let tr = 0; for (const key in S.pacts) if (S.pacts[key].trade && key.split('|').includes(S.player)) tr++;
+  m += tr * 0.00025 * (p.sec.industry + p.sec.tech + p.sec.agri) * c.gdp / 12;   // exports to trade partners
+  return m;
+}
+function econSection() {
+  secInit(); const p = S.p;
+  let h = '<h3>ענפי הכלכלה</h3><p class="sub">משקיעים בענף → הוא גדל → כל חודש הוא מכניס כסף, מעלה צמיחה ומשמח קבוצות בעם. החודש הענפים והייצוא הכניסו ' + money(p.secM || 0) + '.</p>';
+  for (const k in SECT) {
+    const D = SECT[k], lvl = p.sec[k] || 0, run = p.secQ.find(q => q.k === k);
+    h += '<div class="card"><b>' + D.ic + ' ' + D.he + '</b> ' + chip('רמה ' + lvl + '/6', 'teal') + '<div class="sub">' + D.d + '</div>';
+    if (run) { const done = clamp((S.day - run.start) / (run.due - run.start), 0, 1); h += '<div class="fl"><div class="prog g"><div style="width:' + (done * 100).toFixed(1) + '%"></div></div> <small>עוד ' + daysTxt(run.due - S.day) + '</small></div>'; }
+    else if (lvl >= 6) h += '<div class="sub ok">ברמה הגבוהה ביותר</div>';
+    else h += '<div class="btns">' + fbtn('sect', 'השקע · ' + daysTxt(150 + lvl * 30), { cost: secCost(k), note: 'צמיחה ' + isoNums('+' + (D.g * 100).toFixed(2) + '%') }, 'good', p.secQ.length >= 2, ' data-k="' + k + '"') + '</div>';
+    h += '</div>';
+  }
+  return h;
+}
+function startSect(k) {
+  secInit(); const p = S.p; if (!SECT[k] || p.secQ.length >= 2 || p.secQ.some(q => q.k === k) || p.sec[k] >= 6) return;
+  if (!spend(secCost(k))) return;
+  p.secQ.push({ k, start: S.day, due: S.day + 150 + p.sec[k] * 30 });
+  toast('התחלנו להשקיע ב' + SECT[k].he); renderAll();
+}
+function econMonthly() {
+  secInit(); const p = S.p, c = P();
+  p.secQ = p.secQ.filter(q => { if (S.day < q.due) return true; p.sec[q.k]++; fxToast(SECT[q.k].ic + ' ענף ' + SECT[q.k].he + ' עלה לרמה ' + p.sec[q.k], { ap: 1 }); addNews('ענף ה' + SECT[q.k].he + ' שלנו מתרחב.', 'good'); return false; });
+  const m = secIncome(); p.secM = m; p.treasury += m;
+  if (p.sec.industry > 1) addInv(c, 0.002 * (p.sec.industry - 1));
+  if (p.sec.arms > 1) c.tm = Math.min(3, (c.tm || 1) + 0.002 * (p.sec.arms - 1));
+}
+
+/* ================= groups in the population, each with its own wishes ================= */
+const FAC = {
+  army:  { he: 'הצבא', ic: '🎖️' },
+  biz:   { he: 'אנשי עסקים', ic: '💼' },
+  work:  { he: 'עובדים', ic: '👷' },
+  relig: { he: 'דתיים ומסורתיים', ic: '🕌' },
+  youth: { he: 'צעירים', ic: '🎓' },
+  farm:  { he: 'חקלאים ופריפריה', ic: '🚜' },
+};
+function facInit() { const p = S.p; if (!p.fac) { p.fac = {}; for (const k in FAC) p.fac[k] = 55; p.facCd = 0; } }
+function facTarget(k) {
+  const p = S.p, c = P(), wars = activeWars(S.player), sec = p.sec || {};
+  const g = (p.gdpHist && p.gdpHist.length > 12) ? p.gdpHist[p.gdpHist.length - 1] / p.gdpHist[p.gdpHist.length - 13] - 1 : 0.02;
+  switch (k) {
+    case 'army': return 45 + (p.defPct - 0.03) * 500 + (sec.arms || 0) * 3 + (wars ? 5 : 0) + ((P().tm || 1) - 1) * 40;
+    case 'biz': return 70 - (p.tax - 0.25) * 200 + (sec.finance || 0) * 3 + (sec.tech || 0) * 2 + g * 300 - sanctionHit(S.player) * 100;
+    case 'work': return 35 + (p.welfare - 0.1) * 250 + (sec.industry || 0) * 4 + g * 200;
+    case 'relig': return 60 - (sec.tourism || 0) * 2 - (p.unrest || 0) * 2 + ((p.built && p.built.school) || 0) * 2 - (S.p.rep > 70 ? 3 : 0);
+    case 'youth': return 40 + (sec.tech || 0) * 5 + ((p.built && p.built.house) || 0) * 5 + ((p.built && p.built.school) || 0) * 3 - wars * 10 - (c.mob > 0 ? 10 : 0);
+    case 'farm': return 40 + (sec.agri || 0) * 6 + ((p.built && p.built.infra) || 0) * 3 - (p.tax - 0.3) * 80;
+  }
+  return 50;
+}
+// how the groups move the people's love (added to the approval target)
+const factionAp = () => { const p = S.p; if (!p || !p.fac) return 0; let s = 0; for (const k in FAC) s += (p.fac[k] - 50); return s / 6 * 0.25; };
+function facAdd(k, d) { facInit(); S.p.fac[k] = clamp(S.p.fac[k] + d, 0, 100); }
+// what each group asks for when it is unhappy
+const DEMANDS = {
+  army: { t: 'הצבא דורש תקציב', x: 'הרמטכ״ל אומר שהצבא חלש מדי ומבקש עוד כסף לציוד.', o: [
+    ['להגדיל את התקציב', () => { S.p.defPct = Math.min(0.12, S.p.defPct + 0.01); facAdd('army', 18); facAdd('work', -4); }, 'תקציב ביטחון +1% · הצבא +18'],
+    ['לקנות ציוד חדש בבת אחת', () => { if (spend(P().gdp * 0.004)) { addInv(P(), 0.03); facAdd('army', 12); } }, () => money(P().gdp * 0.004) + ' · הצבא +12'],
+    ['לסרב', () => { facAdd('army', -12); }, 'הצבא −12'] ] },
+  biz: { t: 'אנשי העסקים רוצים פחות מסים', x: 'ראשי החברות הגדולות מאיימים להעביר את המפעלים לחו״ל.', o: [
+    ['להוריד מס חברות', () => { S.p.tax = Math.max(0.1, S.p.tax - 0.02); facAdd('biz', 18); facAdd('work', -5); }, 'מסים −2% · עסקים +18'],
+    ['להשקיע בענף הפיננסים', () => { secInit(); if (spend(P().gdp * 0.003)) { S.p.sec.finance = Math.min(6, S.p.sec.finance + 1); facAdd('biz', 10); } }, () => money(P().gdp * 0.003) + ' · עסקים +10'],
+    ['לסרב', () => { facAdd('biz', -12); }, 'עסקים −12'] ] },
+  work: { t: 'העובדים מאיימים בשביתה', x: 'האיגודים דורשים העלאת שכר מינימום ותנאים טובים יותר.', o: [
+    ['להעלות שכר מינימום', () => { S.p.welfare = Math.min(0.35, S.p.welfare + 0.015); facAdd('work', 20); facAdd('biz', -8); }, 'רווחה +1.5% · עובדים +20 · עסקים −8'],
+    ['מענק חד-פעמי', () => { if (spend(P().gdp * 0.002)) facAdd('work', 12); }, () => money(P().gdp * 0.002) + ' · עובדים +12'],
+    ['לסרב — שישבתו', () => { facAdd('work', -15); S.p.growthBonus = (S.p.growthBonus || 0) - 0.002; }, 'עובדים −15 · צמיחה −0.2%'] ] },
+  relig: { t: 'הדתיים מוחים', x: 'מנהיגי הקהילות הדתיות מרגישים שהממשלה מתעלמת מהם ומהמסורת.', o: [
+    ['תקציב למוסדות דת וחינוך', () => { if (spend(P().gdp * 0.002)) facAdd('relig', 16); facAdd('youth', -4); }, () => money(P().gdp * 0.002) + ' · דתיים +16 · צעירים −4'],
+    ['פגישה עם המנהיגים', () => { facAdd('relig', 7); }, 'דתיים +7'],
+    ['להתעלם', () => { facAdd('relig', -12); S.p.unrest = (S.p.unrest || 0) + 1; }, 'דתיים −12'] ] },
+  youth: { t: 'הצעירים יוצאים לרחובות', x: 'אין דירות ואין עבודה טובה. הצעירים מאיימים לעזוב את המדינה.', o: [
+    ['מבצע דיור לצעירים', () => { if (spend(P().gdp * 0.003)) facAdd('youth', 18); }, () => money(P().gdp * 0.003) + ' · צעירים +18'],
+    ['להשקיע בהייטק', () => { secInit(); if (spend(P().gdp * 0.003)) { S.p.sec.tech = Math.min(6, S.p.sec.tech + 1); facAdd('youth', 12); } }, () => money(P().gdp * 0.003) + ' · צעירים +12 · הייטק +1'],
+    ['להתעלם', () => { facAdd('youth', -12); S.p.growthBonus = (S.p.growthBonus || 0) - 0.001; }, 'צעירים −12 · בריחת מוחות'] ] },
+  farm: { t: 'החקלאים חוסמים כבישים', x: 'החקלאים והפריפריה דורשים סבסוד ומים.', o: [
+    ['סבסוד לחקלאות', () => { if (spend(P().gdp * 0.0015)) facAdd('farm', 18); }, () => money(P().gdp * 0.0015) + ' · חקלאים +18'],
+    ['כבישים ומים לפריפריה', () => { if (spend(P().gdp * 0.003)) { facAdd('farm', 12); S.p.growthBonus = (S.p.growthBonus || 0) + 0.0005; } }, () => money(P().gdp * 0.003) + ' · חקלאים +12'],
+    ['לסרב', () => { facAdd('farm', -12); }, 'חקלאים −12'] ] },
+};
+function factionsMonthly() {
+  facInit(); const p = S.p, c = P();
+  for (const k in FAC) p.fac[k] = clamp(p.fac[k] + (clamp(facTarget(k), 0, 100) - p.fac[k]) * 0.15, 0, 100);
+  if (p.facCd > 0) { p.facCd--; return; }
+  const low = Object.keys(FAC).sort((a, b) => p.fac[a] - p.fac[b])[0];
+  if (p.fac[low] < 46 && R() < 0.6) {
+    const D = DEMANDS[low]; p.facCd = 2;
+    modal({ title: FAC[low].ic + ' ' + D.t, html: '<p>' + D.x + '</p><p class="sub">שביעות רצון: ' + Math.round(p.fac[low]) + '/100</p>',
+      buttons: D.o.map(([l, fn, fx]) => ({ label: l + '<small class="cost">' + isoNums(typeof fx === 'function' ? fx() : fx) + '</small>', fn: () => { fn(); renderAll(); } })) });
+  }
+  if (low === 'army' && p.fac.army < 12 && c.gov !== 'democracy' && R() < 0.1) { addNews('קצינים כועסים מדברים על הפיכה! הצבא לא מרוצה.', 'bad'); p.unrest = (p.unrest || 0) + 3; }
+}
+function factionSection() {
+  facInit(); const p = S.p;
+  let h = '<h3>קבוצות בעם</h3><p class="sub">כל קבוצה רוצה משהו אחר. הממוצע שלהן משפיע על אהבת העם (' + sgn(factionAp()) + '). קבוצה לא מרוצה תבוא עם דרישות.</p><div class="grid">';
+  for (const k in FAC) { const v = p.fac[k], T = clamp(facTarget(k), 0, 100);
+    h += '<div><small>' + FAC[k].ic + ' ' + FAC[k].he + '</small><span class="' + (v < 30 ? 'bad' : v < 45 ? 'warn' : 'ok') + '">' + Math.round(v) + '</span> <small>' + (T > v + 2 ? '↑' : T < v - 2 ? '↓' : '') + '</small></div>'; }
+  return h + '</div>';
+}
+
+/* ================= the UN: votes and our own resolutions ================= */
+const UNR = [
+  { t: c => 'גינוי ' + c.he + ' על הפרת זכויות אדם', bad: 1 },
+  { t: c => 'סנקציות על ' + c.he + ' בגלל תוכנית הנשק שלה', bad: 1 },
+  { t: c => 'קרן סיוע בינלאומית ל' + c.he + ' אחרי אסון', bad: 0 },
+  { t: c => 'הכרה בזכותה של ' + c.he + ' לגבולות בטוחים', bad: 0 },
+];
+function unMonthly() {
+  const p = S.p; if (p.unCd > 0) { p.unCd--; return; } p.unCd = 3 + Math.floor(R() * 3);
+  const others = alive().filter(id => id !== S.player && S.c[id].gdp > 20);
+  const o = others[Math.floor(R() * others.length)]; if (!o) return;
+  const C = S.c[o], hated = worldView(o) < -8, R_ = UNR.filter(r => hated ? r.bad : !r.bad), r = R_[Math.floor(R() * R_.length)];
+  const friends = alive().filter(id => id !== o && id !== S.player && rel(id, o) > 40).slice(0, 4), foes = alive().filter(id => id !== o && id !== S.player && rel(id, o) < -40).slice(0, 4);
+  const yes = r.bad ? foes : friends, no = r.bad ? friends : foes;
+  const vote = (dir) => () => {
+    const sg = r.bad ? -1 : 1, e = { rel: {} };
+    if (dir === 1) { e.rel[o] = 12 * sg; yes.forEach(id => e.rel[id] = 4); no.forEach(id => e.rel[id] = -4); e.rep = r.bad ? 2 : 1; }
+    else if (dir === -1) { e.rel[o] = -12 * sg; yes.forEach(id => e.rel[id] = -4); no.forEach(id => e.rel[id] = 4); e.rep = r.bad ? -2 : -1; }
+    else { e.rel[o] = 0; }
+    fxToast('הצבענו באו״ם', e); addNews('עצרת האו״ם הצביעה על: ' + r.t(C) + '.', 'dip'); renderAll();
+  };
+  modal({ title: '🇺🇳 הצבעה באו״ם', html: '<p><b>' + r.t(C) + '</b></p><p class="sub">בעד: ' + (yes.map(nm).join(', ') || '—') + '<br>נגד: ' + (no.map(nm).join(', ') || '—') + '</p>',
+    buttons: [{ label: 'בעד', fn: vote(1) }, { label: 'נגד', fn: vote(-1) }, { label: 'להימנע', fn: vote(0) }] });
+}
+const unChance = o => clamp(0.15 + S.p.rep / 140 - worldView(o) / 60 - (S.c[o].nukes > 0 ? 0.1 : 0), 0.05, 0.85);
+function unButton(o) {
+  if (!S.c[o] || o === S.player) return '';
+  const cd = cdLeft('unres:' + o);
+  return '<h3>האו״ם</h3><div class="btns">' + (cd ? '<button class="b" disabled>הצעת החלטה נגדם' + cdNote(cd) + '</button>' :
+    fbtn('unres', 'להציע החלטה נגדם באו״ם', { note: 'סיכוי ' + pct(unChance(o) * 100) + ' · הצלחה: סנקציות עולמיות עליהם' }, '')) + '</div>';
+}
+function doUnRes() {
+  const o = selOwner(), C = S.c[o]; if (!C || cdLeft('unres:' + o)) return; setCd('unres:' + o, 180);
+  if (R() < unChance(o)) {
+    let n = 0; alive().forEach(id => { if (id !== o && id !== S.player && rel(id, o) < 20 && S.c[id].gdp > 30) { S.sanc[id + '>' + o] = 1; n++; } });
+    noteGrievance(o, S.player);
+    fxToast('ההחלטה עברה! ' + n + ' מדינות מטילות סנקציות על ' + C.he, { rep: 3, rel: { [o]: -20 } });
+    addNews('האו״ם קיבל את ההצעה של ' + P().he + ': סנקציות על ' + C.he + '.', 'good');
+  } else { fxToast('ההצעה נדחתה באו״ם', { rep: -2, rel: { [o]: -10 } }, true); addNews('האו״ם דחה את ההצעה של ' + P().he + ' נגד ' + C.he + '.', 'bad'); }
+  renderAll();
 }
 
 function addInv(c, f) { if (!c.inv) return; ['troops', 'tanks', 'afv', 'art', 'air', 'heli'].forEach(k => { if (c.inv[k]) c.inv[k] *= 1 + f; }); }
@@ -5525,7 +5695,7 @@ function viewCountry() {
     h += scd ? '<button class="b" disabled>סנקציות' + cdNote(scd) + '</button>' :
       sanctions(S.player, o) ? fbtn('sanction', 'הסר סנקציות', { rel: { [o]: 6 } }) : fbtn('sanction', 'הטל סנקציות', { rep: sancRep(o), rel: { [o]: -20 } });
     h += fbtn('war', 'הכרז מלחמה', warFx(o), 'danger');
-    h += '</div>' + peaceButtons(o) + covertButtons(o);
+    h += '</div>' + peaceButtons(o) + covertButtons(o) + unButton(o);
     h += strikeSection(o, null);
   } else {
     const w = S.wars.find(x => (x.A.includes(o) && x.B.includes(S.player)) || (x.B.includes(o) && x.A.includes(S.player)));
@@ -5716,7 +5886,7 @@ function viewEco() {
     (b.war ? row('עלות מלחמות', -b.war) : '') + (b.interest ? row('ריבית על חוב', -b.interest) : '') + (b.upkeep ? row('אחזקת כוחות נוספים ומילואים', -b.upkeep) : '') +
     (b.nuke ? row('תוכנית גרעין', -b.nuke) : '') + (b.gov ? row('שכר השרים', -b.gov) : '') + '<tr class="tot"><td>סה״כ</td><td>' + money(b.net) + '</td></tr></table>';
   h += '<p class="sub">הכסף נכנס ויוצא כל יום. הסכמי סחר: ' + (tr.length ? tr.join(', ') : 'אין') + '<br>מטילות עליך סנקציות: ' + (sancBy.length ? sancBy.join(', ') : 'אף אחת') + '</p>';
-  return h;
+  return h + econSection();
 }
 const row = (l, v) => '<tr><td>' + l + '</td><td>' + money(v) + '</td></tr>';
 function slider(k, label, v, mn, mx, hint) {
@@ -5768,7 +5938,7 @@ function viewHome() {
   h += '<h3>מה משפיע על המוניטין בעולם</h3><ul class="plain"><li>מוריד: תקיפות בלי סיבה, מלחמה בלי סיבה, הפרת הסכמים, נשק גרעיני, סיפוח, דיכוי הפגנות, סנקציות על מדינות חלשות.</li>' +
     '<li>מעלה: סיוע הומניטרי, עזרה באסונות, הסכמי שלום וסחר, קליטת פליטים, אנרגיה ירוקה.</li>' +
     '<li>מוניטין נמוך = יותר סנקציות, סירובים וקואליציות נגדך. גבוה = הסכמים קלים יותר ותמיכה.</li></ul>';
-  return missionSection() + h + iniSection();
+  return missionSection() + factionSection() + h + iniSection();
 }
 
 /* ---- military ---- */
@@ -6276,6 +6446,8 @@ const ACT = {
   pz: d => doPz(d.k),
   tech: d => startTech(d.k),
   cov: d => doCovert(d.k),
+  sect: d => startSect(d.k),
+  unres: () => doUnRes(),
   provo: d => doProvo(d.k),
   calm: () => doCalm(),
   mclaim: d => claimMission(+d.k),
