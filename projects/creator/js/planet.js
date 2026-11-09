@@ -47,26 +47,30 @@ export function buildTerrain(world) {
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
     fragmentShader: `
       uniform vec3 sunDir; varying vec3 vN; varying vec3 vP; varying vec3 vC;
-      float h(vec3 p){ return fract(sin(dot(p, vec3(127.1,311.7,74.7))) * 43758.5453); }
+      // sine-free hash: stays stable at the large coordinates used for close-up detail
+      float h(vec3 p){ p = fract(p * 0.1031); p += dot(p, p.yzx + 33.33); return fract((p.x + p.y) * p.z); }
       float vnoise(vec3 p){ vec3 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
         return mix(mix(mix(h(i),h(i+vec3(1,0,0)),f.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),f.x),f.y),
                    mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),f.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),f.x),f.y),f.z); }
       void main(){
         vec3 N = normalize(vN); vec3 up = normalize(vP);
         float camD = length(cameraPosition);
-        // fine detail so the ground isn't flat when zoomed in
+        float dist = length(cameraPosition - vP);
+        // fine detail so the ground isn't flat when zoomed in (more octaves the closer you are)
         float near = 1.0 - smoothstep(1.15, 1.8, camD);
         float dn = (vnoise(vP*420.0)*0.6 + vnoise(vP*1300.0)*0.4) - 0.5;
-        vec3 col = vC * (1.0 + dn * 0.35 * near);
-        float ndl = dot(N, sunDir);
-        float term = dot(up, sunDir);
-        float day = smoothstep(-0.12, 0.12, term);
-        vec3 sunCol = mix(vec3(1.0,0.55,0.3), vec3(1.0,0.97,0.92), smoothstep(0.0, 0.35, term));
-        vec3 lit = col * (max(ndl, 0.0) * 2.2 * sunCol * day + vec3(0.035,0.045,0.07) + 0.06*day*vec3(0.5,0.7,1.0));
+        float close = 1.0 - smoothstep(0.01, 0.06, dist);
+        float dn2 = (vnoise(vP*4200.0)*0.6 + vnoise(vP*13000.0)*0.4) - 0.5;
+        vec3 col = vC * (1.0 + dn * 0.35 * near + dn2 * 0.3 * close);
+        // even lighting: the light follows the camera, so there is never a dark side
+        float ndl = max(dot(N, sunDir), 0.0);
+        float slope = 1.0 - max(dot(N, up), 0.0);
+        vec3 lit = col * (0.5 + 1.15 * ndl) * vec3(1.0, 0.98, 0.95);
+        lit *= 1.0 - slope * 0.35;
         vec3 V = normalize(cameraPosition - vP);
         float rim = 1.0 - max(dot(up, V), 0.0);
         float far = smoothstep(1.2, 2.2, camD);
-        lit += vec3(0.25,0.45,0.95) * pow(rim, 2.5) * 0.45 * day * far;
+        lit += vec3(0.25,0.45,0.95) * pow(rim, 2.5) * 0.4 * far;
         gl_FragColor = vec4(lit, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -91,16 +95,17 @@ export function buildOcean() {
         vec3 q = vP * 600.0;
         vec3 w = vec3(sin(q.x + time*1.3) + sin(q.y*1.3 - time), sin(q.y + time*1.1) + sin(q.z*1.2 + time*0.7), sin(q.z + time*0.9) + sin(q.x*1.1 - time*1.2));
         vec3 Nw = normalize(N + w * 0.03 * (1.0 - smoothstep(1.15, 1.6, camD)));
-        float term = dot(N, sunDir);
-        float day = smoothstep(-0.12, 0.12, term);
+        float lodw = 1.0 - smoothstep(1.002, 1.02, camD);
+        vec3 q2 = vP * 9000.0;
+        Nw = normalize(Nw + vec3(sin(q2.x + time*2.0), sin(q2.y*1.2 - time*1.7), sin(q2.z*0.9 + time*1.3)) * 0.04 * lodw);
         float ndl = max(dot(N, sunDir), 0.0);
         float fres = 0.02 + 0.98 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
-        vec3 deep = vec3(0.004, 0.018, 0.05);
+        vec3 deep = vec3(0.006, 0.03, 0.075);
         vec3 sky = vec3(0.25, 0.45, 0.85);
-        vec3 col = deep * (0.15 + 1.6 * ndl) + sky * fres * 0.55 * day;
+        vec3 col = deep * (0.7 + 1.3 * ndl) + sky * fres * 0.5;
         vec3 H = normalize(sunDir + V);
-        float spec = pow(max(dot(Nw, H), 0.0), 380.0) * 6.0 + pow(max(dot(N, H), 0.0), 60.0) * 0.25;
-        col += vec3(1.0, 0.9, 0.75) * spec * day;
+        float spec = pow(max(dot(Nw, H), 0.0), 380.0) * 1.2 + pow(max(dot(N, H), 0.0), 80.0) * 0.06;
+        col += vec3(1.0, 0.95, 0.85) * spec;
         float a = mix(0.72, 0.98, fres);
         gl_FragColor = vec4(col, a);
         #include <tonemapping_fragment>
@@ -142,10 +147,8 @@ export function buildClouds(seed) {
       void main(){
         float a = textureCube(map, vL).a;
         vec3 N = normalize(vW);
-        float term = dot(N, sunDir);
-        float day = smoothstep(-0.15, 0.15, term);
-        vec3 c = mix(vec3(1.0,0.6,0.4), vec3(1.0), smoothstep(0.0,0.3,term)) * (0.04 + 1.1 * max(term, 0.0) + 0.1*day);
-        gl_FragColor = vec4(c, a * opacity * (0.35 + 0.65*day));
+        vec3 c = vec3(1.0) * (0.55 + 0.55 * max(dot(N, sunDir), 0.0));
+        gl_FragColor = vec4(c, a * opacity * 0.9);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }`,
@@ -169,10 +172,8 @@ export function buildAtmosphere() {
         float g = smoothstep(1.075, 0.995, hgt);
         g = pow(g, 2.2);
         if (hgt < 1.0) g *= smoothstep(0.96, 1.0, hgt);
-        vec3 n = normalize(c);
-        float lit = smoothstep(-0.35, 0.4, dot(n, sunDir));
-        vec3 col = mix(vec3(1.0, 0.45, 0.2), vec3(0.3, 0.55, 1.0), smoothstep(-0.05, 0.35, dot(n, sunDir)));
-        gl_FragColor = vec4(col * g * lit * 1.3 * strength, 1.0);
+        vec3 col = vec3(0.3, 0.55, 1.0);
+        gl_FragColor = vec4(col * g * 1.15 * strength, 1.0);
       }`,
   });
   const m = new THREE.Mesh(new THREE.SphereGeometry(1.08, 96, 48), mat);
@@ -209,6 +210,7 @@ export function buildSunGlow() {
   return sp;
 }
 
+// sunDir passed to the shaders is the light direction (follows the camera), not the visible sun.
 export class PlanetView {
   constructor(scene, world) {
     this.group = new THREE.Group();

@@ -49,7 +49,9 @@
       <span><b id="hudPop">0</b> יצורים</span>
       <span>דור <b id="hudGen">0</b></span>
       <span><b id="hudSpecies">0</b> מינים</span>
+      <span>🛖 <b id="hudNests">0</b> קנים</span>
     </div>
+    <button id="btnLog" class="icon-btn" aria-label="ידע">📜</button>
     <button id="btnMenu" class="icon-btn" aria-label="תפריט">☰</button>
   </header>
   <div id="speed">
@@ -58,7 +60,12 @@
     <button data-speed="2">×2</button>
     <button data-speed="4">×4</button>
     <button data-speed="8">×8</button>
+    <button data-speed="16">×16</button>
+    <button data-speed="32">×32</button>
+    <button data-speed="64">×64</button>
+    <button id="btnSkip" aria-label="דלג קדימה">⏩</button>
   </div>
+  <div id="speedReal" hidden></div>
   <div id="toast"></div>
   <div id="panel" hidden>
     <div class="p-head">
@@ -67,6 +74,7 @@
       <button id="btnFollow" class="chip">עקוב</button>
       <button id="btnClose" class="icon-btn" aria-label="סגור">✕</button>
     </div>
+    <div class="p-body" id="pBody"></div>
     <div class="p-stats" id="pStats"></div>
     <div class="p-brain-title">המוח (חי): כחול = חיובי, כתום = שלילי</div>
     <div class="p-brain" id="pBrain"></div>
@@ -77,10 +85,28 @@
     <button data-tool="bolt"><svg viewBox="0 0 24 24"><path d="M13 2L4 14h6l-1 8 9-12h-6z"/></svg><span>ברק</span></button>
     <button data-tool="spawn"><svg viewBox="0 0 24 24"><path d="M12 3a3 3 0 110 6 3 3 0 010-6zm-6 8h12l-2 10H8zM3 6l3 3M21 6l-3 3"/></svg><span>צור חיים</span></button>
   </nav>
+  <div id="logBox" class="screen" hidden>
+    <div class="menu-box log-box">
+      <h2>📜 ידע</h2>
+      <p class="hint">אבני דרך ואירועים בעולם — הזרע של ספר ההיסטוריה.</p>
+      <ul id="logList"></ul>
+      <button class="big primary" id="btnLogClose">סגור</button>
+    </div>
+  </div>
+  <div id="skip" class="screen" hidden>
+    <div class="menu-box">
+      <h2>⏩ מדלג קדימה…</h2>
+      <div class="skip-track"><i id="skipBar"></i></div>
+      <p class="hint" id="skipText"></p>
+      <button class="big" id="btnSkipCancel">עצור כאן</button>
+    </div>
+  </div>
   <div id="pause" class="screen" hidden>
     <div class="menu-box">
       <h2>תפריט</h2>
       <button class="big primary" id="btnResume">חזרה למשחק</button>
+      <button class="big" id="btnSkip2">⏩ דלג קדימה (10 דורות)</button>
+      <button class="big" id="btnLog2">📜 ידע — מה קרה בעולם</button>
       <button class="big" id="btnSave">שמור עכשיו</button>
       <button class="big" id="btnQuit">לתפריט הראשי</button>
     </div>

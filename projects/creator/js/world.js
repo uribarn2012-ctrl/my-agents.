@@ -137,4 +137,13 @@ export function sample(world, field, x, y, z) {
 }
 
 export const isLand = (world, x, y, z) => sample(world, world.elev, x, y, z) > 0.004;
-export const surfaceRadius = (world, x, y, z) => sample(world, world.radius, x, y, z);
+// exact height of the rendered terrain triangle (a,b,d / a,d,c) so tiny things sit on the ground
+export function surfaceRadius(world, x, y, z) {
+  const N = world.N, S = world.S, field = world.radius;
+  const g = dirToGrid(N, x, y, z);
+  const i = Math.min(N - 1, Math.max(0, Math.floor(g.gi))), j = Math.min(N - 1, Math.max(0, Math.floor(g.gj)));
+  const fi = Math.min(1, Math.max(0, g.gi - i)), fj = Math.min(1, Math.max(0, g.gj - j));
+  const b = g.f * S * S + j * S + i;
+  const a = field[b], bb = field[b + 1], c = field[b + S], d = field[b + S + 1];
+  return fi >= fj ? a + (bb - a) * fi + (d - bb) * fj : a + (c - a) * fj + (d - c) * fi;
+}

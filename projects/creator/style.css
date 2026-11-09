@@ -35,18 +35,30 @@ input { font: inherit; font-size: 18px; padding: 12px 14px; border-radius: 12px;
 #topbar { position: absolute; top: 0; left: 0; right: 0; padding: calc(6px + var(--st)) calc(10px + var(--sr)) 6px calc(10px + var(--sl));
   display: flex; align-items: center; gap: 10px; background: linear-gradient(180deg, rgba(0,0,0,0.65), rgba(0,0,0,0)); }
 .tb-name { font-weight: 700; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 32%; }
-.tb-stats { flex: 1; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; color: #d5e1f7; }
+.tb-stats { flex: 1; display: flex; flex-wrap: wrap; gap: 3px 10px; font-size: 13px; color: #d5e1f7; }
+#btnLog { min-width: 44px; min-height: 44px; font-size: 20px; }
 .tb-stats b { color: #fff; }
 #btnMenu { min-width: 44px; min-height: 44px; }
 #speed { position: absolute; top: calc(62px + var(--st)); left: calc(10px + var(--sl)); display: flex; direction: ltr; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
-#speed button { border: 0; background: transparent; min-width: 44px; min-height: 40px; font-size: 15px; font-weight: 600; }
+#speed button { border: 0; background: transparent; min-width: 36px; min-height: 40px; padding: 0 4px; font-size: 14px; font-weight: 600; }
+#speedReal { position: absolute; top: calc(106px + var(--st)); left: calc(12px + var(--sl)); font-size: 12px; color: var(--gold); text-shadow: 0 1px 2px #000; }
+.p-body { font-size: 13px; color: #dfe9ff; margin-top: 8px; line-height: 1.4; }
+.log-box { max-height: 80vh; }
+#logList { list-style: none; margin: 0; padding: 0; overflow-y: auto; max-height: 55vh; display: flex; flex-direction: column; gap: 6px; }
+#logList li { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; font-size: 14px; display: flex; flex-direction: column; gap: 2px; }
+#logList li.milestone { border-color: rgba(255,211,107,0.5); }
+.lg-t { font-size: 11px; color: var(--muted); }
+#logBox, #skip { background: rgba(2,4,10,0.86); z-index: 25; }
+.log-box { max-height: 82vh; }
+.skip-track { height: 12px; border-radius: 6px; background: rgba(255,255,255,0.12); overflow: hidden; }
+.skip-track i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #3d8fe0, #6fe3c3); transition: width 0.15s; }
 #speed button.on { background: var(--accent); color: #001428; }
 #toolbar { position: absolute; bottom: 0; left: 0; right: 0; display: flex; justify-content: center; gap: 8px;
   padding: 8px calc(10px + var(--sr)) calc(8px + var(--sb)) calc(10px + var(--sl)); background: linear-gradient(0deg, rgba(0,0,0,0.7), rgba(0,0,0,0)); }
 #toolbar button { flex: 1; max-width: 110px; min-height: 64px; border-radius: 16px; border: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 13px; }
 #toolbar svg { width: 26px; height: 26px; fill: currentColor; stroke: currentColor; stroke-width: 0.6; }
 #toolbar button.on { background: linear-gradient(180deg, #3d8fe0, #2563b8); border-color: #8cc8ff; }
-#toast { position: absolute; top: calc(112px + var(--st)); left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line); padding: 8px 14px; border-radius: 12px;
+#toast { position: absolute; top: calc(124px + var(--st)); left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line); padding: 8px 14px; border-radius: 12px;
   font-size: 14px; opacity: 0; transition: opacity 0.3s; pointer-events: none; max-width: 90%; text-align: center; }
 #toast.show { opacity: 1; }
 #panel { position: absolute; left: calc(8px + var(--sl)); right: calc(8px + var(--sr)); bottom: calc(86px + var(--sb)); max-width: 480px; margin: 0 auto;
@@ -64,7 +76,7 @@ input { font: inherit; font-size: 18px; padding: 12px 14px; border-radius: 12px;
 .p-stats .bar { display: block; height: 4px; background: rgba(255,255,255,0.12); border-radius: 2px; margin-top: 4px; overflow: hidden; }
 .p-stats .bar i { display: block; height: 100%; background: #6be38c; }
 .p-brain-title { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-.p-brain { position: relative; height: 210px; }
+.p-brain { position: relative; height: 250px; }
 .p-brain canvas { position: absolute; inset: 0; }
 .bl-in, .bl-out { position: absolute; top: 0; bottom: 0; font-size: 10px; color: #c7d4ec; pointer-events: none; }
 .bl-in { right: 0; } .bl-out { left: 0; }

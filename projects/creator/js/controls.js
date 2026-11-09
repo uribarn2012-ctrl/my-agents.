@@ -3,6 +3,8 @@
 import * as THREE from 'three';
 import { surfaceRadius } from './world.js';
 
+export const MIN_ALT = 0.0016, MAX_ALT = 4.5; // can fly down to just above the creatures
+
 export class PlanetControls {
   constructor(camera, el, world) {
     this.camera = camera; this.el = el; this.world = world;
@@ -20,7 +22,8 @@ export class PlanetControls {
     el.addEventListener('contextmenu', (e) => e.preventDefault());
   }
   setWorld(world) { this.world = world; }
-  zoom(f) { this.targetAlt = Math.min(4.5, Math.max(0.03, this.targetAlt * f)); }
+  zoom(f) { this.flyTo = null; this.targetAlt = Math.min(MAX_ALT, Math.max(MIN_ALT, this.targetAlt * f)); }
+  fly(dir, alt) { this.flyTo = dir.clone().normalize(); this.targetAlt = Math.min(MAX_ALT, Math.max(MIN_ALT, alt)); }
   down(e) {
     if (!this.enabled) return;
     this.el.setPointerCapture?.(e.pointerId);
@@ -33,12 +36,12 @@ export class PlanetControls {
     const dx = e.clientX - p.x, dy = e.clientY - p.y;
     p.x = e.clientX; p.y = e.clientY;
     if (this.pointers.size === 1) {
-      if (Math.hypot(p.x - p.sx, p.y - p.sy) > 8) { this.follow = null; p.moved = true; }
+      if (Math.hypot(p.x - p.sx, p.y - p.sy) > 8) { this.follow = null; this.flyTo = null; p.moved = true; }
       if (p.moved) { this.rotate(dx, dy); this.vel.set(dx, dy); }
     } else if (this.pointers.size === 2) {
       p.moved = true;
       const [a, b] = [...this.pointers.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y);
-      if (this.pinch) { this.targetAlt = Math.min(4.5, Math.max(0.03, this.targetAlt * this.pinch / d)); this.alt = this.targetAlt; }
+      if (this.pinch) { this.flyTo = null; this.targetAlt = Math.min(MAX_ALT, Math.max(MIN_ALT, this.targetAlt * this.pinch / d)); this.alt = this.targetAlt; }
       this.pinch = d;
     }
   }
@@ -60,7 +63,11 @@ export class PlanetControls {
   update(dt, followPos) {
     if (!this.pointers.size && this.vel.lengthSq() > 0.01) { this.rotate(this.vel.x, this.vel.y); this.vel.multiplyScalar(Math.pow(0.02, dt)); }
     if (this.autoSpin) this.rotate(this.autoSpin * dt, 0);
-    this.alt += (this.targetAlt - this.alt) * Math.min(1, dt * 8);
+    this.alt = Math.exp(Math.log(this.alt) + (Math.log(this.targetAlt) - Math.log(this.alt)) * Math.min(1, dt * 6));
+    if (!followPos && this.flyTo) {
+      followPos = this.flyTo;
+      if (new THREE.Vector3(0, 0, 1).applyQuaternion(this.q).dot(this.flyTo) > 0.99999) this.flyTo = null;
+    }
     if (followPos) { // rotate so the creature is under the camera
       const S = new THREE.Vector3(0, 0, 1).applyQuaternion(this.q);
       const r = new THREE.Quaternion().setFromUnitVectors(S, followPos.clone().normalize());
@@ -72,18 +79,21 @@ export class PlanetControls {
     const U = new THREE.Vector3(0, 1, 0).applyQuaternion(this.q);
     const ground = Math.max(1.0, surfaceRadius(this.world, S.x, S.y, S.z));
     const near = THREE.MathUtils.smoothstep(0.5, 0.04, this.alt);
-    const tilt = near * 1.05;
+    const tilt = near * 1.05 + THREE.MathUtils.smoothstep(0.03, 0.002, this.alt) * 0.22; // look toward the horizon when very low
     const T = S.clone().multiplyScalar(ground * near);
     const off = S.clone().multiplyScalar(Math.cos(tilt)).addScaledVector(U, -Math.sin(tilt));
     const cam = this.camera;
     cam.position.copy(S).multiplyScalar(ground).addScaledVector(off, this.alt);
     // keep above ground
     const cp = cam.position, cl = cp.length(), cd = cp.clone().divideScalar(cl);
-    const gr = Math.max(1.0, surfaceRadius(this.world, cd.x, cd.y, cd.z)) + 0.006;
+    const gr = Math.max(1.0, surfaceRadius(this.world, cd.x, cd.y, cd.z)) + Math.max(0.00045, this.alt * 0.3);
     if (cl < gr) cp.multiplyScalar(gr / cl);
     cam.up.copy(U).lerp(S, 1 - near).normalize();
     cam.lookAt(T);
-    cam.near = Math.max(0.0008, this.alt * 0.15); cam.far = 200;
+    // tight near/far around the planet (stars + sun are drawn in a separate background pass)
+    const d = cp.length();
+    cam.near = Math.min(0.5, Math.max(0.00003, this.alt * 0.15));
+    cam.far = Math.sqrt(Math.max(0, d * d - 1)) + 0.65;
     cam.updateProjectionMatrix();
   }
   // ray -> point on the planet surface (unit direction) or null
