@@ -1,0 +1,83 @@
+/* LEVEL UP. short ads — "style B" (matches the owner's reference ad). 1080x1920. */
+:root{--lime:#C6FF00;--green:#3CEB5F;--grey:#9AA0A8;--card:#16181B;--card2:#1E2125;--line:#2A2D31;--glow:rgb(34,150,60)}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1080px;height:1920px;background:#000;overflow:hidden}
+body{font-family:'Plus Jakarta Sans','Heebo',system-ui,sans-serif;color:#fff;-webkit-font-smoothing:antialiased}
+body.he{font-family:'Heebo',system-ui,sans-serif}
+#frame{position:absolute;inset:0;overflow:hidden;background:#000}
+
+/* drifting soft glows */
+#bg{position:absolute;inset:0}
+#bg i{position:absolute;width:1100px;height:1100px;margin:-550px 0 0 -550px;border-radius:50%;
+  background:radial-gradient(circle,var(--glow) 0%,rgba(0,0,0,0) 62%);opacity:.32;will-change:transform,opacity}
+
+/* ---------- titles ---------- */
+.ttl{position:absolute;left:150px;width:780px;top:200px;text-align:center;display:none}
+.ttl .l1,.ttl .l2{display:block;font-weight:800;font-size:104px;line-height:1.0;letter-spacing:-.045em;will-change:transform,opacity,filter}
+.he .ttl .l1,.he .ttl .l2{font-weight:800;letter-spacing:-.012em;line-height:1.04;font-size:108px}
+.ttl .l2 span{background:linear-gradient(90deg,#4CF25C,#C6FF00);-webkit-background-clip:text;background-clip:text;color:transparent;padding:0 .04em}
+.ttl .sub{display:block;margin-top:26px;font-weight:500;font-size:38px;color:#C9CDD2;letter-spacing:-.01em}
+.he .ttl .sub{font-weight:500;letter-spacing:0}
+
+/* ---------- phone: straight on, centered, large; bottom runs off frame ---------- */
+#phone{position:absolute;left:214px;top:0;width:652px;height:1378px;border-radius:100px;background:#0b0b0c;will-change:transform,opacity;
+  box-shadow:inset 0 0 0 2px #45474b,inset 0 0 0 5px #17181a,inset 0 0 0 7px #050505,0 0 0 1px rgba(255,255,255,.08),0 0 120px rgba(40,200,80,.18)}
+#phone .btn{position:absolute;width:6px;border-radius:3px;background:linear-gradient(90deg,#26272a,#55575c,#26272a)}
+#screen{position:absolute;left:14px;top:14px;width:390px;height:844px;transform:scale(1.6);transform-origin:0 0;border-radius:51px;overflow:hidden;background:#000}
+.island{position:absolute;left:50%;top:11px;width:120px;height:35px;margin-left:-60px;border-radius:18px;background:#000;z-index:20;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)}
+.sbar{position:absolute;left:0;right:0;top:14px;height:22px;padding:0 30px 0 34px;display:flex;justify-content:space-between;align-items:center;
+  font:700 15px/1 'Plus Jakarta Sans',sans-serif;z-index:19;direction:ltr}
+.he .sbar{flex-direction:row-reverse;padding:0 34px 0 30px}
+.sbar b{letter-spacing:2px;font-size:14px}
+
+/* screens inside the phone (logical 390x844) */
+.scr{position:absolute;inset:0;padding:58px 18px 0;background:#000;display:flex;flex-direction:column;gap:10px}
+.he .scr{direction:rtl}
+.kick{font-size:14px;color:var(--grey);font-weight:500}
+.h1{font-size:29px;font-weight:800;letter-spacing:-.03em;margin-top:-6px}
+.he .h1{letter-spacing:-.01em}
+.bub{max-width:80%;padding:12px 15px;border-radius:19px;font-size:17.5px;line-height:1.35;font-weight:600}
+.bub.me{align-self:flex-end;background:var(--green);color:#03150A;border-end-end-radius:6px}
+.bub.ai{align-self:flex-start;background:var(--card2);color:#EDEFF1;border-end-start-radius:6px;font-weight:500}
+.bub.ai b{font-weight:800;color:#fff}
+.caret{display:inline-block;width:2px;height:1.05em;background:#03150A;vertical-align:-2px;margin-inline-start:1px}
+.dots{align-self:flex-start;background:var(--card2);border-radius:18px;padding:13px 16px;display:flex;gap:6px}
+.dots i{width:8px;height:8px;border-radius:50%;background:#8b9097}
+.chip{align-self:flex-start;display:flex;align-items:center;gap:10px;background:#0E2414;border:1px solid rgba(60,235,95,.45);border-radius:14px;padding:11px 13px;font-size:15px;font-weight:700;color:#CFF7D8}
+.chip .open{background:var(--green);color:#03150A;border-radius:9px;padding:5px 10px;font-weight:800}
+.meta{display:flex;gap:16px;margin:2px 0 4px}
+.meta div{display:flex;flex-direction:column}
+.meta b{font-size:25px;font-weight:800;letter-spacing:-.02em}
+.meta small{font-size:13px;color:var(--grey);font-weight:500}
+.row{display:flex;align-items:center;gap:11px;background:var(--card);border-radius:14px;padding:0 12px;height:52px;flex:none;overflow:hidden;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.04)}
+.row .ic{width:34px;height:34px;border-radius:9px;background:#0F2A17;display:flex;align-items:center;justify-content:center;flex:none}
+.row .nm{flex:1;font-size:17px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .rp{font-size:15px;color:#B9BEC4;font-weight:600;direction:ltr}
+.addbtn{height:48px;border-radius:14px;border:1.5px dashed #3A3E43;display:flex;align-items:center;justify-content:center;gap:6px;font-size:16.5px;font-weight:800;color:var(--green);flex:none}
+.cta{position:absolute;left:18px;right:18px;bottom:30px;height:52px;border-radius:26px;background:var(--green);color:#03150A;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px}
+.inbar{position:absolute;left:14px;right:14px;bottom:28px;height:46px;border-radius:23px;background:var(--card);display:flex;align-items:center;justify-content:space-between;padding:0 6px 0 16px;color:#70757c;font-size:14px}
+.he .inbar{padding:0 16px 0 6px}
+.inbar i{width:34px;height:34px;border-radius:50%;background:var(--green)}
+.sheet{position:absolute;left:0;right:0;bottom:0;height:560px;background:#141619;border-radius:26px 26px 0 0;padding:10px 18px;display:flex;flex-direction:column;gap:9px;
+  box-shadow:0 -20px 60px rgba(0,0,0,.6);z-index:10}
+.sheet .grab{width:38px;height:5px;border-radius:3px;background:#3a3e43;align-self:center;margin-bottom:4px}
+.sheet .lbl{font-size:13px;font-weight:800;letter-spacing:.08em;color:var(--grey);text-transform:uppercase}
+.he .sheet .lbl{letter-spacing:0}
+.search{height:46px;border-radius:12px;background:#202328;display:flex;align-items:center;padding:0 14px;font-size:17px;font-weight:600}
+.res{display:flex;justify-content:space-between;align-items:center;height:52px;border-bottom:1px solid #22252a;font-size:17px;font-weight:700;padding:0 4px}
+.res span{font-size:15px;color:var(--grey);font-weight:600}
+.cnt{font-size:13.5px;color:var(--grey);font-weight:600}
+.tap{position:absolute;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;background:rgba(255,255,255,.22);border:1.5px solid rgba(255,255,255,.55);z-index:30;opacity:0;pointer-events:none}
+
+/* ---------- full-screen beats ---------- */
+.beat{position:absolute;inset:0;display:none}
+#note{position:absolute;left:0;right:0;top:1480px;text-align:center;display:none;z-index:50}
+#note span{display:inline-block;font-weight:600;font-size:30px;color:#9AA0A8;background:rgba(0,0,0,.6);padding:7px 20px;border-radius:22px}
+#end .icon{position:absolute;left:410px;top:560px;width:260px;height:260px;border-radius:58px;overflow:hidden;
+  box-shadow:0 0 0 2px rgba(255,255,255,.06),0 0 80px rgba(60,235,95,.35)}
+#end .icon img{width:100%;height:100%;display:block}
+#end .word{position:absolute;left:0;right:0;top:880px;text-align:center;font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;font-size:178px;letter-spacing:-.055em;line-height:1;direction:ltr}
+#end .word span{color:var(--lime)}
+#end .tag{position:absolute;left:120px;right:120px;top:1090px;text-align:center;font-weight:500;font-size:44px;color:#D5D9DD;letter-spacing:-.01em}
+#end .link{position:absolute;left:0;right:0;top:1170px;text-align:center;font-weight:700;font-size:36px;color:var(--grey)}

@@ -1,0 +1,6 @@
+# Temporary render output (frames and demo captures live in the scratchpad, never in the repo)
+frames-*/
+cap*/
+look*/
+*.tmp.mp4
+node_modules/
