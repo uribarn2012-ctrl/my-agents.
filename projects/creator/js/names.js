@@ -6,7 +6,10 @@ export function makeName(id, salt = 0) {
   const n = 2 + (next() % 2);
   let s = '';
   for (let i = 0; i < n; i++) s += SYL[next() % SYL.length];
-  return s;
+  // final letter forms (ך ם ן ף ץ) only at the end of a word
+  const F = { 'ך': 'כ', 'ם': 'מ', 'ן': 'נ', 'ף': 'פ', 'ץ': 'צ' }, R = { 'כ': 'ך', 'מ': 'ם', 'נ': 'ן', 'פ': 'ף', 'צ': 'ץ' };
+  s = s.replace(/[ךםןףץ]/g, (ch) => F[ch]);
+  return s.slice(0, -1) + (R[s.slice(-1)] || s.slice(-1));
 }
 export function randomWorldName(rng) {
   const A = ['ארץ','עולם','כוכב','אי'], B = ['התכלת','הזריחה','החיים','השקט','הירוק','האור','החלומות','הסערה'];
