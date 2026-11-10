@@ -56,7 +56,7 @@ namespace CivInventionData
 		// Era 3: iron and thought
 		{ TEXT("iron"), TEXT("ברזל"), TEXT("הברזל"), F::Craft, 3, 90, TEXT("bronze"), TEXT("stone=60 wood=60"), N::None, false, TEXT("metal=2 food=1.3 war=1.5"), M::None },
 		{ TEXT("mathematics"), TEXT("הנדסה וחשבון גבוה"), TEXT("ההנדסה והחשבון הגבוה"), F::Science, 3, 110, TEXT("writing counting"), TEXT(""), N::None, false, TEXT("research=1.5"), M::None },
-		{ TEXT("philosophy"), TEXT("דרכי החשיבה"), TEXT("דרכי החשיבה"), F::Society, 3, 80, TEXT("writing"), TEXT(""), N::None, false, TEXT("research=1.2 spread=1.2"), M::None },
+		{ TEXT("philosophy"), TEXT("פילוסופיה"), TEXT("הפילוסופיה"), F::Society, 3, 80, TEXT("writing"), TEXT(""), N::None, false, TEXT("research=1.2 spread=1.2"), M::None },
 		{ TEXT("astronomy"), TEXT("מדידת הכוכבים"), TEXT("מדידת הכוכבים"), F::Science, 3, 100, TEXT("mathematics calendar"), TEXT(""), N::None, false, TEXT("range=0.1 research=1.15"), M::None },
 		{ TEXT("aqueducts"), TEXT("אמות מים"), TEXT("אמות המים"), F::Craft, 3, 100, TEXT("roads mathematics"), TEXT("stone=120"), N::Disaster, false, TEXT("cap=1.8 health=1.1"), M::None },
 		{ TEXT("hygiene"), TEXT("תורת הניקיון"), TEXT("תורת הניקיון"), F::Medicine, 3, 90, TEXT("herbal writing"), TEXT(""), N::Plague, true, TEXT("health=1.25 resist=0.06"), M::None },

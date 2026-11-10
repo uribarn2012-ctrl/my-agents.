@@ -335,6 +335,18 @@ ECivReject CivGenerator::Validate(const FCivInventionProposal& Proposal, const F
 	if (Context.PeopleEra < Principle->MinEra) { return ECivReject::TooEarly; }
 	// Nobody designs a new water-wheel device in the age of atoms: an old principle is no longer worth the work.
 	if (Proposal.Key.StartsWith(TEXT("gen_")) && !Principle->bSpeculative && Context.PeopleEra - Principle->MinEra >= 2) { return ECivReject::Obsolete; }
+	// Nor is a steam pump "invented" once the world already has an electric one: the older way is never first after the newer.
+	if (Proposal.Key.StartsWith(TEXT("gen_")) && !Principle->bSpeculative)
+	{
+		for (const FCivInventionDef& Def : Tree)
+		{
+			if (!Def.bGenerated || Def.PurposeKey != Proposal.PurposeKey) { continue; }
+			const FPrinciple* Existing = FindPrinciple(Def.PrincipleKey);
+			// Steam and electricity open in the same era, but steam is the older of the two.
+			auto Rank = [](const FPrinciple* P) { return P->MinEra - (FCString::Strcmp(P->Key, TEXT("steam")) == 0 ? 0.5 : 0.0); };
+			if (Existing && Rank(Existing) > Rank(Principle)) { return ECivReject::Obsolete; }
+		}
+	}
 
 	// 4. Beyond known science only for the most advanced peoples.
 	if ((Proposal.bSpeculative || Principle->bSpeculative) && (!Context.bAllowSpeculative || Context.PeopleEra < 8))

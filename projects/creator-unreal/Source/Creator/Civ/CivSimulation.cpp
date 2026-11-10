@@ -52,7 +52,7 @@ namespace CivSimData
 
 	static const TCHAR* const EraNames[] =
 	{
-		TEXT("עידן האש"), TEXT("עידן הכפרים"), TEXT("עידן הכתב"), TEXT("עידן הברזל והמחשבה"), TEXT("עידן הדפוס והמדע"),
+		TEXT("עידן האש"), TEXT("עידן הכפרים"), TEXT("עידן הכתב"), TEXT("עידן הממלכות והמחשבה"), TEXT("עידן הדפוס והמדע"),
 		TEXT("עידן הקיטור והחשמל"), TEXT("עידן האטום והמחשב"), TEXT("עידן החלל"), TEXT("עידן הכוכבים")
 	};
 
@@ -103,6 +103,8 @@ namespace CivSimData
 }
 
 using namespace CivSimData;
+
+static FString UniquePeopleName(FCivRandom& Rng, const TArray<FCivPeople>& Peoples, int32 Self);
 
 FString FCivPerson::PersonalityWord() const
 {
@@ -361,7 +363,7 @@ int32 FCivSimulation::AddPeopleSlot()
 void FCivSimulation::CreatePeople(int32 Index, const FString* FixedName, const double* LatRad, const double* LonRad)
 {
 	FCivPeople& P = Peoples[Index];
-	P.Name = FixedName ? *FixedName : CivText::PeopleName(Rng);
+	P.Name = FixedName ? *FixedName : UniquePeopleName(Rng, Peoples, Index);
 	P.FoundedYear = Year;
 	P.Latitude = LatRad ? *LatRad : FMath::Asin(Rng.Range(-0.85, 0.85));
 	P.Longitude = LonRad ? *LonRad : Rng.Range(-UE_DOUBLE_PI, UE_DOUBLE_PI);
@@ -527,7 +529,24 @@ const FString& FCivSimulation::CityOrName(const FCivPeople& P) const
 {
 	static const FString Camp = TEXT("מחנה המדורות");
 	static const FString Villages = TEXT("הכפרים");
-	return P.Cities.Num() > 0 ? P.Cities[0].Name : (P.Era <= 1 ? Camp : Villages);
+	return P.Cities.Num() > 0 ? P.Cities[0].Name : (P.Era == 0 ? Camp : Villages);
+}
+
+// A new people never takes the name of another people, living or gone: "the X beat the X" must never be written.
+static FString UniquePeopleName(FCivRandom& Rng, const TArray<FCivPeople>& Peoples, int32 Self)
+{
+	FString Name;
+	for (int32 Try = 0; Try < 64; ++Try)
+	{
+		Name = CivText::PeopleName(Rng);
+		bool bTaken = false;
+		for (int32 Index = 0; Index < Peoples.Num() && !bTaken; ++Index)
+		{
+			bTaken = Index != Self && Peoples[Index].Name == Name;
+		}
+		if (!bTaken) { return Name; }
+	}
+	return Name + TEXT(" החדש");
 }
 
 // ---------------------------------------------------------------------------
@@ -584,6 +603,8 @@ void FCivSimulation::ApplyEvent(ECivEvent Event, int32 PeopleIndex, double Sever
 
 	double WorldDeaths = 0.0;
 	TArray<int32> Targets;
+	// Cities ruined by this blow are written after the blow itself, so the book reads cause before effect.
+	TArray<TPair<int32, int32>> Ruined;
 	if (Def.bWorldwide)
 	{
 		for (int32 Index = 0; Index < Peoples.Num(); ++Index) { if (Peoples[Index].bAlive) { Targets.Add(Index); } }
@@ -624,8 +645,9 @@ void FCivSimulation::ApplyEvent(ECivEvent Event, int32 PeopleIndex, double Sever
 		if (Severity > 0.8 && Loss > 0.04 && P.Cities.Num() > 1 && Rng.Chance(0.5))
 		{
 			// Cities from the historical record stand until their recorded end; only invented cities can vanish at random.
-			const int32 Doomed = Rng.RangeInt(0, P.Cities.Num() - 1);
-			if (P.Cities[Doomed].RealId == INDEX_NONE) { DestroyCity(Target, Doomed); }
+			// The capital (the first city) survives; a smaller town is the one that is lost.
+			const int32 Doomed = Rng.RangeInt(1, P.Cities.Num() - 1);
+			if (P.Cities[Doomed].RealId == INDEX_NONE) { Ruined.Add(TPair<int32, int32>(Target, Doomed)); }
 		}
 		else if (P.Cities.Num() > 0 && Loss > 0.0)
 		{
@@ -644,7 +666,16 @@ void FCivSimulation::ApplyEvent(ECivEvent Event, int32 PeopleIndex, double Sever
 	{
 		Text = FString(TEXT("זעם האל: ")) + Text;
 	}
-	Write(bFromGod ? ECivEntryKind::God : ECivEntryKind::Event, bBig ? 2 : 1, PeopleIndex, Text);
+	Write(bFromGod ? ECivEntryKind::God : ECivEntryKind::Event, (bBig || Ruined.Num() > 0) ? 2 : 1, PeopleIndex, Text);
+
+	for (const TPair<int32, int32>& Lost : Ruined)
+	{
+		FCivPeople& P = Peoples[Lost.Key];
+		if (!P.Cities.IsValidIndex(Lost.Value)) { continue; }
+		Write(ECivEntryKind::City, 2, Lost.Key, Fill(TEXT("בעקבות האסון ננטשה העיר {0} של עם {1}, ולא נבנתה עוד."), { P.Cities[Lost.Value].Name, P.Name }));
+		P.Cities.RemoveAt(Lost.Value);
+		++Stats.CitiesLost;
+	}
 
 	for (int32 Target : Targets)
 	{
@@ -758,7 +789,7 @@ void FCivSimulation::Secede(int32 PeopleIndex)
 	const int32 NewIndex = AddPeopleSlot();
 	FCivPeople& Old = Peoples[PeopleIndex];
 	FCivPeople& P = Peoples[NewIndex];
-	P.Name = CivText::PeopleName(Rng);
+	P.Name = UniquePeopleName(Rng, Peoples, NewIndex);
 	P.FoundedYear = Year;
 	P.Latitude = Old.Latitude + Rng.Range(-0.4, 0.4);
 	P.Longitude = Old.Longitude + Rng.Range(-0.4, 0.4);
@@ -1137,6 +1168,12 @@ void FCivSimulation::GrantInvention(int32 PeopleIndex, int32 Invention, FCivPers
 	if (bFirstInWorld)
 	{
 		const FString Who = Inventor ? Inventor->Name : FString(TEXT("חכמי העם"));
+		// The first world era this invention opens gets its own chapter, and the invention that opened it is the chapter's first line.
+		if (Def.Era > WorldEra)
+		{
+			WorldEra = Def.Era;
+			Write(ECivEntryKind::Chapter, 3, PeopleIndex, EraNames[FMath::Clamp(Def.Era, 0, UE_ARRAY_COUNT(EraNames) - 1)]);
+		}
 		if (Def.Milestone != ECivMilestone::None)
 		{
 			RecordMilestone(Def.Milestone, PeopleIndex, Who, MilestoneTitle(Def.Milestone));
@@ -1152,13 +1189,6 @@ void FCivSimulation::GrantInvention(int32 PeopleIndex, int32 Invention, FCivPers
 		else
 		{
 			Write(ECivEntryKind::Invention, 2, PeopleIndex, Fill(TEXT("חכמי עם {0} חשפו את {1}."), { P.Name, Def.NameDefinite }));
-		}
-
-		// The first world era this invention opens gets its own chapter.
-		if (Def.Era > WorldEra)
-		{
-			WorldEra = Def.Era;
-			Write(ECivEntryKind::Chapter, 3, PeopleIndex, EraNames[FMath::Clamp(Def.Era, 0, UE_ARRAY_COUNT(EraNames) - 1)]);
 		}
 	}
 	else if (bFromNeighbour)
@@ -1276,7 +1306,15 @@ void FCivSimulation::TickDiplomacy()
 				}
 			}
 
-			if (!bFighting && Relation < -25.0 && Rng.Chance(0.03 * Settings.WarTendency * (-Relation / 50.0) * 0.5 * (Peoples[A].RulerAggression + Peoples[B].RulerAggression)))
+			// Ideas and traders travel far; armies do not. A war needs the two peoples to be within marching or sailing reach,
+			// so the Levant does not fight Mexico in the bronze age. Flight and later transport bring the whole world into reach.
+			const FCivPeople& PA = Peoples[A];
+			const FCivPeople& PB = Peoples[B];
+			const double Cosine = FMath::Sin(PA.Latitude) * FMath::Sin(PB.Latitude)
+				+ FMath::Cos(PA.Latitude) * FMath::Cos(PB.Latitude) * FMath::Cos(PA.Longitude - PB.Longitude);
+			const bool bArmiesReach = FMath::Acos(FMath::Clamp(Cosine, -1.0, 1.0)) < 0.8 + 0.6 * FMath::Max(PA.Range, PB.Range);
+
+			if (!bFighting && bArmiesReach && Relation < -25.0 && Rng.Chance(0.03 * Settings.WarTendency * (-Relation / 50.0) * 0.5 * (Peoples[A].RulerAggression + Peoples[B].RulerAggression)))
 			{
 				FCivWar War;
 				War.A = A;
@@ -1543,7 +1581,13 @@ bool FCivSimulation::GodMiracle(int32 PeopleIndex, ECivMiracle Miracle)
 
 FString FCivSimulation::YearLabel(int32 InYear) const
 {
-	if (!bRealCalendar) { return FString::Printf(TEXT("שנה %d"), InYear); }
+	if (!bRealCalendar)
+	{
+		// People alive when the world begins were born before year 0: "year -10" means nothing to a reader.
+		if (InYear == -1) { return TEXT("שנה אחת לפני תחילת הספר"); }
+		if (InYear < 0) { return FString::Printf(TEXT("%d שנים לפני תחילת הספר"), -InYear); }
+		return FString::Printf(TEXT("שנה %d"), InYear);
+	}
 	const int32 Calendar = StartCalendarYear + InYear;
 	return Calendar < 0
 		? FString::Printf(TEXT("שנת %d לפנה\"ס"), -Calendar)

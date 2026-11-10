@@ -2,49 +2,49 @@ Starting invention table: 73 entries
 PASS  invention table is valid and has tens of entries
 
 --- Average IQ 200, 8 seeds, at most 6000 years ---
-seed=1   iq=200 city=    82 writing=   148 printing=   325 steam=   383 electric=   405 computer=   543 satellite=   625 moon=   842 mars=  1020 launch=  1423 arrival=  1453 end=  1453 pop= 6.79e+09 wars= 12 events= 408 inventors= 1588 generated= 26 persons=  3369 lost= 0 extinct=0
-seed=2   iq=200 city=   144 writing=   241 printing=   364 steam=   462 electric=   489 computer=   623 satellite=   733 moon=   897 mars=  1026 launch=  1589 arrival=  1633 end=  1633 pop= 7.10e+09 wars= 34 events= 434 inventors= 1774 generated= 24 persons=  4082 lost= 0 extinct=0
-seed=3   iq=200 city=    92 writing=   172 printing=   328 steam=   398 electric=   423 computer=   564 satellite=   675 moon=   846 mars=   942 launch=  1512 arrival=  1549 end=  1549 pop= 6.32e+09 wars= 22 events= 435 inventors= 1565 generated= 31 persons=  3340 lost= 0 extinct=0
-seed=4   iq=200 city=   106 writing=   172 printing=   338 steam=   412 electric=   436 computer=   568 satellite=   712 moon=   792 mars=   925 launch=  1248 arrival=  1282 end=  1282 pop= 6.65e+09 wars= 21 events= 418 inventors= 1435 generated= 28 persons=  3113 lost= 0 extinct=0
-seed=5   iq=200 city=   108 writing=   163 printing=   332 steam=   397 electric=   422 computer=   535 satellite=   657 moon=   792 mars=   907 launch=  1206 arrival=  1236 end=  1236 pop= 5.41e+09 wars= 20 events= 393 inventors= 1359 generated= 19 persons=  2926 lost= 0 extinct=0
-seed=6   iq=200 city=    90 writing=   184 printing=   359 steam=   438 electric=   460 computer=   591 satellite=   673 moon=   801 mars=   965 launch=  1261 arrival=  1290 end=  1290 pop= 5.94e+09 wars= 19 events= 381 inventors= 1405 generated= 20 persons=  3115 lost= 0 extinct=0
-seed=7   iq=200 city=    99 writing=   160 printing=   330 steam=   396 electric=   415 computer=   545 satellite=   645 moon=   765 mars=   893 launch=  1302 arrival=  1335 end=  1335 pop= 7.94e+09 wars= 22 events= 392 inventors= 1475 generated= 31 persons=  3197 lost= 0 extinct=0
-seed=8   iq=200 city=    79 writing=   153 printing=   333 steam=   392 electric=   417 computer=   559 satellite=   658 moon=   771 mars=   899 launch=  1178 arrival=  1226 end=  1226 pop= 9.59e+09 wars= 39 events= 325 inventors= 1671 generated= 31 persons=  3523 lost= 0 extinct=0
-IQ 200 moon: reached 8/8, mean 813, min 765, max 897 | first city mean 100 | first city to moon: mean 713, min 666, max 760 | first starship: reached 8/8, mean 1340
+seed=1   iq=200 city=    89 writing=   157 printing=   334 steam=   404 electric=   427 computer=   562 satellite=   696 moon=   775 mars=   891 launch=  1205 arrival=  1236 end=  1236 pop= 6.22e+09 wars= 24 events= 358 inventors= 1364 generated= 22 persons=  2967 lost= 0 extinct=0
+seed=2   iq=200 city=    86 writing=   150 printing=   360 steam=   433 electric=   450 computer=   561 satellite=   698 moon=   840 mars=   943 launch=  1255 arrival=  1289 end=  1289 pop= 1.08e+10 wars= 40 events= 368 inventors= 1948 generated= 34 persons=  4117 lost= 0 extinct=0
+seed=3   iq=200 city=    92 writing=   172 printing=   327 steam=   393 electric=   412 computer=   561 satellite=   641 moon=   774 mars=   893 launch=  1137 arrival=  1172 end=  1172 pop= 7.14e+09 wars= 11 events= 361 inventors= 1435 generated= 24 persons=  3065 lost= 0 extinct=0
+seed=4   iq=200 city=   106 writing=   172 printing=   337 steam=   410 electric=   434 computer=   598 satellite=   730 moon=   852 mars=  1038 launch=  1462 arrival=  1498 end=  1498 pop= 6.16e+09 wars= 11 events= 451 inventors= 1579 generated= 24 persons=  3413 lost= 0 extinct=0
+seed=5   iq=200 city=   108 writing=   163 printing=   332 steam=   397 electric=   422 computer=   570 satellite=   636 moon=   722 mars=   837 launch=  1221 arrival=  1263 end=  1263 pop= 6.09e+09 wars= 19 events= 375 inventors= 1350 generated= 30 persons=  2911 lost= 0 extinct=0
+seed=6   iq=200 city=    90 writing=   178 printing=   341 steam=   401 electric=   431 computer=   567 satellite=   685 moon=   845 mars=  1061 launch=  1463 arrival=  1508 end=  1508 pop= 5.97e+09 wars= 36 events= 424 inventors= 1693 generated= 28 persons=  3764 lost= 0 extinct=0
+seed=7   iq=200 city=   109 writing=   166 printing=   327 steam=   394 electric=   417 computer=   536 satellite=   617 moon=   743 mars=   913 launch=  1291 arrival=  1319 end=  1319 pop= 4.94e+09 wars= 10 events= 410 inventors= 1300 generated= 15 persons=  2827 lost= 0 extinct=0
+seed=8   iq=200 city=   110 writing=   178 printing=   338 steam=   404 electric=   424 computer=   541 satellite=   624 moon=   761 mars=   877 launch=  1160 arrival=  1198 end=  1198 pop= 7.67e+09 wars= 17 events= 318 inventors= 1494 generated= 19 persons=  3190 lost= 0 extinct=0
+IQ 200 moon: reached 8/8, mean 789, min 722, max 852 | first city mean 99 | first city to moon: mean 690, min 614, max 755 | first starship: reached 8/8, mean 1274
 
 --- Average IQ 100, 8 seeds, at most 12000 years ---
-seed=1   iq=100 city=   651 writing=   928 printing=  4771 steam=  5141 electric=  5190 computer=  5688 satellite=  5940 moon=  6426 mars=  6785 launch=  8145 arrival=  8187 end=  8187 pop= 1.55e+10 wars=526 events=2418 inventors= 5940 generated= 48 persons= 51237 lost= 0 extinct=0
-seed=2   iq=100 city=   462 writing=   770 printing=  4710 steam=  5019 electric=  5097 computer=  5516 satellite=  5805 moon=  6249 mars=  6516 launch=  8225 arrival=  8256 end=  8256 pop= 1.58e+10 wars=579 events=2280 inventors= 6184 generated= 50 persons= 55582 lost= 0 extinct=0
-seed=3   iq=100 city=   644 writing=  1115 printing=  4345 steam=  4648 electric=  4724 computer=  5159 satellite=  5374 moon=  5798 mars=  6139 launch=  7590 arrival=  7626 end=  7626 pop= 1.58e+10 wars=571 events=2178 inventors= 5716 generated= 49 persons= 48601 lost= 0 extinct=0
-seed=4   iq=100 city=   656 writing=  1015 printing=  4551 steam=  4954 electric=  5010 computer=  5477 satellite=  5784 moon=  6178 mars=  6495 launch=  8525 arrival=  8564 end=  8564 pop= 1.59e+10 wars=599 events=2370 inventors= 6246 generated= 55 persons= 52422 lost= 0 extinct=0
-seed=5   iq=100 city=   641 writing=   963 printing=  4771 steam=  5103 electric=  5168 computer=  5613 satellite=  5866 moon=  6279 mars=  6593 launch=  8797 arrival=  8827 end=  8827 pop= 1.57e+10 wars=640 events=2511 inventors= 6450 generated= 49 persons= 54916 lost= 0 extinct=0
-seed=6   iq=100 city=   550 writing=   983 printing=  5082 steam=  5475 electric=  5550 computer=  6008 satellite=  6365 moon=  6679 mars=  6933 launch=  9331 arrival=  9376 end=  9376 pop= 1.58e+10 wars=601 events=2700 inventors= 6732 generated= 52 persons= 57896 lost= 0 extinct=0
-seed=7   iq=100 city=   647 writing=  1105 printing=  5002 steam=  5304 electric=  5372 computer=  5807 satellite=  6078 moon=  6605 mars=  6940 launch=  9067 arrival=  9099 end=  9099 pop= 1.58e+10 wars=589 events=2666 inventors= 6570 generated= 52 persons= 56619 lost= 0 extinct=0
-seed=8   iq=100 city=   583 writing=   897 printing=  4545 steam=  4881 electric=  4938 computer=  5408 satellite=  5669 moon=  6083 mars=  6557 launch=  9177 arrival=  9212 end=  9212 pop= 1.57e+10 wars=737 events=2713 inventors= 7040 generated= 50 persons= 56188 lost= 0 extinct=0
-IQ 100 moon: reached 8/8, mean 6287, min 5798, max 6679 | first city mean 604 | first city to moon: mean 5683, min 5154, max 6129 | first starship: reached 8/8, mean 8607
+seed=1   iq=100 city=   561 writing=   981 printing=  4271 steam=  4624 electric=  4685 computer=  5133 satellite=  5463 moon=  5691 mars=  6171 launch=  8042 arrival=  8073 end=  8073 pop= 1.57e+10 wars=527 events=2285 inventors= 6000 generated= 52 persons= 48645 lost= 0 extinct=0
+seed=2   iq=100 city=   667 writing=   935 printing=  5445 steam=  5794 electric=  5880 computer=  6338 satellite=  6631 moon=  7125 mars=  7383 launch=  8860 arrival=  8892 end=  8892 pop= 1.58e+10 wars=478 events=2597 inventors= 6273 generated= 46 persons= 60291 lost= 0 extinct=0
+seed=3   iq=100 city=   644 writing=  1115 printing=  4214 steam=  4535 electric=  4587 computer=  4991 satellite=  5221 moon=  5632 mars=  5966 launch=  8233 arrival=  8268 end=  8268 pop= 1.57e+10 wars=514 events=2399 inventors= 6256 generated= 45 persons= 49026 lost= 0 extinct=0
+seed=4   iq=100 city=   656 writing=  1015 printing=  5025 steam=  5341 electric=  5400 computer=  5810 satellite=  6056 moon=  6447 mars=  6760 launch=  8311 arrival=  8347 end=  8347 pop= 1.57e+10 wars=465 events=2316 inventors= 6101 generated= 51 persons= 55978 lost= 0 extinct=0
+seed=5   iq=100 city=   645 writing=  1135 printing=  4619 steam=  4929 electric=  5026 computer=  5412 satellite=  5619 moon=  6227 mars=  6658 launch=  8565 arrival=  8591 end=  8591 pop= 1.58e+10 wars=534 events=2520 inventors= 6250 generated= 47 persons= 51679 lost= 0 extinct=0
+seed=6   iq=100 city=   550 writing=   998 printing=  5007 steam=  5368 electric=  5421 computer=  5912 satellite=  6221 moon=  6695 mars=  7058 launch=  9292 arrival=  9327 end=  9327 pop= 1.58e+10 wars=554 events=2672 inventors= 6950 generated= 46 persons= 59325 lost= 0 extinct=0
+seed=7   iq=100 city=   647 writing=   993 printing=  4353 steam=  4634 electric=  4735 computer=  5227 satellite=  5501 moon=  5846 mars=  6149 launch=  8224 arrival=  8262 end=  8262 pop= 1.58e+10 wars=521 events=2374 inventors= 6118 generated= 46 persons= 51117 lost= 0 extinct=0
+seed=8   iq=100 city=   503 writing=   870 printing=  4514 steam=  4889 electric=  4939 computer=  5401 satellite=  5648 moon=  5987 mars=  6462 launch=  7821 arrival=  7856 end=  7856 pop= 1.58e+10 wars=434 events=2260 inventors= 5965 generated= 46 persons= 51955 lost= 0 extinct=0
+IQ 100 moon: reached 8/8, mean 6206, min 5632, max 7125 | first city mean 609 | first city to moon: mean 5597, min 4988, max 6458 | first starship: reached 8/8, mean 8418
 
 --- Average IQ 80, 8 seeds, at most 12000 years ---
-seed=1   iq= 80 city=  1113 writing=  2168 printing=    -1 steam=    -1 electric=    -1 computer=    -1 satellite=    -1 moon=    -1 mars=    -1 launch=    -1 arrival=    -1 end= 12000 pop= 3.87e+07 wars=840 events=3493 inventors= 2884 generated=  3 persons=118459 lost= 0 extinct=0
-seed=2   iq= 80 city=  1898 writing=  3045 printing=    -1 steam=    -1 electric=    -1 computer=    -1 satellite=    -1 moon=    -1 mars=    -1 launch=    -1 arrival=    -1 end= 12000 pop= 3.57e+07 wars=747 events=3321 inventors= 2842 generated=  3 persons=115617 lost= 0 extinct=0
-seed=3   iq= 80 city=   978 writing=  2462 printing=    -1 steam=    -1 electric=    -1 computer=    -1 satellite=    -1 moon=    -1 mars=    -1 launch=    -1 arrival=    -1 end= 12000 pop= 4.77e+07 wars=792 events=3445 inventors= 2711 generated=  3 persons=117527 lost= 0 extinct=0
-seed=4   iq= 80 city=  1812 writing=  3422 printing=    -1 steam=    -1 electric=    -1 computer=    -1 satellite=    -1 moon=    -1 mars=    -1 launch=    -1 arrival=    -1 end= 12000 pop= 4.04e+07 wars=717 events=3496 inventors= 2735 generated=  2 persons=113676 lost= 0 extinct=0
-seed=5   iq= 80 city=  1947 writing=  3246 printing=    -1 steam=    -1 electric=    -1 computer=    -1 satellite=    -1 moon=    -1 mars=    -1 launch=    -1 arrival=    -1 end= 12000 pop= 6.04e+07 wars=714 events=3498 inventors= 2890 generated=  3 persons=114263 lost= 0 extinct=0
-seed=6   iq= 80 city=  1931 writing=  2803 printing=    -1 steam=    -1 electric=    -1 computer=    -1 satellite=    -1 moon=    -1 mars=    -1 launch=    -1 arrival=    -1 end= 12000 pop= 6.08e+07 wars=477 events=3468 inventors= 2576 generated=  3 persons= 99991 lost= 2 extinct=0
-seed=7   iq= 80 city=  1254 writing=  2253 printing=    -1 steam=    -1 electric=    -1 computer=    -1 satellite=    -1 moon=    -1 mars=    -1 launch=    -1 arrival=    -1 end= 12000 pop= 1.93e+07 wars=824 events=3371 inventors= 2923 generated=  2 persons=118509 lost= 0 extinct=0
-seed=8   iq= 80 city=  2027 writing=  3407 printing=    -1 steam=    -1 electric=    -1 computer=    -1 satellite=    -1 moon=    -1 mars=    -1 launch=    -1 arrival=    -1 end= 12000 pop= 5.41e+07 wars=678 events=3411 inventors= 2599 generated=  2 persons=104852 lost= 1 extinct=0
-IQ 80 moon: reached 0/8, mean 0, min 0, max 0 | first city mean 1620 | first city to moon: mean 0, min 0, max 0 | first starship: reached 0/8, mean 0
-Speed: 21882 simulated years per real second (176151 years)
+seed=1   iq= 80 city=  1099 writing=  2795 printing=    -1 steam=    -1 electric=    -1 computer=    -1 satellite=    -1 moon=    -1 mars=    -1 launch=    -1 arrival=    -1 end= 12000 pop= 5.73e+07 wars=773 events=3444 inventors= 2965 generated=  2 persons=118551 lost= 0 extinct=0
+seed=2   iq= 80 city=  1947 writing=  2897 printing=    -1 steam=    -1 electric=    -1 computer=    -1 satellite=    -1 moon=    -1 mars=    -1 launch=    -1 arrival=    -1 end= 12000 pop= 4.88e+07 wars=449 events=3475 inventors= 2493 generated=  3 persons=104853 lost= 1 extinct=0
+seed=3   iq= 80 city=  1526 writing=  2577 printing=    -1 steam=    -1 electric=    -1 computer=    -1 satellite=    -1 moon=    -1 mars=    -1 launch=    -1 arrival=    -1 end= 12000 pop= 7.25e+07 wars=616 events=3386 inventors= 2641 generated=  3 persons=105662 lost= 1 extinct=0
+seed=4   iq= 80 city=  1092 writing=  2531 printing=    -1 steam=    -1 electric=    -1 computer=    -1 satellite=    -1 moon=    -1 mars=    -1 launch=    -1 arrival=    -1 end= 12000 pop= 2.44e+07 wars=367 events=3449 inventors= 2508 generated=  1 persons=113112 lost= 0 extinct=0
+seed=5   iq= 80 city=  1866 writing=  3038 printing=    -1 steam=    -1 electric=    -1 computer=    -1 satellite=    -1 moon=    -1 mars=    -1 launch=    -1 arrival=    -1 end= 12000 pop= 5.18e+07 wars=465 events=3398 inventors= 2806 generated=  3 persons=114488 lost= 0 extinct=0
+seed=6   iq= 80 city=  1869 writing=  3466 printing=    -1 steam=    -1 electric=    -1 computer=    -1 satellite=    -1 moon=    -1 mars=    -1 launch=    -1 arrival=    -1 end= 12000 pop= 5.43e+07 wars=489 events=3461 inventors= 2592 generated=  2 persons=105408 lost= 1 extinct=0
+seed=7   iq= 80 city=  1674 writing=  2645 printing=    -1 steam=    -1 electric=    -1 computer=    -1 satellite=    -1 moon=    -1 mars=    -1 launch=    -1 arrival=    -1 end= 12000 pop= 6.60e+07 wars=525 events=3394 inventors= 2723 generated=  3 persons=111795 lost= 0 extinct=0
+seed=8   iq= 80 city=  1949 writing=  2919 printing=    -1 steam=    -1 electric=    -1 computer=    -1 satellite=    -1 moon=    -1 mars=    -1 launch=    -1 arrival=    -1 end= 12000 pop= 6.95e+07 wars=687 events=3303 inventors= 2863 generated=  3 persons=116402 lost= 0 extinct=0
+IQ 80 moon: reached 0/8, mean 0, min 0, max 0 | first city mean 1628 | first city to moon: mean 0, min 0, max 0 | first starship: reached 0/8, mean 0
+Speed: 20831 simulated years per real second (174099 years)
 
 --- IQ acceptance ---
 PASS  default world: IQ 100, real history off
-PASS  IQ 200 moon mean 813 is around year 800
-PASS  IQ 200 moon year varies by seed (765..897)
-PASS  IQ 100 is slow like real history: moon in 8/8 seeds, first city to moon mean 5683 years (min 5154, max 6129)
-PASS  IQ 100 takes at least 5 times as long as IQ 200 (mean moon 6287 vs 813)
-PASS  IQ 100 founds its first city later too (mean year 604 vs 100)
+PASS  IQ 200 moon mean 789 is around year 800
+PASS  IQ 200 moon year varies by seed (722..852)
+PASS  IQ 100 is slow like real history: moon in 8/8 seeds, first city to moon mean 5597 years (min 4988, max 6458)
+PASS  IQ 100 takes at least 5 times as long as IQ 200 (mean moon 6206 vs 789)
+PASS  IQ 100 founds its first city later too (mean year 609 vs 99)
 PASS  IQ 80 is slower still and usually never gets there (moon in 0/8 seeds within 12000 years)
-PASS  IQ 80 still builds cities, later (mean year 1620)
-PASS  speed 21882 years/second is well above 1
+PASS  IQ 80 still builds cities, later (mean year 1628)
+PASS  speed 20831 years/second is well above 1
 
 --- Settings ---
 PASS  disaster frequency setting works (0 -> 0 events, 3x -> 844)
@@ -54,24 +54,24 @@ PASS  start era 5 starts with 39 inventions known
 PASS  invention speed setting works
 
 --- Determinism ---
-PASS  same seed, same history (hash c584d5f592623281)
-PASS  same seed, same generated inventions (36)
+PASS  same seed, same history (hash 9ed4bdfa5c2b065)
+PASS  same seed, same generated inventions (21)
 PASS  different seed, different history
 PASS  real-time playback matches year stepping (500 years at 50/s)
 PASS  speed 0 pauses time
 
 --- God actions ---
-PASS  disaster kills people (3391551 -> 2577579)
+PASS  disaster kills people (2542439 -> 1932254)
 PASS  miracle of revelation gives an invention
 PASS  miracle of abundance fills the stores
 PASS  inspire marks an inventor as inspired
-  seed 1 moon: plain 842, inspired every 25y 575, plague every 10y -1 (extinct 1)
-  seed 2 moon: plain 897, inspired every 25y 586, plague every 10y -1 (extinct 1)
-  seed 3 moon: plain 846, inspired every 25y 526, plague every 10y -1 (extinct 1)
-  seed 4 moon: plain 792, inspired every 25y 528, plague every 10y -1 (extinct 1)
-  seed 5 moon: plain 792, inspired every 25y 551, plague every 10y -1 (extinct 1)
-  seed 6 moon: plain 801, inspired every 25y 635, plague every 10y -1 (extinct 1)
-PASS  inspiration brings the moon earlier (mean 567 vs 828)
+  seed 1 moon: plain 775, inspired every 25y 601, plague every 10y -1 (extinct 1)
+  seed 2 moon: plain 840, inspired every 25y 589, plague every 10y -1 (extinct 1)
+  seed 3 moon: plain 774, inspired every 25y 522, plague every 10y -1 (extinct 1)
+  seed 4 moon: plain 852, inspired every 25y 563, plague every 10y -1 (extinct 1)
+  seed 5 moon: plain 722, inspired every 25y 551, plague every 10y -1 (extinct 1)
+  seed 6 moon: plain 845, inspired every 25y 607, plague every 10y -1 (extinct 1)
+PASS  inspiration brings the moon earlier (mean 572 vs 801)
 PASS  relentless plagues delay or prevent the moon (6 of 6)
 
 --- Real history (off by default) ---
@@ -92,65 +92,66 @@ PASS  disasters toggle works alone
   earliest-start sample runs to calendar year 0 with 12 real cities
 
 --- Open-ended inventions ---
-  proposals tried 7902, accepted 143, rejected by rules 98.2%
-    parent not known to this people          1207
-    principle does not fit purpose           4685
-    too early for this era                   13
-    near-duplicate                           758
-    speculative before high knowledge        7
-    principle long outdated                  891
-PASS  long runs generate new inventions (143 accepted)
-PASS  generated inventions are used as prerequisites of later ones (54)
+  proposals tried 8988, accepted 155, rejected by rules 98.3%
+    parent not known to this people          1255
+    principle does not fit purpose           5404
+    principle's basis not known              6
+    too early for this era                   16
+    near-duplicate                           827
+    speculative before high knowledge        2
+    principle long outdated                  1091
+PASS  long runs generate new inventions (155 accepted)
+PASS  generated inventions are used as prerequisites of later ones (70)
 PASS  every generated invention has known, earlier parents
 PASS  no two inventions in a world share a name
-PASS  ideas beyond known science come only at the highest knowledge and stay the minority (47 of 143)
+PASS  ideas beyond known science come only at the highest knowledge and stay the minority (56 of 155)
 PASS  apple-on-a-stick weapon with no basis is rejected
 PASS  same idea with a parent but no purpose is rejected
 PASS  same idea with a purpose but no mechanism is rejected
 PASS  same idea with a mismatched principle is rejected
 PASS  adding it by hand under the rules is refused
 PASS  a custom invention can be added by hand
-PASS  save and load restore the world exactly (2202380 bytes)
-PASS  save keeps generated inventions (41)
+PASS  save and load restore the world exactly (2185430 bytes)
+PASS  save keeps generated inventions (29)
 PASS  a loaded world continues identically
 
 --- Individual lives ---
-  one world in detail (seed 21, remembered lives only): commoner soldiers 61, battles 78, soldiers with two or more battles 22, knighted 3, named people 18446
-  6 worlds at IQ 100, 15000 world-years, 107418 named people
-  died young 2382 | commoner to knight 26 | commoner to lord 4 | commoner to ruler 8 | coups tried 23, won 17 | rulers deposed 22 | tyrants 1471
-  preachers 752 | venerated saints 7 | healers 208 | rich merchants 164 | ruined 124 | rebels 309, won 5 | explorers 244 | inventors 6796
-  per 1000 lives: knighted 0.24, ennobled 0.04, commoner to ruler 0.07, coups tried 0.21, saints 0.07, ruined merchants 1.15
-PASS  a commoner reaching the throne happens, and is rare (8 in 107418 lives, under 1 in 100)
-PASS  the ladder is used and narrows: knighted 26 > ennobled 4 > 0
-PASS  coups happen and can fail (23 tried, 17 won)
-PASS  most rebels fail (5 of 309 won)
-PASS  fortunes fall too: 124 merchants ruined, 22 rulers deposed
+  one world in detail (seed 21, remembered lives only): commoner soldiers 20, battles 30, soldiers with two or more battles 6, knighted 1, named people 16411
+  6 worlds at IQ 100, 15000 world-years, 107991 named people
+  died young 2278 | commoner to knight 16 | commoner to lord 2 | commoner to ruler 5 | coups tried 20, won 10 | rulers deposed 14 | tyrants 1520
+  preachers 683 | venerated saints 4 | healers 207 | rich merchants 180 | ruined 127 | rebels 277, won 4 | explorers 237 | inventors 7328
+  per 1000 lives: knighted 0.15, ennobled 0.02, commoner to ruler 0.05, coups tried 0.19, saints 0.04, ruined merchants 1.18
+PASS  a commoner reaching the throne happens, and is rare (5 in 107991 lives, under 1 in 100)
+PASS  the ladder is used and narrows: knighted 16 > ennobled 2 > 0
+PASS  coups happen and can fail (20 tried, 10 won)
+PASS  most rebels fail (4 of 277 won)
+PASS  fortunes fall too: 127 merchants ruined, 14 rulers deposed
 PASS  sainthood happens, and is rare
-PASS  a world where a commoner climbed from soldier to the throne was found (seed 16)
+PASS  a world where a commoner climbed from soldier to the throne was found (seed 14)
 PASS  life stories written (20), missing kinds: none
 PASS  life stories have no unfilled template slots
 PASS  anyone can be promoted from the crowd with a written past
 PASS  the promoted person's past is consistent: in order, from birth, with a real family
   promoted person:
-צורלוון בן טלנוור, מבית גלגיור, מעם עדתיור (שנה 2979 עד היום, עדיין בחיים)
-  שנה 2979: נולד בעם עדתיור, בעיר קרית אורתיאל.
-  שנה 2993, בגיל 14: התחיל לעבוד כאיכר.
-  שנה 3000, בגיל 21: באותה שנה הפנה האל את מבטו אליו, ומאז נרשם כל מה שעבר עליו.
+סברה בת חנניאל, מבית גלסיית, מעם סבור (שנה 2964 עד היום, עדיין בחיים)
+  שנה 2964: נולדה בעם סבור, באחד הכפרים.
+  שנה 2978, בגיל 14: התחילה לעבוד כאיכרה.
+  שנה 3000, בגיל 36: האל הפנה אליה את מבטו, ומאז נרשם כל מה שעבר עליה.
 
 PASS  god can bless, curse and inspire a person
 PASS  same seed gives the same life stories
 PASS  life stories survive save and load
 
 --- Sample books ---
-PASS  IQ 100 sample saved and reads back through UTF-8 (year 6905)
-PASS  IQ 100 book text is clean (32610 Hebrew letters, 0 '?', 0 bad endings, 0 bad middles)
+PASS  IQ 100 sample saved and reads back through UTF-8 (year 6146)
+PASS  IQ 100 book text is clean (28691 Hebrew letters, 0 '?', 0 bad endings, 0 bad middles)
 PASS  IQ 100 book does not call anyone a genius
-  IQ 100 book: 573 lines, 93 KB, most common line shape 6.1% (שיטפון גדול שטף את )
+  IQ 100 book: 501 lines, 81 KB, most common line shape 7.4% (שיטפון גדול שטף את )
 PASS  IQ 100 book is readable: no line shape above 12%, under 160 thousand characters
-PASS  IQ 200 sample saved and reads back through UTF-8 (year 1335)
-PASS  IQ 200 book text is clean (10182 Hebrew letters, 0 '?', 0 bad endings, 0 bad middles)
+PASS  IQ 200 sample saved and reads back through UTF-8 (year 1319)
+PASS  IQ 200 book text is clean (8847 Hebrew letters, 0 '?', 0 bad endings, 0 bad middles)
 PASS  IQ 200 book does not call anyone a genius
-  IQ 200 book: 211 lines, 28 KB, most common line shape 3.3% (רעידת אדמה הרסה את )
+  IQ 200 book: 185 lines, 25 KB, most common line shape 2.7% (שיטפון גדול שטף את )
 PASS  IQ 200 book is readable: no line shape above 12%, under 160 thousand characters
 
 RESULT: ALL PASSED (0 failures)
