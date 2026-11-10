@@ -123,7 +123,8 @@ float L = dot(Dir, SunDir);
 float Light = saturate(L * 0.7 + 0.3) * smoothstep(-0.12, 0.1, L);
 float3 Tint = lerp(float3(1.0, 0.55, 0.32), float3(1.0, 0.98, 0.95), smoothstep(0.0, 0.3, L));
 float Thick = lerp(0.72, 1.0, saturate(Op * 1.2));
-return Albedo * Sun / 3.1415927 * Light * Tint * Thick + 0.0015;
+float Night = saturate(-L * 0.7 + 0.3) * (1.0 - smoothstep(-0.12, 0.1, L));
+return Albedo * Sun / 3.1415927 * (Light * Tint + Night * 0.145 * float3(0.62, 0.72, 1.0)) * Thick + 0.0015;
 """
 STAR_CODE = """
 struct FS
@@ -136,7 +137,7 @@ struct FS
         if (R < 1.0 - Density) return 0.0;
         float3 O = 0.2 + 0.6 * float3(H(C + 1.0), H(C + 2.0), H(C + 3.0));
         float L = length(F - O);
-        float S = smoothstep(0.09, 0.0, L);
+        float S = smoothstep(0.16, 0.0, L);
         float T = H(C + 4.0);
         return S * lerp(float3(1.0, 0.82, 0.68), float3(0.72, 0.84, 1.0), T) * (0.2 + 2.0 * pow(H(C + 5.0), 6.0));
     }
@@ -275,7 +276,7 @@ def build_stars():
     # mirrored the star field as glitter.
     mat.set_editor_property("is_sky", False)
     cam = node(mat, unreal.MaterialExpressionCameraVectorWS, -800, 0)
-    intensity = scalar(mat, "Intensity", 1.2, -800, 200)
+    intensity = scalar(mat, "Intensity", 6.0, -800, 200)
     stars = custom(mat, "Stars", STAR_CODE, unreal.CustomMaterialOutputType.CMOT_FLOAT3,
                    {"CameraVectorIn": cam, "Intensity": intensity}, -500, 0)
     LIB.connect_material_property(stars, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)

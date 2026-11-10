@@ -272,7 +272,18 @@ void APlanetWorld::CreateSkyAndSun()
 	Sun->DynamicShadowDistanceMovableLight = 0.0f;
 	Sun->RegisterComponent();
 
-	SkyLight = NewObject<USkyLightComponent>(this, TEXT("SkyLight"));
+	// Soft "moonlight" from the opposite side, so the night half is dim but still readable.
+	UDirectionalLightComponent* Moon = NewObject<UDirectionalLightComponent>(this, TEXT("NightLight"));
+	Moon->SetMobility(EComponentMobility::Movable);
+	Moon->SetupAttachment(Root);
+	Moon->SetWorldRotation((FVector(SunDirection)).Rotation());
+	Moon->SetIntensity(1.6f);
+	Moon->SetLightColor(FLinearColor(0.62f, 0.72f, 1.0f));
+	Moon->SetAtmosphereSunLight(false);
+	Moon->CastShadows = false;
+	Moon->RegisterComponent();
+
+	SkyLight =NewObject<USkyLightComponent>(this, TEXT("SkyLight"));
 	SkyLight->SetMobility(EComponentMobility::Movable);
 	SkyLight->SetupAttachment(Root);
 	SkyLight->bRealTimeCapture = true;

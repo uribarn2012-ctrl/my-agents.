@@ -34,7 +34,7 @@ Controls:
 |---|---|
 | Left mouse drag | Rotate the planet (orbit) |
 | Right mouse drag | Turn the view |
-| Mouse wheel | Zoom smoothly from space down to about 400 m above the ground |
+| Mouse wheel | Zoom smoothly from deep space down to about 1,500 km (closer views are not detailed enough yet) |
 | N | Generate a new random planet |
 
 Start options (add to the command line):

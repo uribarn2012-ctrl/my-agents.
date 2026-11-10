@@ -18,7 +18,8 @@
 
 namespace
 {
-	constexpr double MinAltitudeM = 400.0;
+	// Closest view is about space-station height: the ground is not detailed enough for lower.
+	constexpr double MinAltitudeM = 1500000.0;
 	constexpr double MaxAltitudeM = 60000000.0;
 	constexpr double DragRadiansPerPixel = 0.0024;
 
