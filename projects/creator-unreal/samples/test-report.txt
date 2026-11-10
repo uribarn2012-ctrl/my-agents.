@@ -33,7 +33,7 @@ seed=6   iq= 80 city=  1931 writing=  2803 printing=    -1 steam=    -1 electric
 seed=7   iq= 80 city=  1254 writing=  2253 printing=    -1 steam=    -1 electric=    -1 computer=    -1 satellite=    -1 moon=    -1 mars=    -1 launch=    -1 arrival=    -1 end= 12000 pop= 1.93e+07 wars=824 events=3371 inventors= 2923 generated=  2 persons=118509 lost= 0 extinct=0
 seed=8   iq= 80 city=  2027 writing=  3407 printing=    -1 steam=    -1 electric=    -1 computer=    -1 satellite=    -1 moon=    -1 mars=    -1 launch=    -1 arrival=    -1 end= 12000 pop= 5.41e+07 wars=678 events=3411 inventors= 2599 generated=  2 persons=104852 lost= 1 extinct=0
 IQ 80 moon: reached 0/8, mean 0, min 0, max 0 | first city mean 1620 | first city to moon: mean 0, min 0, max 0 | first starship: reached 0/8, mean 0
-Speed: 22313 simulated years per real second (176151 years)
+Speed: 21882 simulated years per real second (176151 years)
 
 --- IQ acceptance ---
 PASS  default world: IQ 100, real history off
@@ -44,7 +44,7 @@ PASS  IQ 100 takes at least 5 times as long as IQ 200 (mean moon 6287 vs 813)
 PASS  IQ 100 founds its first city later too (mean year 604 vs 100)
 PASS  IQ 80 is slower still and usually never gets there (moon in 0/8 seeds within 12000 years)
 PASS  IQ 80 still builds cities, later (mean year 1620)
-PASS  speed 22313 years/second is well above 1
+PASS  speed 21882 years/second is well above 1
 
 --- Settings ---
 PASS  disaster frequency setting works (0 -> 0 events, 3x -> 844)
@@ -81,7 +81,7 @@ PASS  earliest start has only the earliest city
 PASS  a later city is not there yet
   after 250 years (calendar -2950): real cities 2
 PASS  Memphis appears at its own date
-  start at year 0: real cities present 14
+  start at year 0: real cities present 12
 PASS  year 0 start has Rome, Alexandria and Jerusalem
 PASS  year 0 start does not have cities abandoned earlier
 PASS  year 0 start does not have Teotihuacan yet
@@ -89,7 +89,7 @@ PASS  real disasters arrive by date (14 fired by calendar year 2030, data set ha
 PASS  Vesuvius and the Black Death are in the book at their exact years
 PASS  cities toggle works alone
 PASS  disasters toggle works alone
-  earliest-start sample runs to calendar year 0 with 14 real cities
+  earliest-start sample runs to calendar year 0 with 12 real cities
 
 --- Open-ended inventions ---
   proposals tried 7902, accepted 143, rejected by rules 98.2%

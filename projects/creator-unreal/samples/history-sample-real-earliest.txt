@@ -163,12 +163,10 @@
 שנת 200 לפנה"ס: סוף המאה: 10 עמים ו-74.7 מיליון נפשות בעולם. במאה הזו נוספו 2 המצאות, ופרצו 2 מלחמות. העם המתקדם ביותר הוא ארם נהריים, שיודע 31 המצאות.
 שנת 168 לפנה"ס: אחרי 5 שנים של מלחמה, עם עמק הגנגס גבר על עם צפון אפריקה ולקח ממנו את העיר קרתגו.
 שנת 167 לפנה"ס: מגפה פרצה בבבל והתפשטה בכל עם צפון אפריקה. אבדו 2.2 מיליון נפשות.
+שנת 146 לפנה"ס: העיר קרתגו ננטשה.
 שנת 100 לפנה"ס: כך נראה העולם כשהמאה הסתיימה: 10 עמים, 85.2 מיליון נפשות. במאה הזו לא נוספה אף המצאה, ופרצה מלחמה אחת. העם המתקדם ביותר הוא ארם נהריים, שיודע 31 המצאות.
-שנת 60 לפנה"ס: מגפה פרצה בירושלים והתפשטה בכל עם כנען וסוריה. אבדו 2.2 מיליון נפשות.
-שנת 51 לפנה"ס: מגפה פרצה בקנוסוס והתפשטה בכל עם הים האגאי. אבדו 1.5 מיליון נפשות.
-שנת 23 לפנה"ס: אחרי 17 שנים של מלחמה, עם צפון אפריקה גבר על עם מישור הנהר הצהוב ולקח ממנו את העיר צ'אנגאן.
-שנת 0 לספירה: אחרי 12 שנים של מלחמה בין עם צפון אפריקה לעם מישור הנהר הצהוב, עם צפון אפריקה יצא על העליונה.
-שנת 0 לספירה: מאה נוספת עברה. בעולם חיים 81.6 מיליון נפשות, ב-10 עמים. במאה הזו לא נוספה אף המצאה, ופרצו 4 מלחמות. העם המתקדם ביותר הוא ארם נהריים, שיודע 31 המצאות.
+שנת 30 לפנה"ס: העיר תבאי ננטשה.
+שנת 0 לספירה: מאה נוספת עברה. בעולם חיים 84.8 מיליון נפשות, ב-10 עמים. במאה הזו לא נוספה אף המצאה, ופרצה מלחמה אחת. העם המתקדם ביותר הוא ארם נהריים, שיודע 31 המצאות.
 
 היכל הממציאים
 --------
@@ -190,24 +188,24 @@
 
 העולם בסוף הספר
 --------
-שנת 0 לספירה. עמים חיים: 10. נפשות: 81.6 מיליון. ערים שנוסדו: 19. מלחמות: 109. אירועי טבע: 864. ממציאים שנולדו: 1570. המצאות חדשות שנוספו לעץ: 3. ספינות כוכבים: 0. מושבות בכוכבים אחרים: 0.
+שנת 0 לספירה. עמים חיים: 10. נפשות: 84.8 מיליון. ערים שנוסדו: 19. מלחמות: 106. אירועי טבע: 870. ממציאים שנולדו: 1574. המצאות חדשות שנוספו לעץ: 3. ספינות כוכבים: 0. מושבות בכוכבים אחרים: 0.
 
 נספח: מה בספר הזה לקוח מן ההיסטוריה האמיתית
 --------
 כל השאר (העמים, האנשים, ההמצאות והמלחמות) נוצר בידי המשחק. המקורות כתובים באנגלית, כמו שהם מופיעים בספרות המחקר.
 ערים (שנת הופעה בספר, לפי התאריך המוקדם שבו קיומה כעיר מבוסס):
   אורוך: 3200 לפנה"ס. מקור: Uruk IV archaic tablets and Eanna precinct, late 4th millennium BCE
-  ממפיס: 3000 לפנה"ס. מקור: Early Dynastic capital of Egypt; Saqqara elite tombs from the 1st Dynasty
+  ממפיס: 3000 לפנה"ס, ננטשה או נחרבה ב-650 לספירה. מקור: Early Dynastic capital of Egypt; Saqqara elite tombs from the 1st Dynasty. Abandoned after Fustat was founded, c. 7th century CE
   מארי: 2900 לפנה"ס, ננטשה או נחרבה ב-1759 לפנה"ס. מקור: French excavations; founded c. 2900 BCE; destroyed by Hammurabi (middle chronology, approximate)
   אור: 2600 לפנה"ס, ננטשה או נחרבה ב-500 לפנה"ס. מקור: Royal Cemetery of Ur (Woolley); largely abandoned c. 500 BCE (approximate)
   הראפה: 2500 לפנה"ס, ננטשה או נחרבה ב-1300 לפנה"ס. מקור: Mature Harappan phase c. 2600-1900 BCE; city decline, end date approximate
   מוהנג'ו דארו: 2500 לפנה"ס, ננטשה או נחרבה ב-1800 לפנה"ס. מקור: Mature Harappan city; largely abandoned by c. 1900-1800 BCE (approximate)
-  תבאי: 2000 לפנה"ס. מקור: Royal centre of the 11th Dynasty, c. 2050 BCE onward
-  קנוסוס: 1900 לפנה"ס. מקור: First palace of Knossos, Middle Minoan, c. 1900 BCE
-  בבל: 1800 לפנה"ס. מקור: Capital of Hammurabi, 18th century BCE
+  תבאי: 2000 לפנה"ס, ננטשה או נחרבה ב-30 לפנה"ס. מקור: Royal centre of the 11th Dynasty, c. 2050 BCE onward. Only scattered villages by the Roman conquest (Strabo)
+  קנוסוס: 1900 לפנה"ס, ננטשה או נחרבה ב-700 לספירה. מקור: First palace of Knossos, Middle Minoan, c. 1900 BCE. Faded away in late antiquity, c. 7th century CE
+  בבל: 1800 לפנה"ס, ננטשה או נחרבה ב-100 לספירה. מקור: Capital of Hammurabi, 18th century BCE. Largely deserted by the early centuries CE
   ירושלים: 1350 לפנה"ס. מקור: Named as a city-state in the Amarna letters, 14th century BCE
   אניאנג: 1250 לפנה"ס, ננטשה או נחרבה ב-1046 לפנה"ס. מקור: Yinxu, late Shang capital with oracle bones; fell with the Shang, c. 1046 BCE
-  קרתגו: 800 לפנה"ס. מקור: Phoenician foundation; archaeology from the late 9th century BCE
+  קרתגו: 800 לפנה"ס, ננטשה או נחרבה ב-146 לפנה"ס. מקור: Phoenician foundation; archaeology from the late 9th century BCE. Destroyed by Rome in 146 BCE (the later Roman city is not modelled)
   אתונה: 800 לפנה"ס. מקור: Polis by the 8th century BCE; earlier Mycenaean citadel not counted as a city here
   לואויאנג: 770 לפנה"ס. מקור: Capital of the Eastern Zhou from 770 BCE
   רומא: 600 לפנה"ס. מקור: Forum paved and urban by c. 600 BCE; the traditional 753 BCE date is not used
@@ -215,7 +213,7 @@
   פטליפוטרה: 300 לפנה"ס. מקור: Mauryan capital described by Megasthenes, c. 300 BCE
   אנטיוכיה: 300 לפנה"ס. מקור: Founded by Seleucus I in 300 BCE
   צ'אנגאן: 202 לפנה"ס. מקור: Capital of the Western Han from 202 BCE
-  טאוטיהואקאן: 100 לספירה. מקור: Pyramid of the Sun and city grid by c. 100-200 CE
+  טאוטיהואקאן: 100 לספירה, ננטשה או נחרבה ב-650 לספירה. מקור: Pyramid of the Sun and city grid by c. 100-200 CE. Centre burned c. 550 CE, largely abandoned by c. 650
 אסונות (עוצמתם במשחק יחסית, לא מספר הרוגים היסטורי):
   430 לפנה"ס: המגפה הגדולה של אתונה פגעה בעיר בזמן המלחמה. מקור: Thucydides, History, Book 2
   79 לספירה: הר וזוב התפרץ וקבר את פומפיי והרקולנאום. מקור: Pliny the Younger, letters to Tacitus; excavations
@@ -229,7 +227,7 @@
   1815 לספירה: הר טמבורה התפרץ, והשנה שאחריו נקראה השנה בלי קיץ. מקור: Raffles and colonial records; 1816 weather records
   1883 לספירה: קרקטואה התפרץ וגלי ים ענקיים שטפו את החופים. מקור: Royal Society report, 1888
   1887 לספירה: הנהר הצהוב עלה על גדותיו בשיטפון ענק. מקור: Contemporary records
-  1918 לספירה: מגפת השפעת הגדולה הקיפה את העולם. מקור: Public health records
+  1918 לספירה: מגפת השפעת הגדולה הקיפה את העולם. מקור: Public health records; worldwide, so no single origin point is used
   1923 לספירה: רעידת האדמה הגדולה של קאנטו הרסה את טוקיו ויוקוהמה. מקור: Japanese seismological records
   2004 לספירה: צונאמי בים ההודי שטף חופים בכמה ארצות. מקור: USGS and UN records
 נשארו בחוץ בכוונה, כי התאריך או העובדות שנויים במחלוקת:
@@ -241,4 +239,6 @@
   אכד, בירת סרגון: קיומה ודאי, אבל מקומה עדיין לא נמצא.
   בירת שושלת שיה בסין: לא ברור אם האתר ארליטואו הוא בירת השושלת, ויש הטוענים שהשושלת אגדית.
   המבול הגדול: סיפור מסורתי, אין לו תאריך או ראיה היסטורית.
+  מקום פריצת שפעת 1918: לא ידוע בוודאות אם התחילה בארצות הברית, בצרפת, בבריטניה או בסין, ולכן המגפה מופיעה כמגפה עולמית בלי נקודת מוצא.
+  תאריכים מוקדמים במסופוטמיה ובסין: שנים כמו נפילת מארי או סוף שושלת שאנג תלויות בשיטת התיארוך; המשחק משתמש בכרונולוגיה התיכונה ובשנת 1046 לפנה"ס.
   מספרי ההרוגים של מגפות עתיקות: ההערכות רחוקות מאוד זו מזו, ולכן המשחק משתמש רק בעוצמה יחסית ולא במספרים.
