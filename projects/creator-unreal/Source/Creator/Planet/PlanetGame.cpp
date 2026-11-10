@@ -146,7 +146,7 @@ void APlanetPawn::Zoom(float WheelSteps)
 	// Zooming in past the closest planet view keeps going: down into the nature view.
 	if (WheelSteps > 0.f && TargetAltitudeM <= MinAltitudeM * 1.001 && AltitudeM < MinAltitudeM * 1.08)
 	{
-		BeginDescent(ScreenCenterDir());
+		BeginDescent(AimDir());
 		return;
 	}
 	TargetAltitudeM = FMath::Clamp(TargetAltitudeM * FMath::Pow(0.82, (double)WheelSteps), MinAltitudeM, MaxAltitudeM);
@@ -194,7 +194,9 @@ void APlanetPawn::Tick(float DeltaSeconds)
 		Fade = FMath::Min(1.f, Fade + DeltaSeconds / 0.55f);
 		if (Fade >= 1.f)
 		{
+			bArriveAtSpot = true;
 			EnterNatureNow(DescentDir, 2500.0);
+			bArriveAtSpot = false;
 			Fade = 1.f;
 			return;
 		}
@@ -289,7 +291,10 @@ void APlanetPawn::EnterNatureNow(const FVector3d& Dir, double DistM)
 	DescentDir = Dir;
 	View = ECreatorView::Nature;
 	FollowId = 0;
-	Focus = FocusTarget = N->HerdCenter() + FVector(0, 0, 60.0);
+	// Coming down from the planet, arrive exactly at the spot that was aimed at.
+	Focus = FocusTarget = bArriveAtSpot
+		? FVector(0.0, 0.0, N->GroundCm(0.0, 0.0) + 60.0)
+		: N->HerdCenter() + FVector(0, 0, 60.0);
 	// Look with the sun behind and a little to the side, so the animals are lit from the front.
 	const FVector Sun = N->LocalSunDir();
 	Yaw = FMath::Atan2(-Sun.Y, -Sun.X) + FMath::DegreesToRadians(35.0);
@@ -482,7 +487,7 @@ void APlanetPlayerController::OnEnter()
 	{
 		if (P->GetView() == ECreatorView::Planet)
 		{
-			P->BeginDescent(P->ScreenCenterDir());
+			P->BeginDescent(P->AimDir());
 		}
 	}
 }
@@ -536,6 +541,12 @@ void APlanetPlayerController::PlayerTick(float DeltaTime)
 	float X = 0.f, Y = 0.f;
 	const bool bHasMouse = GetMousePosition(X, Y);
 	APlanetPawn* P = Cast<APlanetPawn>(GetPawn());
+	if (P)
+	{
+		FVector O, D;
+		P->bMouseAimValid = bHasMouse && P->GetView() == ECreatorView::Planet
+			&& DeprojectScreenPositionToWorld(X, Y, O, D) && P->RayToPlanet(O, D, P->MouseAim);
+	}
 	if (bHasMouse && bHadMouse && P)
 	{
 		// Screen Y grows downward; the pawn expects positive Y to mean a move up the screen.
@@ -586,7 +597,7 @@ void APlanetHUD::DrawHUD()
 	if (Pawn && Pawn->GetFade() > 0.f)
 	{
 		// The fly-through haze between the planet and the ground.
-		DrawRect(FLinearColor(0.80f, 0.86f, 0.93f, Pawn->GetFade()), 0.f, 0.f, Canvas->SizeX, Canvas->SizeY);
+		DrawRect(FLinearColor(0.01f, 0.012f, 0.02f, Pawn->GetFade()), 0.f, 0.f, Canvas->SizeX, Canvas->SizeY);
 	}
 	if (FParse::Param(FCommandLine::Get(), TEXT("CreatorNoHud")))
 	{

@@ -62,11 +62,18 @@ public:
 	FString Message;
 	double MessageUntil = 0.0;
 
+	/** The planet point under the mouse cursor, set by the controller every frame. */
+	FVector3d MouseAim = FVector3d::ZeroVector;
+	bool bMouseAimValid = false;
+	FVector3d AimDir() const { return bMouseAimValid ? MouseAim : ScreenCenterDir(); }
+
 private:
 	void UpdateCamera(double GroundM);
 	void TickNatureCamera(float DeltaSeconds);
 	void LeaveNature();
 	APlanetWorld* FindWorld();
+	/** True while flying down from the planet: land at the chosen spot, not at the herd. */
+	bool bArriveAtSpot = false;
 
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UCameraComponent> Camera;
 
