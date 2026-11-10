@@ -66,12 +66,12 @@ namespace CivGenData
 		{ TEXT("magnetic"), TEXT("מגנטי"), TEXT("מגנטית"), TEXT("שדות מגנטיים חזקים"), 6, TEXT("electricity steel"), TEXT("haul diagnose"), { 0, 0, 1, 1, 0.5 }, false },
 		{ TEXT("radio"), TEXT("אלחוטי"), TEXT("אלחוטית"), TEXT("גלי רדיו"), 6, TEXT("radio"), TEXT("warn defend"), { 0, 0, 0.5, 0.5, 1 }, false },
 		{ TEXT("optical"), TEXT("אופטי"), TEXT("אופטית"), TEXT("קרני אור ועדשות מדויקות"), 6, TEXT("optics electricity"), TEXT("diagnose message"), { 0, 0, 0.5, 0.5, 1 }, false },
-		{ TEXT("computing"), TEXT("ממוחשב"), TEXT("ממוחשבת"), TEXT("תוכנה שמחליטה לפי מדידות"), 6, TEXT("computer"), TEXT("diagnose warn harvest irrigate build preserve defend"), { 0, 0, 0.5, 1, 1 }, false },
+		{ TEXT("computing"), TEXT("ממוחשב"), TEXT("ממוחשבת"), TEXT("תוכנה שמחליטה לפי מדידות"), 6, TEXT("computer"), TEXT("diagnose warn harvest irrigate build defend"), { 0, 0, 0.5, 1, 1 }, false },
 		{ TEXT("nuclear"), TEXT("גרעיני"), TEXT("גרעינית"), TEXT("חום מביקוע גרעיני"), 6, TEXT("nuclear"), TEXT("haul treat"), { 0, 0, 1, 2, 2 }, false },
 		{ TEXT("robotic"), TEXT("רובוטי"), TEXT("רובוטית"), TEXT("זרועות שפועלות בלי אדם"), 7, TEXT("robotics"), TEXT("harvest mine build treat defend"), { 0, 0, 1, 1, 1 }, false },
 		{ TEXT("genetic"), TEXT("גנטי"), TEXT("גנטית"), TEXT("תיקון מדויק של הגנים"), 7, TEXT("genetics"), TEXT("treat"), { 0, 0, 0, 0.5, 1 }, false },
 		{ TEXT("orbital"), TEXT("מסלולי"), TEXT("מסלולית"), TEXT("לוויינים שצופים מלמעלה"), 7, TEXT("satellite"), TEXT("warn message defend"), { 0, 0, 1, 1, 1 }, false },
-		{ TEXT("fusion"), TEXT("היתוכי"), TEXT("היתוכית"), TEXT("אנרגיה מהיתוך גרעיני"), 7, TEXT("fusion"), TEXT("haul mine"), { 0, 0, 1, 3, 1 }, false },
+		{ TEXT("fusion"), TEXT("היתוכי"), TEXT("היתוכית"), TEXT("אנרגיה מהיתוך גרעיני"), 7, TEXT("fusion"), TEXT("haul"), { 0, 0, 1, 3, 1 }, false },
 		{ TEXT("neural"), TEXT("עצבי"), TEXT("עצבית"), TEXT("רשתות מלאכותיות שמחקות עצבים"), 8, TEXT("thinking_machines genetics"), TEXT("compute treat mind extend_life"), { 0, 0, 0.5, 1, 2 }, true },
 		{ TEXT("quantum"), TEXT("קוונטי"), TEXT("קוונטית"), TEXT("חלקיקים שמצבם שזור"), 8, TEXT("thinking_machines"), TEXT("compute message mind"), { 0, 0, 0.5, 2, 3 }, true },
 		{ TEXT("gravity"), TEXT("כבידתי"), TEXT("כבידתית"), TEXT("עיצוב שדה הכבידה"), 8, TEXT("antimatter"), TEXT("haul defend travel"), { 0, 0, 2, 4, 3 }, true },
@@ -101,7 +101,7 @@ namespace CivGenData
 		{ TEXT("gen_mind_copy"), TEXT("העתקת תודעה"), TEXT("העתקת התודעה"), TEXT("gen_computer_brain"), TEXT("extend_life"), TEXT("neural"), F::Medicine, true },
 		{ TEXT("gen_life_in_computer"), TEXT("חיים בתוך מחשב"), TEXT("החיים בתוך המחשב"), TEXT("gen_mind_copy"), TEXT("mind"), TEXT("neural"), F::Science, true },
 		{ TEXT("gen_thought_net"), TEXT("רשת מחשבות"), TEXT("רשת המחשבות"), TEXT("gen_brain_interface internet"), TEXT("mind"), TEXT("quantum"), F::Science, true },
-		{ TEXT("gen_aging"), TEXT("עצירת הזדקנות"), TEXT("עצירת ההזדקנות"), TEXT("genetics"), TEXT("extend_life"), TEXT("biotech"), F::Medicine, false },
+		{ TEXT("gen_aging"), TEXT("עצירת הזדקנות"), TEXT("עצירת ההזדקנות"), TEXT("genetics"), TEXT("extend_life"), TEXT("biotech"), F::Medicine, true },
 		{ TEXT("gen_nanomed"), TEXT("רפואת מכונות זעירות"), TEXT("רפואת המכונות הזעירות"), TEXT("robotics genetics"), TEXT("extend_life"), TEXT("nano"), F::Medicine, true },
 		{ TEXT("gen_terraform"), TEXT("עיצוב כוכבי לכת"), TEXT("עיצוב כוכבי הלכת"), TEXT("mars genetics"), TEXT("settle"), TEXT("planetary"), F::Space, true },
 		{ TEXT("gen_weather"), TEXT("שליטה במזג האוויר"), TEXT("השליטה במזג האוויר"), TEXT("satellite fusion"), TEXT("climate"), TEXT("planetary"), F::Science, true },
@@ -115,6 +115,32 @@ namespace CivGenData
 	{
 		TEXT("message:electric"), TEXT("message:radio"), TEXT("compute:computing"), TEXT("haul:steam"),
 		TEXT("light:electric"), TEXT("haul:electric"), TEXT("defend:chemical"),
+	};
+
+	// Some pairs have a plain everyday name of their own: "a magnetic transport device" is simply a maglev train.
+	struct FNamed { const TCHAR* Pair; const TCHAR* Name; const TCHAR* NameDefinite; };
+	static const FNamed Named[] =
+	{
+		{ TEXT("irrigate:water"), TEXT("גלגל השקיה"), TEXT("גלגל ההשקיה") },
+		{ TEXT("irrigate:wind"), TEXT("טחנת רוח לשאיבת מים"), TEXT("טחנת הרוח לשאיבת מים") },
+		{ TEXT("mine:water"), TEXT("גלגל מים למכרות"), TEXT("גלגל המים למכרות") },
+		{ TEXT("preserve:chemical"), TEXT("חומרי שימור למזון"), TEXT("חומרי השימור למזון") },
+		{ TEXT("preserve:electric"), TEXT("מקרר חשמלי"), TEXT("המקרר החשמלי") },
+		{ TEXT("treat:chemical"), TEXT("תרופות כימיות"), TEXT("התרופות הכימיות") },
+		{ TEXT("treat:nuclear"), TEXT("טיפול בקרינה"), TEXT("הטיפול בקרינה") },
+		{ TEXT("treat:robotic"), TEXT("ניתוח רובוטי"), TEXT("הניתוח הרובוטי") },
+		{ TEXT("diagnose:magnetic"), TEXT("סורק מגנטי"), TEXT("הסורק המגנטי") },
+		{ TEXT("haul:magnetic"), TEXT("רכבת מגנטית"), TEXT("הרכבת המגנטית") },
+		{ TEXT("haul:nuclear"), TEXT("ספינה גרעינית"), TEXT("הספינה הגרעינית") },
+		{ TEXT("haul:fusion"), TEXT("ספינת משא בהנעת היתוך"), TEXT("ספינת המשא בהנעת היתוך") },
+		{ TEXT("message:optical"), TEXT("רשת סיבי אור"), TEXT("רשת סיבי האור") },
+		{ TEXT("message:orbital"), TEXT("לווייני תקשורת"), TEXT("לווייני התקשורת") },
+		{ TEXT("warn:orbital"), TEXT("לווייני תצפית"), TEXT("לווייני התצפית") },
+		{ TEXT("defend:radio"), TEXT("מערך גילוי בגלי רדיו"), TEXT("מערך הגילוי בגלי רדיו") },
+		{ TEXT("irrigate:computing"), TEXT("השקיה ממוחשבת"), TEXT("ההשקיה הממוחשבת") },
+		{ TEXT("harvest:robotic"), TEXT("רובוט קציר"), TEXT("רובוט הקציר") },
+		{ TEXT("mine:robotic"), TEXT("רובוט כרייה"), TEXT("רובוט הכרייה") },
+		{ TEXT("build:robotic"), TEXT("רובוט בנייה"), TEXT("רובוט הבנייה") },
 	};
 
 	static const double EraCost[] = { 3, 12, 35, 100, 280, 900, 4000, 40000, 150000 };
@@ -184,7 +210,7 @@ bool FCivCuratedProposer::Propose(const FCivProposalContext& Context, FCivRandom
 	const FCivPeople& People = *Context.People;
 
 	// Sometimes reach for one of the great far-future ideas.
-	if (Context.PeopleEra >= 7 && Rng.Chance(0.25))
+	if (Context.PeopleEra >= 7 && Rng.Chance(0.12))
 	{
 		const FConcept& Concept = Concepts[Rng.RangeInt(0, UE_ARRAY_COUNT(Concepts) - 1)];
 		const FPurpose* Purpose = FindPurpose(Concept.Purpose);
@@ -266,30 +292,14 @@ bool FCivCuratedProposer::Propose(const FCivProposalContext& Context, FCivRandom
 		}
 	}
 
-	// A device that already exists and is known can be improved, a generation at a time.
-	int32 Tier = 1;
-	static const TCHAR* const TierNames[] = { TEXT(""), TEXT(""), TEXT(" מהדור השני"), TEXT(" מהדור השלישי"), TEXT(" מהדור הרביעי") };
-	for (Tier = 1; Tier <= 4; ++Tier)
+	// Each pairing exists once: a second "generation" of the same device would only be a near-duplicate.
+	const FString Pair = FString(Purpose.Key) + TEXT(":") + Principle.Key;
+	for (const FNamed& Plain : Named)
 	{
-		const FString TierKey = Tier == 1 ? Out.Key : FString::Printf(TEXT("%s_t%d"), *Out.Key, Tier);
-		const int32 Existing = FindInTree(Tree, TierKey);
-		if (Existing == INDEX_NONE)
-		{
-			Out.Key = TierKey;
-			if (Tier > 1)
-			{
-				Out.Name += TierNames[Tier];
-				Out.NameDefinite += TierNames[Tier];
-				const FString PreviousKey = Tier == 2 ? FString::Printf(TEXT("gen_%s_%s"), Purpose.Key, Principle.Key) : FString::Printf(TEXT("gen_%s_%s_t%d"), Purpose.Key, Principle.Key, Tier - 1);
-				Out.Parents.Add(FindInTree(Tree, PreviousKey));
-			}
-			break;
-		}
+		if (Pair == Plain.Pair) { Out.Name = Plain.Name; Out.NameDefinite = Plain.NameDefinite; break; }
 	}
-	if (Tier > 4) { return false; }
 
 	FillBill(Principle, Era, Out);
-	Out.Cost *= Tier;
 	FillEffects(Purpose, Principle.bSpeculative, Out.Effects);
 	return true;
 }
@@ -323,6 +333,8 @@ ECivReject CivGenerator::Validate(const FCivInventionProposal& Proposal, const F
 		if (Index == INDEX_NONE || !People.Known[Index]) { return ECivReject::MissingBasis; }
 	}
 	if (Context.PeopleEra < Principle->MinEra) { return ECivReject::TooEarly; }
+	// Nobody designs a new water-wheel device in the age of atoms: an old principle is no longer worth the work.
+	if (Proposal.Key.StartsWith(TEXT("gen_")) && !Principle->bSpeculative && Context.PeopleEra - Principle->MinEra >= 2) { return ECivReject::Obsolete; }
 
 	// 4. Beyond known science only for the most advanced peoples.
 	if ((Proposal.bSpeculative || Principle->bSpeculative) && (!Context.bAllowSpeculative || Context.PeopleEra < 8))
@@ -381,6 +393,7 @@ const TCHAR* CivGenerator::RejectName(ECivReject Reason)
 	case ECivReject::TooStrong: return TEXT("effect too strong");
 	case ECivReject::Duplicate: return TEXT("near-duplicate");
 	case ECivReject::SpeculativeTooSoon: return TEXT("speculative before high knowledge");
+	case ECivReject::Obsolete: return TEXT("principle long outdated");
 	default: return TEXT("unknown");
 	}
 }

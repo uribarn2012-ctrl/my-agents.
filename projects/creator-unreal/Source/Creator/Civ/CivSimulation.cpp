@@ -39,7 +39,7 @@ namespace CivSimData
 		{ ECivEvent::Plague, 0.03, TEXT("מגפה"), 0.03, 0.30, 0.05, 0.02, 0.03, ECivNeed::Plague, 1.0, 0, 0, false, TEXT("מגפה פרצה ב{0} והתפשטה בכל עם {1}. אבדו {2} נפשות.") },
 		{ ECivEvent::Storm, 0.05, TEXT("סופה"), 0.002, 0.04, 0.12, 0.08, 0.0, ECivNeed::Disaster, 1.0, 0, 0, false, TEXT("סופה עזה פגעה ב{0} של עם {1}. אבדו {2} נפשות.") },
 		{ ECivEvent::Meteor, 0.0015, TEXT("פגיעת מטאור"), 0.05, 0.25, 0.50, 0.40, 0.10, ECivNeed::Disaster, 0.75, 4, 12, true, TEXT("אבן ענק מהשמיים פגעה בעולם, ליד {0} של עם {1}. אבק חסם את השמש ואבדו {2} נפשות.") },
-		{ ECivEvent::IceAge, 0.0008, TEXT("עידן קרח"), 0.01, 0.06, 0.40, 0.10, 0.02, ECivNeed::Famine, 0.72, 40, 110, true, TEXT("הקור ירד על העולם ועידן קרח החל. גם {0} של עם {1} קפאה, ואבדו {2} נפשות.") },
+		{ ECivEvent::IceAge, 0.0008, TEXT("עידן קרח"), 0.01, 0.06, 0.40, 0.10, 0.02, ECivNeed::Famine, 0.72, 40, 110, true, TEXT("הקור ירד על העולם ועידן קרח החל. הכפור הגיע גם אל {0} של עם {1}, ואבדו {2} נפשות.") },
 		{ ECivEvent::Bumper, 0.05, TEXT("שנות שפע"), 0.0, 0.0, 0.0, 0.0, 0.0, ECivNeed::None, 1.25, 3, 6, false, TEXT("שנות שפע באו על עם {1}. השדות סביב {0} הניבו כפליים.") },
 		{ ECivEvent::Comet, 0.008, TEXT("כוכב שביט"), 0.0, 0.0, 0.0, 0.0, 0.0, ECivNeed::None, 1.0, 0, 0, true, TEXT("כוכב שביט בוהק נראה בשמי {0}. אצל עם {1} ובכל העולם התחילו לשאול שאלות חדשות.") },
 		{ ECivEvent::SolarStorm, 0.006, TEXT("סערת שמש"), 0.0, 0.01, 0.05, 0.30, 0.05, ECivNeed::Disaster, 1.0, 0, 0, false, TEXT("סערה מהשמש שרפה את המכונות ב{0} של עם {1}. אבדו {2} נפשות.") },
@@ -120,9 +120,13 @@ FString FCivPerson::PersonalityWord() const
 
 void FCivSimulation::ComputeFactors()
 {
-	const double IQRatio = FMath::Max(0.1, Settings.AverageIQ / 100.0);
-	BirthFactor = FMath::Pow(IQRatio, Settings.Tuning.BirthIQExponent);
-	SpreadFactor = FMath::Pow(IQRatio, Settings.Tuning.SpreadIQExponent);
+	const double IQRatio = FMath::Max(0.05, Settings.AverageIQ / 200.0);
+	for (int32 Era = 0; Era < 9; ++Era)
+	{
+		const double Exponent = Settings.Tuning.BirthIQExponentByEra[Era] > 0.0 ? Settings.Tuning.BirthIQExponentByEra[Era] : Settings.Tuning.BirthIQExponent;
+		BirthFactors[Era] = Settings.Tuning.BirthFactorAt200 * FMath::Pow(IQRatio, Exponent);
+	}
+	SpreadFactor = Settings.Tuning.SpreadFactorAt200 * FMath::Pow(IQRatio, Settings.Tuning.SpreadIQExponent);
 }
 
 int32 FCivSimulation::ResolveStartEra() const
@@ -192,9 +196,22 @@ FCivSimulation::FCivSimulation(const FCivWorldSettings& InSettings)
 		WorldEra = StartEra - 1;
 	}
 
+	// One opening line for the whole world instead of one per people.
+	{
+		FString Opening = bRealCalendar ? TEXT("בתחילת הספר חיים בעולם ") : TEXT("בתחילת הזמן חיים בעולם ");
+		Opening += FString::FromInt(Peoples.Num());
+		Opening += TEXT(" עמים, רחוקים זה מזה: ");
+		for (int32 Index = 0; Index < Peoples.Num(); ++Index)
+		{
+			if (Index > 0) { Opening += Index + 1 == Peoples.Num() ? TEXT(" ו") : TEXT(", "); }
+			Opening += Peoples[Index].Name + TEXT(" (") + Count(Peoples[Index].Population) + TEXT(" נפשות)");
+		}
+		Opening += StartEra == 0 ? TEXT(". הם חיים בלהקות קטנות של ציידים ולקטים, סביב מדורות.") : TEXT(".");
+		Write(ECivEntryKind::Chronicle, 2, INDEX_NONE, Opening);
+	}
+
 	SetupRealHistory();
 	SeedPersonPool();
-
 	// Each people starts with a few adult thinkers, so the story can begin at once.
 	for (int32 Index = 0; Index < Peoples.Num(); ++Index)
 	{
@@ -223,12 +240,12 @@ void FCivSimulation::SetupRealHistory()
 		if (City.FoundedYear <= StartCalendarYear)
 		{
 			RealCityDone[C] = true;
-			if (City.EndYear > StartCalendarYear) { AddRealCity(C); }
+			if (City.EndYear > StartCalendarYear) { AddRealCity(C, true); }
 		}
 	}
 }
 
-void FCivSimulation::AddRealCity(int32 DataIndex)
+void FCivSimulation::AddRealCity(int32 DataIndex, bool bAtStart)
 {
 	const CivRealHistory::FCity& Data = CivRealHistory::Cities()[DataIndex];
 	const double LatRad = Data.LatDeg * DegToRad;
@@ -251,8 +268,9 @@ void FCivSimulation::AddRealCity(int32 DataIndex)
 	City.RealId = DataIndex;
 	Peoples[Owner].Cities.Add(City);
 	++Stats.CitiesFounded;
-	Write(ECivEntryKind::City, 2, Owner, Fill(TEXT("העיר {0} עומדת על מכונה, בארץ {1}."), { City.Name, Peoples[Owner].Name }));
-	if (GetMilestoneYear(ECivMilestone::FirstCity) == INDEX_NONE)
+	Write(ECivEntryKind::City, 2, Owner, Fill(bAtStart ? TEXT("העיר {0} כבר עומדת, בארץ {1}.") : TEXT("העיר {0} קמה בארץ {1}, כפי שהיה בהיסטוריה."), { City.Name, Peoples[Owner].Name }));
+	// Only a start at the earliest city makes it the first city of the world; a later start finds many already standing.
+	if (GetMilestoneYear(ECivMilestone::FirstCity) == INDEX_NONE && StartCalendarYear <= CivRealHistory::EarliestCityYear())
 	{
 		RecordMilestone(ECivMilestone::FirstCity, Owner, FString(), MilestoneTitle(ECivMilestone::FirstCity));
 	}
@@ -282,7 +300,7 @@ void FCivSimulation::TickRealHistory()
 		if (!RealCityDone[C] && CivRealHistory::Cities()[C].FoundedYear <= Calendar)
 		{
 			RealCityDone[C] = true;
-			AddRealCity(C);
+			AddRealCity(C, false);
 		}
 	}
 
@@ -363,7 +381,7 @@ void FCivSimulation::CreatePeople(int32 Index, const FString* FixedName, const d
 		Peoples[Other].Relations[Index] = Start;
 	}
 	Recalculate(P);
-	Write(ECivEntryKind::People, 2, Index, Fill(TEXT("בקצה אחד של העולם התגבש עם {0}, {1} נפשות סביב המדורות."), { P.Name, Count(P.Population) }));
+	Write(ECivEntryKind::People, 1, Index, Fill(TEXT("עם {0} התגבש, {1} נפשות."), { P.Name, Count(P.Population) }));
 }
 
 void FCivSimulation::Recalculate(FCivPeople& P)
@@ -409,15 +427,15 @@ void FCivSimulation::Recalculate(FCivPeople& P)
 	}
 }
 
-int32 FCivSimulation::InventorCap() const
+int32 FCivSimulation::InventorCap(const FCivPeople& P) const
 {
 	// Notable inventors are few among ordinary people and more common only as average IQ rises.
-	return FMath::Clamp(FMath::RoundToInt32(3.0 * FMath::Pow(BirthFactor, 0.4)), 1, Settings.Tuning.InventorCapPerPeople);
+	return FMath::Clamp(FMath::RoundToInt32(3.0 * FMath::Pow(BirthFactorFor(P), 0.4)), 1, Settings.Tuning.InventorCapPerPeople);
 }
 
 double FCivSimulation::CostOf(const FCivInventionDef& Def) const
 {
-	return Def.Cost * Settings.Tuning.CostScale * FMath::Pow(Settings.Tuning.EraCostFactor, Def.Era);
+	return Def.Cost * Settings.Tuning.CostScale * FMath::Pow(Settings.Tuning.EraCostFactor, Def.Era) * Settings.Tuning.EraCostShape[FMath::Clamp(Def.Era, 0, 8)];
 }
 
 double FCivSimulation::ExpectedLifespan(const FCivPeople& P) const
@@ -508,7 +526,8 @@ void FCivSimulation::Write(ECivEntryKind Kind, int32 Importance, int32 PeopleInd
 const FString& FCivSimulation::CityOrName(const FCivPeople& P) const
 {
 	static const FString Camp = TEXT("מחנה המדורות");
-	return P.Cities.Num() > 0 ? P.Cities[0].Name : Camp;
+	static const FString Villages = TEXT("הכפרים");
+	return P.Cities.Num() > 0 ? P.Cities[0].Name : (P.Era <= 1 ? Camp : Villages);
 }
 
 // ---------------------------------------------------------------------------
@@ -604,7 +623,9 @@ void FCivSimulation::ApplyEvent(ECivEvent Event, int32 PeopleIndex, double Sever
 		// A hard blow can wipe out a city altogether.
 		if (Severity > 0.8 && Loss > 0.04 && P.Cities.Num() > 1 && Rng.Chance(0.5))
 		{
-			DestroyCity(Target, Rng.RangeInt(0, P.Cities.Num() - 1));
+			// Cities from the historical record stand until their recorded end; only invented cities can vanish at random.
+			const int32 Doomed = Rng.RangeInt(0, P.Cities.Num() - 1);
+			if (P.Cities[Doomed].RealId == INDEX_NONE) { DestroyCity(Target, Doomed); }
 		}
 		else if (P.Cities.Num() > 0 && Loss > 0.0)
 		{
@@ -614,8 +635,11 @@ void FCivSimulation::ApplyEvent(ECivEvent Event, int32 PeopleIndex, double Sever
 	}
 
 	const FCivPeople& Struck = Peoples[PeopleIndex];
-	const bool bBig = bFromGod || Def.bWorldwide || Severity > 0.5 || Report != nullptr;
+	// The book keeps the blows people remembered for generations; ordinary bad years stay in the records only.
+	const bool bHarmless = Event == ECivEvent::Bumper || Event == ECivEvent::Comet;
+	const bool bBig = bFromGod || Report != nullptr || (!bHarmless && (Def.bWorldwide || (Severity > 0.8 && Def.PopLossMax >= 0.08)));
 	FString Text = Report ? (*Report + FString::Printf(TEXT(" (%s נפשות אבדו בעולם המשחק)"), *Count(WorldDeaths))) : Fill(Def.Report, { CityOrName(Struck), Struck.Name, Count(WorldDeaths) });
+	Text.ReplaceInline(TEXT("בהכפרים"), TEXT("בכפרים"));
 	if (bFromGod)
 	{
 		Text = FString(TEXT("זעם האל: ")) + Text;
@@ -655,7 +679,7 @@ void FCivSimulation::TickEconomy()
 		if (Year >= P.ClimateUntil) { P.ClimateFactor = 1.0; }
 		for (int32 N = 0; N < CivNeedCount; ++N) { P.NeedPressure[N] *= 0.95; }
 
-		const double Capacity = FMath::Min(T.BaseCapacity * P.LandQuality * P.FoodMult * P.CapacityMult * Settings.LandFertility, 4.0e9);
+		const double Capacity = FMath::Min(T.BaseCapacity * P.LandQuality * P.FoodMult * P.CapacityMult * Settings.LandFertility, 1.0e9);   // no homeland feeds more than about a billion
 		const double Crowding = P.Population / FMath::Max(1.0, Capacity);
 		const double PerPerson = 1.2 * P.ClimateFactor * (Crowding > 1.0 ? 1.0 / Crowding : 1.0);
 		P.Food += P.Population * (PerPerson - 1.0);
@@ -844,8 +868,8 @@ void FCivSimulation::TickInventors()
 			}
 		}
 
-		const double Yearly = T.InventorRate * BirthFactor * FMath::Pow(FMath::Max(1.0, P.Population), T.PopulationExponent);
-		const int32 Room = InventorCap() - P.LivingInventors.Num();
+		const double Yearly = T.InventorRate * BirthFactorFor(P) * FMath::Pow(FMath::Max(1.0, P.Population), T.PopulationExponent);
+		const int32 Room = InventorCap(P) - P.LivingInventors.Num();
 		if (Room > 0)
 		{
 			const int32 Births = FMath::Min(Room, Rng.Poisson(FMath::Min(Yearly, 8.0)));
@@ -914,9 +938,9 @@ void FCivSimulation::TickResearch()
 		if (!P.bAlive || P.LivingInventors.Num() == 0) { continue; }
 
 		// When more thinkers are born than the book can name, the named ones lead a school.
-		const double Yearly = T.InventorRate * BirthFactor * FMath::Pow(FMath::Max(1.0, P.Population), T.PopulationExponent);
+		const double Yearly = T.InventorRate * BirthFactorFor(P) * FMath::Pow(FMath::Max(1.0, P.Population), T.PopulationExponent);
 		const double ExpectedAlive = Yearly * ExpectedLifespan(P);
-		const double School = FMath::Max(1.0, ExpectedAlive / InventorCap());
+		const double School = FMath::Max(1.0, ExpectedAlive / InventorCap(P));
 		const double KnowledgeBonus = 1.0 + T.KnowledgeBonus * FMath::LogX(10.0, 1.0 + P.Knowledge);
 		const double Mood = (P.CuriosityUntil > Year) ? 1.2 : 1.0;
 		const double Hunger = P.Food > 0.0 ? 1.0 : 0.6;
@@ -1021,7 +1045,7 @@ void FCivSimulation::TryGenerateInvention(int32 PeopleIndex, FCivPerson& G)
 	}
 
 	// Ideas beyond known science are rare even when allowed.
-	if (Proposal.bSpeculative && !Rng.Chance(0.35)) { return; }
+	if (Proposal.bSpeculative && !Rng.Chance(0.2)) { return; }
 
 	++Stats.ProposalsAccepted;
 	G.Project = AddToTree(Proposal, PeopleIndex);
@@ -1107,7 +1131,7 @@ void FCivSimulation::GrantInvention(int32 PeopleIndex, int32 Invention, FCivPers
 	{
 		++Inventor->InventionCount;
 		Inventor->Reputation = FMath::Min(1.0, Inventor->Reputation + 0.1);
-		Log(*Inventor, ECivLife::Invented, INDEX_NONE, Invention);
+		Log(*Inventor, ECivLife::Invented, bFirstInWorld ? 1 : 0, Invention);
 	}
 
 	if (bFirstInWorld)
@@ -1120,9 +1144,9 @@ void FCivSimulation::GrantInvention(int32 PeopleIndex, int32 Invention, FCivPers
 		}
 		else if (Inventor)
 		{
-			static const TCHAR* const Male[] = { TEXT("{0} {1} מעם {2} המציא את {3}."), TEXT("{0} {1} מעם {2} גילה את {3}."), TEXT("אחרי שנים של עבודה, {0} {1} מעם {2} הציג את {3}.") };
-			static const TCHAR* const Female[] = { TEXT("{0} {1} מעם {2} המציאה את {3}."), TEXT("{0} {1} מעם {2} גילתה את {3}."), TEXT("אחרי שנים של עבודה, {0} {1} מעם {2} הציגה את {3}.") };
-			const int32 Variant = Rng.RangeInt(0, 2);
+			static const TCHAR* const Male[] = { TEXT("{0} {1} מעם {2} פיתח לראשונה את {3}."), TEXT("בעם {2} הגיע {0} {1} ראשון אל {3}."), TEXT("{0} {1} מעם {2} הציג, אחרי שנים של עבודה, את {3}."), TEXT("{0} מעם {2}, {1} שבחכמיו, היה הראשון בעולם שהגיע אל {3}."), TEXT("{0} {1} השלים בעם {2} את {3}, ראשון בעולם.") };
+			static const TCHAR* const Female[] = { TEXT("{0} {1} מעם {2} פיתחה לראשונה את {3}."), TEXT("בעם {2} הגיעה {0} {1} ראשונה אל {3}."), TEXT("{0} {1} מעם {2} הציגה, אחרי שנים של עבודה, את {3}."), TEXT("{0} מעם {2}, {1} שבחכמיו, הייתה הראשונה בעולם שהגיעה אל {3}."), TEXT("{0} {1} השלימה בעם {2} את {3}, ראשונה בעולם.") };
+			const int32 Variant = Rng.RangeInt(0, UE_ARRAY_COUNT(Male) - 1);
 			Write(ECivEntryKind::Invention, 2, PeopleIndex, Fill(Inventor->bFemale ? Female[Variant] : Male[Variant], { Inventor->Name, Inventor->PersonalityWord(), P.Name, Def.NameDefinite }));
 		}
 		else
@@ -1260,7 +1284,7 @@ void FCivSimulation::TickDiplomacy()
 				War.StartYear = Year;
 				Wars.Add(War);
 				++Stats.Wars;
-				Write(ECivEntryKind::War, 2, A, Fill(TEXT("פרצה מלחמה בין עם {0} לעם {1}."), { Peoples[A].Name, Peoples[B].Name }));
+				Write(ECivEntryKind::War, 1, A, Fill(TEXT("פרצה מלחמה בין עם {0} לעם {1}."), { Peoples[A].Name, Peoples[B].Name }));
 			}
 		}
 	}
@@ -1298,6 +1322,8 @@ void FCivSimulation::EndWar(int32 WarIndex, int32 Winner)
 	const int32 Loser = Winner == War.A ? War.B : War.A;
 	FCivPeople& Win = Peoples[Winner];
 	FCivPeople& Lose = Peoples[Loser];
+	const int32 Years = FMath::Max(1, Year - War.StartYear);
+	const FString Duration = Years == 1 ? FString(TEXT("שנה אחת")) : (Years == 2 ? FString(TEXT("שנתיים")) : FString::Printf(TEXT("%d שנים"), Years));
 
 	for (int32 R = 0; R < CivResourceCount; ++R)
 	{
@@ -1322,11 +1348,12 @@ void FCivSimulation::EndWar(int32 WarIndex, int32 Winner)
 		const double Moved = Lose.Population * 0.1;
 		Lose.Population -= Moved;
 		Win.Population += Moved;
-		Write(ECivEntryKind::Peace, 2, Winner, Fill(TEXT("עם {0} ניצח במלחמה ולקח מעם {1} את העיר {2}."), { Win.Name, Lose.Name, City.Name }));
+		Write(ECivEntryKind::Peace, 2, Winner, Fill(TEXT("אחרי {3} של מלחמה, עם {0} גבר על עם {1} ולקח ממנו את העיר {2}."), { Win.Name, Lose.Name, City.Name, Duration }));
 	}
 	else
 	{
-		Write(ECivEntryKind::Peace, 2, Winner, Fill(TEXT("המלחמה בין עם {0} לעם {1} נגמרה, ועם {0} יצא על העליונה."), { Win.Name, Lose.Name }));
+		// Short border wars stay in the records; the book keeps the long ones.
+		Write(ECivEntryKind::Peace, Years >= 10 ? 2 : 1, Winner, Fill(TEXT("אחרי {2} של מלחמה בין עם {0} לעם {1}, עם {0} יצא על העליונה."), { Win.Name, Lose.Name, Duration }));
 	}
 }
 
@@ -1349,7 +1376,7 @@ void FCivSimulation::TickSpace()
 		Voyage.Star = CivText::StarName(Rng);
 		Voyages.Add(Voyage);
 		++Stats.Starships;
-		Write(ECivEntryKind::Space, 2, Index, Fill(TEXT("עוד ספינה של עם {0} יצאה לדרך, אל הכוכב {1}."), { P.Name, Voyage.Star }));
+		Write(ECivEntryKind::Space, 1, Index, Fill(TEXT("עוד ספינה של עם {0} יצאה לדרך, אל הכוכב {1}."), { P.Name, Voyage.Star }));
 	}
 
 	for (int32 V = Voyages.Num() - 1; V >= 0; --V)
@@ -1381,8 +1408,29 @@ void FCivSimulation::TickChronicle()
 	}
 	if (Leader == INDEX_NONE) { return; }
 
-	Write(ECivEntryKind::Chronicle, 2, Leader, Fill(TEXT("סיכום המאה: {0} עמים, {1} נפשות בעולם. הידע המתקדם ביותר נמצא בעם {2}, שיודע {3} המצאות."),
-		{ FString::FromInt(GetAlivePeoples()), Count(GetWorldPopulation()), Peoples[Leader].Name, FString::FromInt(Peoples[Leader].KnownCount) }));
+	// What the century brought, counted from the book itself.
+	int32 NewInventions = 0, NewWars = 0;
+	for (int32 I = Entries.Num() - 1; I >= 0 && Entries[I].Year > Year - 100; --I)
+	{
+		const FCivEntry& E = Entries[I];
+		if ((E.Kind == ECivEntryKind::Invention || E.Kind == ECivEntryKind::Milestone) && E.Importance >= 2) { ++NewInventions; }
+		if (E.Kind == ECivEntryKind::War) { ++NewWars; }
+	}
+	static const TCHAR* const Openings[] = { TEXT("סוף המאה: {0} עמים ו-{1} נפשות בעולם. "), TEXT("כך נראה העולם כשהמאה הסתיימה: {0} עמים, {1} נפשות. "), TEXT("מאה נוספת עברה. בעולם חיים {1} נפשות, ב-{0} עמים. ") };
+	FString Text = Fill(Openings[(Year / 100) % UE_ARRAY_COUNT(Openings)], { FString::FromInt(GetAlivePeoples()), Count(GetWorldPopulation()) });
+	if (NewInventions == 0 && NewWars == 0)
+	{
+		Text += TEXT("הייתה זו מאה שקטה: לא נוסף לעולם דבר חדש, ולא פרצה מלחמה.");
+	}
+	else
+	{
+		Text += TEXT("במאה הזו ");
+		Text += NewInventions == 0 ? FString(TEXT("לא נוספה אף המצאה")) : (NewInventions == 1 ? FString(TEXT("נוספה המצאה אחת")) : FString::Printf(TEXT("נוספו %d המצאות"), NewInventions));
+		Text += TEXT(", ");
+		Text += NewWars == 0 ? FString(TEXT("ולא פרצה אף מלחמה.")) : (NewWars == 1 ? FString(TEXT("ופרצה מלחמה אחת.")) : FString::Printf(TEXT("ופרצו %d מלחמות."), NewWars));
+	}
+	Text += Fill(TEXT(" העם המתקדם ביותר הוא {0}, שיודע {1} המצאות."), { Peoples[Leader].Name, FString::FromInt(Peoples[Leader].KnownCount) });
+	Write(ECivEntryKind::Chronicle, 2, Leader, Text);
 }
 
 // ---------------------------------------------------------------------------
@@ -1511,6 +1559,7 @@ FString FCivSimulation::BuildBook() const
 	Book += TEXT("======================================\n\n");
 
 	Book += TEXT("אבני דרך\n--------\n");
+	if (Milestones.Num() == 0) { Book += TEXT("בתקופה שהספר הזה מכסה לא הגיע העולם לאבן דרך חדשה.\n"); }
 	for (const FCivMilestoneRecord& Record : Milestones)
 	{
 		Book += YearLabel(Record.Year);
@@ -1551,7 +1600,7 @@ FString FCivSimulation::BuildBook() const
 		Book += G.PersonalityWord();
 		Book += TEXT(", מעם ");
 		Book += Peoples[G.People].Name;
-		Book += FString::Printf(TEXT(": %d המצאות\n"), G.InventionCount);
+		Book += G.InventionCount == 1 ? FString(TEXT(": המצאה אחת\n")) : FString::Printf(TEXT(": %d המצאות\n"), G.InventionCount);
 	}
 
 	Book += TEXT("\nהעולם בסוף הספר\n--------\n");
@@ -1560,6 +1609,40 @@ FString FCivSimulation::BuildBook() const
 	Book += Count(GetWorldPopulation());
 	Book += FString::Printf(TEXT(". ערים שנוסדו: %d. מלחמות: %d. אירועי טבע: %d. ממציאים שנולדו: %d. המצאות חדשות שנוספו לעץ: %d. ספינות כוכבים: %d. מושבות בכוכבים אחרים: %d.\n"),
 		Stats.CitiesFounded, Stats.Wars, Stats.Events, Stats.InventorsBorn, Stats.ProposalsAccepted, Stats.Starships, Stats.StarColonies);
+
+	// With real history on, the reader can see exactly what was taken from the record, with dates and sources.
+	if (bRealCalendar)
+	{
+		const auto DataYear = [](int32 Calendar)
+		{
+			return Calendar < 0 ? FString::Printf(TEXT("%d לפנה\"ס"), -Calendar) : FString::Printf(TEXT("%d לספירה"), Calendar);
+		};
+		Book += TEXT("\nנספח: מה בספר הזה לקוח מן ההיסטוריה האמיתית\n--------\n");
+		Book += TEXT("כל השאר (העמים, האנשים, ההמצאות והמלחמות) נוצר בידי המשחק. המקורות כתובים באנגלית, כמו שהם מופיעים בספרות המחקר.\n");
+		if (Settings.bRealCities)
+		{
+			Book += TEXT("ערים (שנת הופעה בספר, לפי התאריך המוקדם שבו קיומה כעיר מבוסס):\n");
+			for (const CivRealHistory::FCity& City : CivRealHistory::Cities())
+			{
+				Book += TEXT("  ") + FString(City.Name) + TEXT(": ") + DataYear(City.FoundedYear);
+				if (City.EndYear != MAX_int32) { Book += TEXT(", ננטשה או נחרבה ב-") + DataYear(City.EndYear); }
+				Book += TEXT(". מקור: ") + FString(City.Source) + TEXT("\n");
+			}
+		}
+		if (Settings.bRealDisasters)
+		{
+			Book += TEXT("אסונות (עוצמתם במשחק יחסית, לא מספר הרוגים היסטורי):\n");
+			for (const CivRealHistory::FDisaster& Disaster : CivRealHistory::Disasters())
+			{
+				Book += TEXT("  ") + DataYear(Disaster.Year) + TEXT(": ") + FString(Disaster.Text) + TEXT(" מקור: ") + FString(Disaster.Source) + TEXT("\n");
+			}
+		}
+		Book += TEXT("נשארו בחוץ בכוונה, כי התאריך או העובדות שנויים במחלוקת:\n");
+		for (const CivRealHistory::FLeftOut& Out : CivRealHistory::LeftOut())
+		{
+			Book += TEXT("  ") + FString(Out.Name) + TEXT(": ") + FString(Out.Why) + TEXT("\n");
+		}
+	}
 	return Book;
 }
 
@@ -1570,7 +1653,7 @@ FString FCivSimulation::BuildBook() const
 namespace CivSave
 {
 	constexpr uint32 Magic = 0x43495653;   // "CIVS"
-	constexpr uint32 Version = 1;
+	constexpr uint32 Version = 2;
 
 	template <typename TEnum>
 	static void Enum(FArchive& Ar, TEnum& Value)
@@ -1607,7 +1690,7 @@ using CivSave::Enum;
 	{
 		Ar << E.Year;
 		Enum(Ar, E.Kind);
-		return Ar << E.Other << E.Param << E.OtherName;
+		return Ar << E.Other << E.Param << E.Era << E.OtherName;
 	}
 
 	static FArchive& operator<<(FArchive& Ar, FCivCity& C)
@@ -1671,9 +1754,11 @@ using CivSave::Enum;
 		Ar << W.bGeneratedInventions << W.bSpeculativeInventions << W.GeneratedInventionRate << W.MaxGeneratedInventions;
 		Ar << W.bRealCities << W.bRealDisasters << W.bKeepRandomDisasters << W.RealHistoryStartYear << W.NamedPersonsPerPeople;
 		FCivTuning& T = W.Tuning;
-		Ar << T.BirthIQExponent << T.SpreadIQExponent << T.InventorRate << T.PopulationExponent << T.InventorCapPerPeople << T.CostScale;
+		Ar << T.BirthFactorAt200 << T.SpreadFactorAt200 << T.BirthIQExponent << T.SpreadIQExponent << T.InventorRate << T.PopulationExponent << T.InventorCapPerPeople << T.CostScale;
 		Ar << T.DiffusionRate << T.MaterialScale << T.MiningRate << T.StartingFoodPerPerson << T.PopulationGrowth << T.BaseCapacity;
+		for (double& Exponent : T.BirthIQExponentByEra) { Ar << Exponent; }
 		Ar << T.GenerationChance << T.GeneratedEffectCap << T.KnowledgeBonus << T.ResearchExponent << T.SchoolExponent << T.EraCostFactor;
+		for (double& Shape : T.EraCostShape) { Ar << Shape; }
 	}
 }
 

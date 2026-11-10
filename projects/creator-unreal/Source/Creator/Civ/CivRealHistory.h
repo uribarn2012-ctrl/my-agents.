@@ -39,7 +39,15 @@ namespace CivRealHistory
 		const TCHAR* Source;
 	};
 
+	/** Something deliberately left out because its date or its facts are disputed. */
+	struct FLeftOut
+	{
+		const TCHAR* Name;     // Hebrew
+		const TCHAR* Why;      // Hebrew
+	};
+
 	const TArray<FRegion>& Regions();
+	const TArray<FLeftOut>& LeftOut();
 	const TArray<FCity>& Cities();
 	const TArray<FDisaster>& Disasters();
 	int32 EarliestCityYear();

@@ -30,7 +30,7 @@ struct FCivInventionProposal
 enum class ECivReject : uint8
 {
 	None, NoParents, ParentUnknown, NoPurpose, NoMechanism, Incompatible, MissingBasis,
-	MaterialsLocked, TooEarly, NoEffect, TooStrong, Duplicate, SpeculativeTooSoon, Count
+	MaterialsLocked, TooEarly, NoEffect, TooStrong, Duplicate, SpeculativeTooSoon, Obsolete, Count
 };
 constexpr int32 CivRejectCount = static_cast<int32>(ECivReject::Count);
 

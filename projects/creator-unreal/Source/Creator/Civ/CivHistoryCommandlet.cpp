@@ -36,9 +36,9 @@ namespace CivHistoryTest
 	static FString Row(const FCivSimulation& Sim)
 	{
 		const FCivStats& S = Sim.GetStats();
-		return FString::Printf(TEXT("seed=%-3llu iq=%3.0f city=%6d writing=%6d electric=%6d moon=%6d mars=%6d launch=%6d arrival=%6d end=%6d pop=%9.2e wars=%3d events=%4d inventors=%5d generated=%3d persons=%6d lost=%2d extinct=%d"),
-			Sim.GetSettings().Seed, Sim.GetSettings().AverageIQ, Sim.GetMilestoneYear(ECivMilestone::FirstCity), Sim.GetMilestoneYear(ECivMilestone::Writing),
-			Sim.GetMilestoneYear(ECivMilestone::Electricity), Sim.GetMilestoneYear(ECivMilestone::Moon), Sim.GetMilestoneYear(ECivMilestone::Mars),
+		return FString::Printf(TEXT("seed=%-3llu iq=%3.0f city=%6d writing=%6d printing=%6d steam=%6d electric=%6d computer=%6d satellite=%6d moon=%6d mars=%6d launch=%6d arrival=%6d end=%6d pop=%9.2e wars=%3d events=%4d inventors=%5d generated=%3d persons=%6d lost=%2d extinct=%d"),
+			Sim.GetSettings().Seed, Sim.GetSettings().AverageIQ, Sim.GetMilestoneYear(ECivMilestone::FirstCity), Sim.GetMilestoneYear(ECivMilestone::Writing), Sim.GetMilestoneYear(ECivMilestone::Printing), Sim.GetMilestoneYear(ECivMilestone::Steam),
+			Sim.GetMilestoneYear(ECivMilestone::Electricity), Sim.GetMilestoneYear(ECivMilestone::Computer), Sim.GetMilestoneYear(ECivMilestone::Satellite), Sim.GetMilestoneYear(ECivMilestone::Moon), Sim.GetMilestoneYear(ECivMilestone::Mars),
 			Sim.GetMilestoneYear(ECivMilestone::StarLaunch), Sim.GetMilestoneYear(ECivMilestone::OtherStar), Sim.GetYear(), Sim.GetWorldPopulation(),
 			S.Wars, S.Events, S.InventorsBorn, S.ProposalsAccepted, S.PersonsCreated, S.PeoplesLost, Sim.IsExtinct() ? 1 : 0);
 	}
@@ -64,7 +64,14 @@ namespace CivHistoryTest
 	static FCivTuning ReadTuning(const FString& Params)
 	{
 		FCivTuning T;
-		FParse::Value(*Params, TEXT("BirthExp="), T.BirthIQExponent);
+		if (FParse::Value(*Params, TEXT("BirthExp="), T.BirthIQExponent)) { for (double& E : T.BirthIQExponentByEra) { E = T.BirthIQExponent; } }
+		FString Exps;
+		if (FParse::Value(*Params, TEXT("IQExps="), Exps, false))
+		{
+			TArray<FString> Parts;
+			Exps.ParseIntoArray(Parts, TEXT(","));
+			for (int32 I = 0; I < Parts.Num() && I < 9; ++I) { T.BirthIQExponentByEra[I] = FCString::Atod(*Parts[I]); }
+		}
 		FParse::Value(*Params, TEXT("SpreadExp="), T.SpreadIQExponent);
 		FParse::Value(*Params, TEXT("InventorRate="), T.InventorRate);
 		FParse::Value(*Params, TEXT("PopExp="), T.PopulationExponent);
@@ -79,6 +86,13 @@ namespace CivHistoryTest
 		FParse::Value(*Params, TEXT("ResearchExp="), T.ResearchExponent);
 		FParse::Value(*Params, TEXT("SchoolExp="), T.SchoolExponent);
 		FParse::Value(*Params, TEXT("EraCost="), T.EraCostFactor);
+		FString Shape;
+		if (FParse::Value(*Params, TEXT("EraShape="), Shape, false))
+		{
+			TArray<FString> Parts;
+			Shape.ParseIntoArray(Parts, TEXT(","));
+			for (int32 I = 0; I < Parts.Num() && I < 9; ++I) { T.EraCostShape[I] = FCString::Atod(*Parts[I]); }
+		}
 		return T;
 	}
 
@@ -110,6 +124,82 @@ namespace CivHistoryTest
 			Lines.Add(FString::Printf(TEXT("%s | שנה %d | עידן %d | %s | נבנה על: %s | איך: %s | עמים שיודעים: %d"),
 				*Def.Name, Def.ConceivedYear, Def.Era, Def.bSpeculative ? TEXT("מעבר למדע המוכר") : TEXT("מדע מוכר"), *Parents, *Def.Mechanism, Knowers));
 		}
+		return Lines;
+	}
+
+	/** The generated inventions of one world, each with where it came from, why and how, what it costs and what it gives. */
+	static TArray<FString> InventionReport(const FCivSimulation& Sim)
+	{
+		static const TCHAR* const NeedWords[] = { TEXT("אין צורך דוחק; רצון לשפר את מה שיש"), TEXT("אסונות טבע"), TEXT("מלחמות"), TEXT("רעב"), TEXT("מחלות ומגפות") };
+		static const TCHAR* const MaterialWords[] = { TEXT("עץ"), TEXT("אבן"), TEXT("מתכת"), TEXT("אנרגיה"), TEXT("חומרים נדירים") };
+		const TArray<FCivInventionDef>& Tree = Sim.GetTree();
+		TArray<FString> Lines;
+		int32 Count = 0;
+		for (const FCivInventionDef& Def : Tree) { if (Def.bGenerated) { ++Count; } }
+		Lines.Add(FString::Printf(TEXT("--- עולם %llu, מנת משכל %.0f: %d המצאות חדשות עד שנה %d ---"), Sim.GetSettings().Seed, Sim.GetSettings().AverageIQ, Count, Sim.GetYear()));
+		Lines.Add(TEXT(""));
+		for (int32 Index = 0; Index < Tree.Num(); ++Index)
+		{
+			const FCivInventionDef& Def = Tree[Index];
+			if (!Def.bGenerated) { continue; }
+			FString Parents;
+			for (int32 Parent : Def.Prereqs)
+			{
+				if (!Parents.IsEmpty()) { Parents += TEXT(", "); }
+				Parents += Tree[Parent].Name;
+				if (Tree[Parent].bGenerated) { Parents += TEXT(" (גם זו המצאה חדשה)"); }
+			}
+			FString Materials;
+			for (int32 R = 0; R < CivResourceCount; ++R)
+			{
+				if (Def.Materials[R] <= 0.0) { continue; }
+				if (!Materials.IsEmpty()) { Materials += TEXT(", "); }
+				Materials += MaterialWords[R];
+			}
+			const FCivInventionEffects& E = Def.Effects;
+			FString Gives;
+			const auto Add = [&Gives](double Multiplier, const TCHAR* Word)
+			{
+				if (Multiplier == 1.0) { return; }
+				if (!Gives.IsEmpty()) { Gives += TEXT(", "); }
+				Gives += FString::Printf(TEXT("%s (%+.0f%%)"), Word, (Multiplier - 1.0) * 100.0);
+			};
+			Add(E.Food, TEXT("יותר מזון"));
+			Add(E.Capacity, TEXT("מקום ליותר אנשים"));
+			Add(E.Resources, TEXT("יותר חומרי גלם"));
+			Add(E.Research, TEXT("מחקר מהיר יותר"));
+			Add(E.Spread, TEXT("ידע עובר מהר יותר"));
+			Add(E.Health, TEXT("בריאות טובה יותר"));
+			Add(E.War, TEXT("כוח צבאי"));
+			if (E.Resist > 0.0) { if (!Gives.IsEmpty()) { Gives += TEXT(", "); } Gives += FString::Printf(TEXT("עמידות לאסונות (+%.1f%%)"), E.Resist * 100.0); }
+			if (E.Range > 0.0) { if (!Gives.IsEmpty()) { Gives += TEXT(", "); } Gives += TEXT("מסעות רחוקים יותר"); }
+			int32 Knowers = 0, Alive = 0;
+			for (const FCivPeople& P : Sim.GetPeoples()) { if (P.bAlive) { ++Alive; if (P.Known[Index]) { ++Knowers; } } }
+			const FString Where = Sim.GetPeoples().IsValidIndex(Def.ConceivedPeople) ? Sim.GetPeoples()[Def.ConceivedPeople].Name : FString(TEXT("לא ידוע"));
+
+			Lines.Add(Def.Name + (Def.bSpeculative ? TEXT("  [מעבר למדע המוכר]") : TEXT("")));
+			Lines.Add(FString::Printf(TEXT("  הרעיון נולד: שנה %d, בעם %s"), Def.ConceivedYear, *Where));
+			Lines.Add(TEXT("  נשען על: ") + Parents);
+			Lines.Add(TEXT("  הצורך: ") + FString(NeedWords[FMath::Clamp(static_cast<int32>(Def.Need), 0, 4)]));
+			Lines.Add(TEXT("  איך זה עובד: ") + Def.Mechanism + TEXT("."));
+			Lines.Add(TEXT("  חומרים: ") + (Materials.IsEmpty() ? FString(TEXT("בעיקר עבודה")) : Materials) + (Def.bSpeculative ? TEXT(" (פי שניים מהרגיל, ועבודה פי ארבעה)") : TEXT("")));
+			Lines.Add(TEXT("  מה זה נותן במשחק: ") + Gives);
+			Lines.Add(FString::Printf(TEXT("  בסוף הספר: %d מתוך %d העמים יודעים אותה"), Knowers, Alive));
+			Lines.Add(TEXT(""));
+		}
+		const FCivStats& S = Sim.GetStats();
+		Lines.Add(FString::Printf(TEXT("רעיונות שנבדקו בעולם הזה: %d. התקבלו: %d. נדחו: %d. סיבות הדחייה העיקריות:"), S.ProposalsTried, S.ProposalsAccepted, S.ProposalsTried - S.ProposalsAccepted));
+		static const TCHAR* const RejectWords[] =
+		{
+			TEXT(""), TEXT("אין לה הורים"), TEXT("נשענת על המצאה שהעם לא מכיר"), TEXT("אין לה מטרה"), TEXT("אין לה מנגנון"),
+			TEXT("העיקרון לא מתאים למטרה"), TEXT("הבסיס של העיקרון עוד לא ידוע"), TEXT("חסרים חומרים"), TEXT("מוקדם מדי לעידן"),
+			TEXT("אין לה תועלת במשחק"), TEXT("חזקה מדי"), TEXT("כמעט זהה להמצאה קיימת"), TEXT("מעבר למדע המוכר, לפני שהעם מתקדם מספיק"), TEXT("העיקרון מיושן מזמן")
+		};
+		for (int32 R = 1; R < CivRejectCount && R < UE_ARRAY_COUNT(RejectWords); ++R)
+		{
+			if (S.Rejected[R] > 0) { Lines.Add(FString::Printf(TEXT("  %s: %d"), RejectWords[R], S.Rejected[R])); }
+		}
+		Lines.Add(TEXT(""));
 		return Lines;
 	}
 
@@ -155,7 +245,7 @@ int32 UCivHistoryCommandlet::Main(const FString& Params)
 	Check(Table.Problems().Num() == 0 && Table.Num() >= 40, TEXT("invention table is valid and has tens of entries"));
 
 	// Results per IQ
-	struct FIQRun { double IQ; int32 MaxYears; FSeries Moon; FSeries Launch; };
+	struct FIQRun { double IQ; int32 MaxYears; FSeries Moon; FSeries Launch; FSeries Gap; FSeries City; };
 	int32 MaxLow = 12000;
 	FParse::Value(*Params, TEXT("MaxLow="), MaxLow);
 	TArray<FIQRun> Runs = { { 200.0, 6000 }, { 100.0, MaxLow }, { 80.0, MaxLow } };
@@ -165,7 +255,7 @@ int32 UCivHistoryCommandlet::Main(const FString& Params)
 	{
 		Say(TEXT(""));
 		Say(FString::Printf(TEXT("--- Average IQ %.0f, %d seeds, at most %d years ---"), Run.IQ, Seeds, Run.MaxYears));
-		TArray<int32> Moons, Launches;
+		TArray<int32> Moons, Launches, Gaps, Cities;
 		for (int32 Seed = 1; Seed <= Seeds; ++Seed)
 		{
 			FCivSimulation Sim(MakeSettings(Seed, Run.IQ, Tuning));
@@ -174,13 +264,19 @@ int32 UCivHistoryCommandlet::Main(const FString& Params)
 			SimSeconds += FPlatformTime::Seconds() - Start;
 			SimYears += Sim.GetYear();
 			Say(Row(Sim));
-			Moons.Add(Sim.GetMilestoneYear(ECivMilestone::Moon));
+			const int32 Moon = Sim.GetMilestoneYear(ECivMilestone::Moon);
+			const int32 City = Sim.GetMilestoneYear(ECivMilestone::FirstCity);
+			Moons.Add(Moon);
+			Cities.Add(City);
+			Gaps.Add(Moon != INDEX_NONE && City != INDEX_NONE ? Moon - City : INDEX_NONE);
 			Launches.Add(Sim.GetMilestoneYear(ECivMilestone::StarLaunch));
 		}
 		Run.Moon = Measure(Moons);
 		Run.Launch = Measure(Launches);
-		Say(FString::Printf(TEXT("IQ %.0f moon: reached %d/%d, mean %.0f, min %.0f, max %.0f | first starship: reached %d/%d, mean %.0f"),
-			Run.IQ, Run.Moon.Reached, Seeds, Run.Moon.Mean, Run.Moon.Min, Run.Moon.Max, Run.Launch.Reached, Seeds, Run.Launch.Mean));
+		Run.Gap = Measure(Gaps);
+		Run.City = Measure(Cities);
+		Say(FString::Printf(TEXT("IQ %.0f moon: reached %d/%d, mean %.0f, min %.0f, max %.0f | first city mean %.0f | first city to moon: mean %.0f, min %.0f, max %.0f | first starship: reached %d/%d, mean %.0f"),
+			Run.IQ, Run.Moon.Reached, Seeds, Run.Moon.Mean, Run.Moon.Min, Run.Moon.Max, Run.City.Mean, Run.Gap.Mean, Run.Gap.Min, Run.Gap.Max, Run.Launch.Reached, Seeds, Run.Launch.Mean));
 	}
 	const double YearsPerSecond = SimYears / FMath::Max(1e-6, SimSeconds);
 	Say(FString::Printf(TEXT("Speed: %.0f simulated years per real second (%lld years)"), YearsPerSecond, SimYears));
@@ -193,8 +289,15 @@ int32 UCivHistoryCommandlet::Main(const FString& Params)
 		Check(FCivWorldSettings().AverageIQ == 100.0 && !FCivWorldSettings().bRealCities && !FCivWorldSettings().bRealDisasters, TEXT("default world: IQ 100, real history off"));
 		Check(High.Reached == Seeds && High.Mean >= 700.0 && High.Mean <= 900.0, FString::Printf(TEXT("IQ 200 moon mean %.0f is around year 800"), High.Mean));
 		Check(High.Max > High.Min, FString::Printf(TEXT("IQ 200 moon year varies by seed (%.0f..%.0f)"), High.Min, High.Max));
-		Check(Mid.Reached == 0 || Mid.Min > 3000.0, FString::Printf(TEXT("IQ 100 is slow: moon in %d/%d seeds, earliest %.0f"), Mid.Reached, Seeds, Mid.Min));
-		Check(Low.Reached <= Mid.Reached && (Low.Reached == 0 || Mid.Reached == 0 || Low.Mean > Mid.Mean), FString::Printf(TEXT("IQ 80 is slower than IQ 100 (reached %d, mean %.0f)"), Low.Reached, Low.Mean));
+		// Ordinary people move like real humanity or slower: real first cities to the Moon took about 5,500 years.
+		const FSeries& MidGap = Runs[1].Gap;
+		Check(Mid.Reached == 0 || (MidGap.Min >= 4500.0 && MidGap.Mean >= 5000.0),
+			FString::Printf(TEXT("IQ 100 is slow like real history: moon in %d/%d seeds, first city to moon mean %.0f years (min %.0f, max %.0f)"), Mid.Reached, Seeds, MidGap.Mean, MidGap.Min, MidGap.Max));
+		Check(Mid.Reached == 0 || Mid.Mean >= 5.0 * High.Mean, FString::Printf(TEXT("IQ 100 takes at least 5 times as long as IQ 200 (mean moon %.0f vs %.0f)"), Mid.Mean, High.Mean));
+		Check(Runs[1].City.Mean >= 2.5 * Runs[0].City.Mean, FString::Printf(TEXT("IQ 100 founds its first city later too (mean year %.0f vs %.0f)"), Runs[1].City.Mean, Runs[0].City.Mean));
+		Check(Low.Reached <= Seeds / 2 && Low.Reached <= Mid.Reached && (Low.Reached == 0 || Mid.Reached == 0 || Low.Mean > Mid.Mean),
+			FString::Printf(TEXT("IQ 80 is slower still and usually never gets there (moon in %d/%d seeds within %d years)"), Low.Reached, Seeds, Runs[2].MaxYears));
+		Check(Runs[2].City.Reached == Seeds && Runs[2].City.Mean > Runs[1].City.Mean, FString::Printf(TEXT("IQ 80 still builds cities, later (mean year %.0f)"), Runs[2].City.Mean));
 		Check(YearsPerSecond >= 100.0, FString::Printf(TEXT("speed %.0f years/second is well above 1"), YearsPerSecond));
 
 		Say(TEXT("")); Say(TEXT("--- Settings ---"));
@@ -319,21 +422,34 @@ int32 UCivHistoryCommandlet::Main(const FString& Params)
 
 			const FString EarlyPath = OutDir / TEXT("history-sample-real-earliest.txt");
 			const FString ZeroPath = OutDir / TEXT("history-sample-real-year0.txt");
+			// The sample reads on from the earliest city to the start of the common era, as cities arrive at their own dates.
+			RunYears(Early, -Early.GetCalendarYear());
+			Say(FString::Printf(TEXT("  earliest-start sample runs to calendar year %d with %d real cities"), Early.GetCalendarYear(), CountCities(Early)));
 			FFileHelper::SaveStringToFile(Early.BuildBook(), *EarlyPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 			FFileHelper::SaveStringToFile(Zero.BuildBook(), *ZeroPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 		}
 
 		Say(TEXT("")); Say(TEXT("--- Open-ended inventions ---"));
 		{
-			TArray<FString> AllLines;
-			int32 Tried = 0, Accepted = 0, Chained = 0;
+			int32 Tried = 0, Accepted = 0, Chained = 0, Speculative = 0, LateSpeculative = 0, BadParents = 0;
 			int32 RejectedBy[CivRejectCount] = { 0 };
+			TSet<FString> Names;
+			bool bNoDuplicates = true;
 			for (int32 Seed = 1; Seed <= 4; ++Seed)
 			{
 				FCivSimulation Sim(MakeSettings(Seed, 200, Tuning));
 				RunYears(Sim, 4000);
-				AllLines.Add(FString::Printf(TEXT("=== עולם %d (מנת משכל 200, 4000 שנה) ==="), Seed));
-				AllLines.Append(GeneratedList(Sim));
+				Names.Reset();
+				for (const FCivInventionDef& Def : Sim.GetTree())
+				{
+					bool bAlready = false;
+					Names.Add(Def.Name, &bAlready);
+					if (bAlready) { bNoDuplicates = false; }
+					if (!Def.bGenerated) { continue; }
+					if (Def.bSpeculative) { ++Speculative; if (Def.Era >= 7) { ++LateSpeculative; } }
+					if (Def.Prereqs.Num() == 0) { ++BadParents; }
+					for (int32 Parent : Def.Prereqs) { if (!Sim.GetTree().IsValidIndex(Parent) || Sim.GetTree()[Parent].ConceivedYear > Def.ConceivedYear) { ++BadParents; } }
+				}
 				Tried += Sim.GetStats().ProposalsTried;
 				Accepted += Sim.GetStats().ProposalsAccepted;
 				for (int32 R = 0; R < CivRejectCount; ++R) { RejectedBy[R] += Sim.GetStats().Rejected[R]; }
@@ -343,8 +459,6 @@ int32 UCivHistoryCommandlet::Main(const FString& Params)
 					for (int32 Parent : Def.Prereqs) { if (Sim.GetTree()[Parent].bGenerated) { ++Chained; break; } }
 				}
 			}
-			const FString Path = OutDir / TEXT("generated-inventions.txt");
-			FFileHelper::SaveStringArrayToFile(AllLines, *Path, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 			Say(FString::Printf(TEXT("  proposals tried %d, accepted %d, rejected by rules %.1f%%"), Tried, Accepted, 100.0 * (Tried - Accepted) / FMath::Max(1, Tried)));
 			for (int32 R = 1; R < CivRejectCount; ++R)
 			{
@@ -352,6 +466,9 @@ int32 UCivHistoryCommandlet::Main(const FString& Params)
 			}
 			Check(Accepted >= 20, FString::Printf(TEXT("long runs generate new inventions (%d accepted)"), Accepted));
 			Check(Chained > 0, FString::Printf(TEXT("generated inventions are used as prerequisites of later ones (%d)"), Chained));
+			Check(BadParents == 0, TEXT("every generated invention has known, earlier parents"));
+			Check(bNoDuplicates, TEXT("no two inventions in a world share a name"));
+			Check(Speculative < Accepted / 2 && LateSpeculative == Speculative, FString::Printf(TEXT("ideas beyond known science come only at the highest knowledge and stay the minority (%d of %d)"), Speculative, Accepted));
 
 			// The owner's example of nonsense, and near misses.
 			FCivSimulation Judge(MakeSettings(2, 200, Tuning));
@@ -410,6 +527,22 @@ int32 UCivHistoryCommandlet::Main(const FString& Params)
 				FCivSimulation Sim(MakeSettings(Seed, 100, Tuning));
 				RunYears(Sim, 2500);
 				TotalYears += Sim.GetYear();
+				if (Seed == 21)
+				{
+					int32 Soldiers = 0, Battles = 0, TwoBattles = 0, Knights = 0;
+					for (const FCivPerson& C : Sim.GetPersons())
+					{
+						int32 B = 0; bool bSoldier = false;
+						for (const FCivLifeEvent& E : C.Log)
+						{
+							if (E.Kind == ECivLife::Levied || (E.Kind == ECivLife::Work && E.Param == static_cast<int32>(ECivOccupation::Soldier))) { bSoldier = true; }
+							if (E.Kind == ECivLife::Battle) { ++B; }
+							if (E.Kind == ECivLife::Knighted) { ++Knights; }
+						}
+						Soldiers += (bSoldier && C.OriginRank == ECivRank::Commoner) ? 1 : 0; Battles += B; TwoBattles += B >= 2 ? 1 : 0;
+					}
+					Say(FString::Printf(TEXT("  one world in detail (seed 21, remembered lives only): commoner soldiers %d, battles %d, soldiers with two or more battles %d, knighted %d, named people %d"), Soldiers, Battles, TwoBattles, Knights, Sim.GetPersons().Num()));
+				}
 				const FCivStats& S = Sim.GetStats();
 				Sum.PersonsCreated += S.PersonsCreated; Sum.DiedYoung += S.DiedYoung; Sum.Knighted += S.Knighted; Sum.Ennobled += S.Ennobled;
 				Sum.RulersFromCommon += S.RulersFromCommon; Sum.CoupsTried += S.CoupsTried; Sum.CoupsWon += S.CoupsWon; Sum.Deposed += S.Deposed;
@@ -421,43 +554,125 @@ int32 UCivHistoryCommandlet::Main(const FString& Params)
 				Sum.DiedYoung, Sum.Knighted, Sum.Ennobled, Sum.RulersFromCommon, Sum.CoupsTried, Sum.CoupsWon, Sum.Deposed, Sum.Tyrants));
 			Say(FString::Printf(TEXT("  preachers %d | venerated saints %d | healers %d | rich merchants %d | ruined %d | rebels %d, won %d | explorers %d | inventors %d"),
 				Sum.Preachers, Sum.Saints, Sum.Healers, Sum.RichMerchants, Sum.Ruined, Sum.Rebels, Sum.RebellionsWon, Sum.Explorers, Sum.InventorsBorn));
-			Check(Sum.RulersFromCommon < Sum.PersonsCreated / 100 && Sum.RulersFromCommon > 0, TEXT("a commoner reaching the throne happens, and is rare (under 1 in 100 lives)"));
+			const double Lives = FMath::Max(1, Sum.PersonsCreated);
+			Say(FString::Printf(TEXT("  per 1000 lives: knighted %.2f, ennobled %.2f, commoner to ruler %.2f, coups tried %.2f, saints %.2f, ruined merchants %.2f"),
+				1000.0 * Sum.Knighted / Lives, 1000.0 * Sum.Ennobled / Lives, 1000.0 * Sum.RulersFromCommon / Lives, 1000.0 * Sum.CoupsTried / Lives, 1000.0 * Sum.Saints / Lives, 1000.0 * Sum.Ruined / Lives));
+			Check(Sum.RulersFromCommon < Sum.PersonsCreated / 100 && Sum.RulersFromCommon > 0, FString::Printf(TEXT("a commoner reaching the throne happens, and is rare (%d in %d lives, under 1 in 100)"), Sum.RulersFromCommon, Sum.PersonsCreated));
+			Check(Sum.Knighted > Sum.Ennobled && Sum.Ennobled > 0 && Sum.Knighted < Sum.PersonsCreated / 50, FString::Printf(TEXT("the ladder is used and narrows: knighted %d > ennobled %d > 0"), Sum.Knighted, Sum.Ennobled));
+			Check(Sum.CoupsTried > 0 && Sum.CoupsWon < Sum.CoupsTried, FString::Printf(TEXT("coups happen and can fail (%d tried, %d won)"), Sum.CoupsTried, Sum.CoupsWon));
+			Check(Sum.Rebels > 0 && Sum.RebellionsWon * 3 < Sum.Rebels, FString::Printf(TEXT("most rebels fail (%d of %d won)"), Sum.RebellionsWon, Sum.Rebels));
+			Check(Sum.Ruined > 0 && Sum.Deposed > 0, FString::Printf(TEXT("fortunes fall too: %d merchants ruined, %d rulers deposed"), Sum.Ruined, Sum.Deposed));
 			Check(Sum.Saints > 0 && Sum.Saints < Sum.PersonsCreated / 100, TEXT("sainthood happens, and is rare"));
 
-			FCivSimulation World(MakeSettings(11, 100, Tuning));
-			RunYears(World, 1400);
-			FString Stories;
-			int32 Written = 0;
-			const auto Pick = [&](const TCHAR* Heading, int32 Want, TFunctionRef<bool(const FCivPerson&)> Test)
-			{
-				int32 Taken = 0;
-				for (int32 I = World.GetPersons().Num() - 1; I >= 0 && Taken < Want; --I)
-				{
-					const FCivPerson& Person = World.GetPersons()[I];
-					if (Person.IsAlive() || Person.Log.Num() < 2 || !Test(Person)) { continue; }
-					Stories += FString(TEXT("=== ")) + Heading + TEXT(" ===\n") + World.BuildLifeStory(Person.Id) + TEXT("\n");
-					++Taken; ++Written;
-				}
-			};
+			// Find a world in which someone climbed the whole ladder, so the stories can show it. God also touches two lives there.
 			const auto HasKind = [](const FCivPerson& Person, ECivLife Kind) { return Person.Log.ContainsByPredicate([Kind](const FCivLifeEvent& E) { return E.Kind == Kind; }); };
-			Pick(TEXT("חיים רגילים"), 6, [&](const FCivPerson& C) { return C.Rank == ECivRank::Commoner && C.Occupation == ECivOccupation::Farmer && C.Log.Num() >= 7 && !C.bInventor; });
-			Pick(TEXT("מת צעיר"), 2, [&](const FCivPerson& C) { return C.bChildDeath; });
-			Pick(TEXT("מפשוט עם לשלטון"), 3, [&](const FCivPerson& C) { return C.OriginRank == ECivRank::Commoner && (HasKind(C, ECivLife::CoupWon) || HasKind(C, ECivLife::RebelWon)); });
-			Pick(TEXT("קדוש"), 2, [&](const FCivPerson& C) { return C.bVenerated; });
-			Pick(TEXT("עלה לאצולה"), 2, [&](const FCivPerson& C) { return C.OriginRank == ECivRank::Commoner && HasKind(C, ECivLife::Knighted); });
-			Pick(TEXT("קשר שנכשל"), 2, [&](const FCivPerson& C) { return HasKind(C, ECivLife::CoupLost); });
-			Pick(TEXT("סוחר"), 1, [&](const FCivPerson& C) { return HasKind(C, ECivLife::Rich); });
-			Pick(TEXT("ממציא"), 1, [&](const FCivPerson& C) { return HasKind(C, ECivLife::Invented); });
-			Pick(TEXT("מורד"), 1, [&](const FCivPerson& C) { return HasKind(C, ECivLife::Rebel); });
+			// The classic ladder: a commoner soldier made knight, then given land, then the throne, in the age of kings.
+			const auto IsLadder = [&HasKind](const FCivPerson& C)
+			{
+				const bool bThrone = C.Log.ContainsByPredicate([](const FCivLifeEvent& E) { return (E.Kind == ECivLife::CoupWon || E.Kind == ECivLife::Chosen) && E.Era < 5; });
+				return C.OriginRank == ECivRank::Commoner && HasKind(C, ECivLife::Knighted) && HasKind(C, ECivLife::Ennobled) && bThrone;
+			};
+			TUniquePtr<FCivSimulation> Found;
+			int32 BlessedId = INDEX_NONE, CursedId = INDEX_NONE, StorySeed = 0;
+			for (int32 Seed = 11; Seed <= 110 && !Found.IsValid(); ++Seed)
+			{
+				TUniquePtr<FCivSimulation> Candidate = MakeUnique<FCivSimulation>(MakeSettings(Seed, 100, Tuning));
+				RunYears(*Candidate, 2700);
+				int32 Biggest = INDEX_NONE;
+				for (int32 I = 0; I < Candidate->GetPeoples().Num(); ++I)
+				{
+					if (Candidate->GetPeoples()[I].bAlive && (Biggest == INDEX_NONE || Candidate->GetPeoples()[I].Population > Candidate->GetPeoples()[Biggest].Population)) { Biggest = I; }
+				}
+				int32 Blessed = INDEX_NONE, Cursed = INDEX_NONE;
+				if (Biggest != INDEX_NONE)
+				{
+					for (int32 Id : Candidate->GetPeoples()[Biggest].LivingPersons)
+					{
+						const FCivPerson& C = Candidate->GetPersons()[Id];
+						const int32 Age = Candidate->GetYear() - C.BornYear;
+						if (C.Rank != ECivRank::Commoner || C.bInventor || Age < 22 || Age > 35) { continue; }
+						if (Blessed == INDEX_NONE && C.Occupation == ECivOccupation::Farmer) { Blessed = Id; }
+						else if (Cursed == INDEX_NONE && C.Id != Blessed && (C.Occupation == ECivOccupation::Merchant || C.Occupation == ECivOccupation::Artisan || C.Occupation == ECivOccupation::Farmer)) { Cursed = Id; }
+					}
+				}
+				Candidate->GodBlessPerson(Blessed);
+				Candidate->GodCursePerson(Cursed);
+				RunYears(*Candidate, 300);
+				if (Candidate->GetPersons().ContainsByPredicate([&](const FCivPerson& C) { return !C.IsAlive() && IsLadder(C); }) && Blessed != INDEX_NONE && Cursed != INDEX_NONE)
+				{
+					Found = MoveTemp(Candidate);
+					BlessedId = Blessed; CursedId = Cursed; StorySeed = Seed;
+				}
+			}
+			Check(Found.IsValid(), FString::Printf(TEXT("a world where a commoner climbed from soldier to the throne was found (seed %d)"), StorySeed));
+
+			int32 Written = 0;
+			TSet<int32> Used;
+			TArray<FString> Missing;
+			FString Stories;
+			if (Found.IsValid())
+			{
+				const FCivSimulation& World = *Found;
+				Stories = FString::Printf(TEXT("סיפורי חיים מעולם אחד (זרע %d, מנת משכל 100), עד שנה %d.\nכל החיים האלה התרחשו באותו עולם, באותה היסטוריה. רובם חיים רגילים, וחלקם חיים שנכשלו; מעטים בלטו.\n\n"), StorySeed, World.GetYear());
+				const auto Pick = [&](const TCHAR* Heading, int32 Want, bool bAllowAlive, TFunctionRef<bool(const FCivPerson&)> Test)
+				{
+					int32 Taken = 0;
+					for (int32 I = World.GetPersons().Num() - 1; I >= 0 && Taken < Want; --I)
+					{
+						const FCivPerson& Person = World.GetPersons()[I];
+						if ((!bAllowAlive && Person.IsAlive()) || Person.Log.Num() < 2 || Used.Contains(Person.Id) || !Test(Person)) { continue; }
+						Used.Add(Person.Id);
+						Stories += FString(TEXT("=== ")) + Heading + TEXT(" ===\n") + World.BuildLifeStory(Person.Id) + TEXT("\n");
+						++Taken; ++Written;
+					}
+					if (Taken < Want) { Missing.Add(Heading); }
+				};
+				const auto Ordinary = [&](const FCivPerson& C)
+				{
+					return C.OriginRank == ECivRank::Commoner && C.Rank == ECivRank::Commoner && !C.bInventor && C.Father != INDEX_NONE && !C.bChildDeath && C.Log.Num() >= 7
+						&& (C.Occupation == ECivOccupation::Farmer || C.Occupation == ECivOccupation::Artisan) && !HasKind(C, ECivLife::Levied) && !HasKind(C, ECivLife::Retired);
+				};
+				Pick(TEXT("מחייל פשוט אל השלטון"), 1, false, IsLadder);
+				Pick(TEXT("חיים רגילים"), 2, false, Ordinary);
+				Pick(TEXT("מת בילדותו"), 1, false, [&](const FCivPerson& C) { return C.bChildDeath && C.Father != INDEX_NONE; });
+				Pick(TEXT("חייל שנפל"), 1, false, [&](const FCivPerson& C) { return C.OriginRank == ECivRank::Commoner && (C.DeathCause == TEXT("פצעי מלחמה") || C.DeathCause == TEXT("פצעים מקרב בגבול")); });
+				Pick(TEXT("מורד שנכשל"), 1, false, [&](const FCivPerson& C) { return HasKind(C, ECivLife::Rebel) && !HasKind(C, ECivLife::RebelWon); });
+				Pick(TEXT("קדוש"), 1, false, [&](const FCivPerson& C) { return C.bVenerated; });
+				Pick(TEXT("חיים רגילים"), 1, false, Ordinary);
+				Pick(TEXT("סוחר שאיבד הכול"), 1, false, [&](const FCivPerson& C) { return HasKind(C, ECivLife::Ruined); });
+				Pick(TEXT("ממציא"), 1, false, [&](const FCivPerson& C) { return C.Log.ContainsByPredicate([](const FCivLifeEvent& E) { return E.Kind == ECivLife::Invented && E.Other == 1; }); });
+				Pick(TEXT("ברכת האל"), 1, true, [&](const FCivPerson& C) { return C.Id == BlessedId; });
+				Pick(TEXT("קללת האל"), 1, true, [&](const FCivPerson& C) { return C.Id == CursedId; });
+				Pick(TEXT("חייל שחזר הביתה"), 1, false, [&](const FCivPerson& C) { return HasKind(C, ECivLife::Retired) && C.Rank == ECivRank::Commoner; });
+				Pick(TEXT("מטיף שלא נעשה קדוש"), 1, false, [&](const FCivPerson& C) { return HasKind(C, ECivLife::Awakening) && !C.bVenerated; });
+				Pick(TEXT("קשר שנכשל"), 1, false, [&](const FCivPerson& C) { return HasKind(C, ECivLife::CoupLost); });
+				Pick(TEXT("חיים רגילים"), 1, false, Ordinary);
+				Pick(TEXT("אביר שלא עלה יותר"), 1, false, [&](const FCivPerson& C) { return C.OriginRank == ECivRank::Commoner && HasKind(C, ECivLife::Knighted) && !IsLadder(C); });
+				Pick(TEXT("שליט שהודח"), 1, false, [&](const FCivPerson& C) { return HasKind(C, ECivLife::Deposed); });
+				Pick(TEXT("חיים רגילים"), 1, false, Ordinary);
+				while (Written < 20) { const int32 Before = Written; Pick(TEXT("חיים רגילים"), 1, false, Ordinary); if (Written == Before) { break; } }
+			}
 			const FString StoryPath = OutDir / TEXT("life-stories.txt");
 			FFileHelper::SaveStringToFile(Stories, *StoryPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
-			Check(Written >= 15, FString::Printf(TEXT("life stories written (%d)"), Written));
+			Check(Written == 20, FString::Printf(TEXT("life stories written (%d), missing kinds: %s"), Written, Missing.Num() ? *FString::Join(Missing, TEXT(", ")) : TEXT("none")));
+			Check(!Stories.Contains(TEXT("{")) && !Stories.Contains(TEXT("}")), TEXT("life stories have no unfilled template slots"));
+			if (!Found.IsValid()) { Found = MakeUnique<FCivSimulation>(MakeSettings(11, 100, Tuning)); RunYears(*Found, 1000); }
+			FCivSimulation& World = *Found;
 
 			// God and the player's focus.
 			int32 Target = 0;
 			for (int32 I = 0; I < World.GetPeoples().Num(); ++I) { if (World.GetPeoples()[I].bAlive) { Target = I; break; } }
 			const int32 Promoted = World.PromoteFromCrowd(Target);
 			Check(Promoted != INDEX_NONE && !World.BuildLifeStory(Promoted).IsEmpty(), TEXT("anyone can be promoted from the crowd with a written past"));
+			if (Promoted != INDEX_NONE)
+			{
+				const FCivPerson& Pr = World.GetPersons()[Promoted];
+				bool bOrdered = true;
+				for (int32 I = 1; I < Pr.Log.Num(); ++I) { bOrdered &= Pr.Log[I - 1].Year <= Pr.Log[I].Year; }
+				const bool bFamily = Pr.Spouse == INDEX_NONE || (World.GetPersons()[Pr.Spouse].Spouse == Promoted && World.GetPersons()[Pr.Spouse].IsAlive());
+				Check(bOrdered && bFamily && Pr.Log[0].Year == Pr.BornYear, TEXT("the promoted person's past is consistent: in order, from birth, with a real family"));
+				Say(TEXT("  promoted person:\n") + World.BuildLifeStory(Promoted));
+			}
 			Check(World.GodBlessPerson(Promoted) && World.GodCursePerson(Promoted) && World.GodInspirePerson(Promoted), TEXT("god can bless, curse and inspire a person"));
 
 			FCivSimulation A(MakeSettings(12, 100, Tuning)), B(MakeSettings(12, 100, Tuning));
@@ -474,11 +689,28 @@ int32 UCivHistoryCommandlet::Main(const FString& Params)
 		Say(TEXT("")); Say(TEXT("--- Sample books ---"));
 		{
 			struct FSample { double IQ; const TCHAR* File; int32 Years; };
-			const FSample Samples[] = { { 100.0, TEXT("history-sample.txt"), 4000 }, { 200.0, TEXT("history-sample-iq200.txt"), 6000 } };
+			const FSample Samples[] = { { 100.0, TEXT("history-sample.txt"), MaxLow }, { 200.0, TEXT("history-sample-iq200.txt"), 6000 } };
+			TArray<FString> InventionLines;
+			InventionLines.Add(TEXT("המצאות חדשות שנולדו במהלך המשחק"));
+			InventionLines.Add(TEXT("============================="));
+			InventionLines.Add(TEXT("אלה ההמצאות שאינן בעץ ההתחלתי, מאותם שני עולמות של ספרי ההיסטוריה לדוגמה. כל אחת עברה את כל הכללים:"));
+			InventionLines.Add(TEXT("היא נשענת על המצאות שהעם כבר הכיר, עונה על צורך אמיתי, פועלת בעיקרון שמתאים למטרה, דורשת חומרים שהעם יכול להשיג,"));
+			InventionLines.Add(TEXT("ונותנת תועלת צנועה וברורה במשחק. רעיונות שמעבר למדע המוכר מותרים רק לעמים המתקדמים ביותר, והם נדירים ויקרים יותר."));
+			InventionLines.Add(TEXT(""));
 			for (const FSample& Sample : Samples)
 			{
 				FCivSimulation Sim(MakeSettings(7, Sample.IQ, Tuning));
-				RunUntil(Sim, Sample.Years, ECivMilestone::OtherStar);
+				if (Sample.IQ < 150.0)
+				{
+					// An ordinary world: read it up to a few centuries after the Moon, or to the end of the run.
+					RunUntil(Sim, Sample.Years, ECivMilestone::Moon);
+					RunYears(Sim, FMath::Min(300, FMath::Max(0, Sample.Years - Sim.GetYear())));
+				}
+				else
+				{
+					RunUntil(Sim, Sample.Years, ECivMilestone::OtherStar);
+				}
+				InventionLines.Append(InventionReport(Sim));
 				const FString Book = Sim.BuildBook();
 				const FString Path = OutDir / Sample.File;
 				const bool bSaved = FFileHelper::SaveStringToFile(Book, *Path, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
@@ -502,7 +734,29 @@ int32 UCivHistoryCommandlet::Main(const FString& Params)
 				}
 				Check(Hebrew > 1000 && Question == 0 && BadEnd == 0 && BadMiddle == 0, FString::Printf(TEXT("IQ %.0f book text is clean (%d Hebrew letters, %d '?', %d bad endings, %d bad middles)"), Sample.IQ, Hebrew, Question, BadEnd, BadMiddle));
 				Check(!Book.Contains(TEXT("גאון")), FString::Printf(TEXT("IQ %.0f book does not call anyone a genius"), Sample.IQ));
+
+				// Readable size, and no single kind of line flooding the book.
+				TArray<FString> BookLines;
+				Book.ParseIntoArrayLines(BookLines);
+				TMap<FString, int32> Shapes;
+				int32 Worst = 0;
+				FString WorstShape;
+				for (const FString& Line : BookLines)
+				{
+					// The shape of a line: its words with names and numbers blurred, so repeated templates show up.
+					FString Shape;
+					TArray<FString> Words;
+					Line.ParseIntoArrayWS(Words);
+					for (int32 W = 2; W < FMath::Min(Words.Num(), 6); ++W) { Shape += Words[W] + TEXT(" "); }
+					if (Shape.IsEmpty()) { continue; }
+					const int32 N = ++Shapes.FindOrAdd(Shape);
+					if (N > Worst) { Worst = N; WorstShape = Shape; }
+				}
+				const double WorstShare = BookLines.Num() > 0 ? double(Worst) / BookLines.Num() : 0.0;
+				Say(FString::Printf(TEXT("  IQ %.0f book: %d lines, %d KB, most common line shape %.1f%% (%s)"), Sample.IQ, BookLines.Num(), Book.Len() * 2 / 1024, 100.0 * WorstShare, *WorstShape));
+				Check(WorstShare < 0.12 && Book.Len() < 160000, FString::Printf(TEXT("IQ %.0f book is readable: no line shape above 12%%, under 160 thousand characters"), Sample.IQ));
 			}
+			FFileHelper::SaveStringArrayToFile(InventionLines, *(OutDir / TEXT("generated-inventions.txt")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 		}
 	}
 

@@ -11,8 +11,16 @@
 struct FCivTuning
 {
 	// What average IQ does: notable inventors are born faster, and knowledge spreads faster.
-	double BirthIQExponent = 3.2;
-	double SpreadIQExponent = 1.5;
+	// Both factors are anchored at IQ 200 (a world of geniuses reaching the moon around year 800);
+	// the exponents decide how steeply that falls off toward ordinary people.
+	double BirthFactorAt200 = 9.18959;   // 2 to the power 3.2
+	double SpreadFactorAt200 = 2.828427;  // 2 to the power 1.5
+	double BirthIQExponent = 4.5;      // used only if the per-era list below is cleared to zeros
+	// How steeply invention depends on IQ, era by era. Early breakthroughs needed rare minds; from the age of
+	// schools, printing and laboratories, institutions carry ordinary people further. This gives an IQ 100 world
+	// the real pace of history: very slow ancient centuries, then a quickening modern age.
+	double BirthIQExponentByEra[9] = { 4.5, 4.5, 5.5, 7.5, 4.2, 2.8, 2.6, 2.2, 2.2 };
+	double SpreadIQExponent = 2.5;
 
 	double InventorRate = 0.0009;      // per year, per square root of population, at IQ 100
 	double PopulationExponent = 0.5;   // how strongly population feeds the inventor birth rate
@@ -30,6 +38,8 @@ struct FCivTuning
 	double ResearchExponent = 0.4;      // how fully research inventions compound
 	double SchoolExponent = 1.0;        // how fully the unnamed followers of inventors add up
 	double EraCostFactor = 2.0;         // each era multiplies invention cost by this
+	// A further multiplier per era, to give the ages their real pace: slow ancient centuries, a fast modern rush.
+	double EraCostShape[9] = { 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 };
 };
 
 /** Everything the player chooses when creating a world. The defaults are an ordinary random world. */
@@ -93,7 +103,8 @@ enum class ECivLife : uint8
 	Born, FromCrowd, Work, Married, MarriedUp, Child, ChildDied, Widowed, Illness, PlagueSurvived, Hunger, Levied, Battle,
 	Knighted, Ennobled, Inherited, Crowned, Chosen, CoupWon, CoupLost, Deposed, Disgraced, Tyrant, Law,
 	Awakening, Miracle, Holy, Faith, Persecuted, Rich, Ruined, Healer, Rebel, RebelWon, Explorer, Discovery,
-	BecameInventor, Invented, Inspired, Blessed, Cursed, Died, Venerated, MovedCity, GoodYear, Feud, Grandchild
+	BecameInventor, Invented, Inspired, Blessed, Cursed, Died, Venerated, MovedCity, GoodYear, Feud, Grandchild,
+	FromNobility, Retired, RebelFaded, General
 };
 
 /** One line of a life, kept small because there are very many; the Hebrew is written only when someone reads it. */
@@ -103,6 +114,7 @@ struct FCivLifeEvent
 	ECivLife Kind = ECivLife::Born;
 	int32 Other = INDEX_NONE;     // another person
 	int32 Param = INDEX_NONE;     // depends on the kind
+	uint8 Era = 0;                // the people's era at the time, so titles read as they were then
 	FString OtherName;            // only for people who were never fully simulated
 };
 
@@ -294,6 +306,7 @@ struct FCivYearContext
 	bool bFamine = false;
 	bool bDisaster = false;
 	bool bRulerIsTyrant = false;
+	int32 Enemy = INDEX_NONE;     // the people fought this year, if any
 };
 
 class FCivSimulation
@@ -393,7 +406,8 @@ private:
 	TArray<TPair<int32, int32>> PendingBirths;
 	int32 ForgetCursor = 0;
 
-	double BirthFactor = 1.0;
+	double BirthFactors[9] = { 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 };
+	double BirthFactorFor(const FCivPeople& P) const { return BirthFactors[FMath::Clamp(P.Era, 0, 8)]; }
 	double SpreadFactor = 1.0;
 
 	void Serialize(FArchive& Ar);
@@ -408,7 +422,12 @@ private:
 
 	void SeedPersonPool();
 	int32 CreatePerson(FCivRandom& Random, int32 PeopleIndex, int32 Father, int32 Mother, int32 AgeYears);
-	void Log(FCivPerson& Me, ECivLife Kind, int32 Other = INDEX_NONE, int32 Param = INDEX_NONE);
+	FCivLifeEvent& Log(FCivPerson& Me, ECivLife Kind, int32 Other = INDEX_NONE, int32 Param = INDEX_NONE);
+	/** Brings in an adult from the old families the book has not named yet, so a throne never falls to a stranger by accident. */
+	int32 CreateNoble(int32 PeopleIndex);
+	/** An ambitious lord or general reaches for the throne. Returns true if it cost them their life. */
+	bool TryCoup(int32 Id, const FCivYearContext& Context);
+	int32 CountNobles(int32 PeopleIndex) const;
 	void TickPersons();
 	void LifeYear(int32 Id, const FCivYearContext& Context);
 	void UpdateRuler(int32 PeopleIndex, const FCivYearContext& Context);
@@ -444,10 +463,10 @@ private:
 	const FString& CityOrName(const FCivPeople& P) const;
 	double ExpectedLifespan(const FCivPeople& P) const;
 	double CostOf(const FCivInventionDef& Def) const;
-	int32 InventorCap() const;
+	int32 InventorCap(const FCivPeople& P) const;
 	FString YearLabel(int32 InYear) const;
 	int32 NearestPeople(double LatRad, double LonRad) const;
-	void AddRealCity(int32 DataIndex);
+	void AddRealCity(int32 DataIndex, bool bAtStart);
 
 	void TryGenerateInvention(int32 PeopleIndex, FCivPerson& G);
 	int32 AddToTree(const FCivInventionProposal& Proposal, int32 PeopleIndex);
