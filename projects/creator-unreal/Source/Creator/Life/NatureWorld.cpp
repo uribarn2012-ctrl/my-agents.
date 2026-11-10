@@ -1,0 +1,1213 @@
+#include "NatureWorld.h"
+
+#include "LifeSim.h"
+#include "../Planet/PlanetGenerator.h"
+#include "../Planet/PlanetWorld.h"
+#include "Components/InstancedStaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
+#include "MeshDescription.h"
+#include "ProceduralMeshComponent.h"
+#include "StaticMeshAttributes.h"
+
+namespace
+{
+	enum EUnitMesh : int32 { MEllipsoid = 0, MLimb, MThin, MCone, MBush, MNum };
+
+	constexpr double SimHalf = 400.0;        // Metres; the animals live in this square.
+	constexpr double DetailHalf = 800.0;     // Finest ground mesh and the trees.
+	constexpr double GrassHalf = 420.0;
+
+	double Sstep(double A, double B, double X)
+	{
+		const double T = FMath::Clamp((X - A) / (B - A), 0.0, 1.0);
+		return T * T * (3.0 - 2.0 * T);
+	}
+
+	float Hash2(int64 X, int64 Y, uint32 Seed)
+	{
+		uint64 H = (uint64)X * 0x9E3779B97F4A7C15ull ^ (uint64)Y * 0xC2B2AE3D27D4EB4Full ^ (uint64)Seed * 0x165667B19E3779F9ull;
+		H ^= H >> 31; H *= 0xBF58476D1CE4E5B9ull; H ^= H >> 29;
+		return (float)(H & 0xFFFFFF) / 16777216.f;
+	}
+
+	float VNoise(double X, double Y, uint32 Seed)
+	{
+		const double Fx = FMath::Floor(X), Fy = FMath::Floor(Y);
+		const int64 Ix = (int64)Fx, Iy = (int64)Fy;
+		double Tx = X - Fx, Ty = Y - Fy;
+		Tx = Tx * Tx * (3.0 - 2.0 * Tx);
+		Ty = Ty * Ty * (3.0 - 2.0 * Ty);
+		const double A = FMath::Lerp((double)Hash2(Ix, Iy, Seed), (double)Hash2(Ix + 1, Iy, Seed), Tx);
+		const double B = FMath::Lerp((double)Hash2(Ix, Iy + 1, Seed), (double)Hash2(Ix + 1, Iy + 1, Seed), Tx);
+		return (float)FMath::Lerp(A, B, Ty);
+	}
+
+	/** Fractal noise, roughly 0..1. */
+	float Fbm(double X, double Y, int32 Oct, uint32 Seed)
+	{
+		double S = 0.0, Amp = 0.5, Norm = 0.0;
+		for (int32 I = 0; I < Oct; ++I)
+		{
+			S += VNoise(X, Y, Seed + I * 101) * Amp;
+			Norm += Amp;
+			Amp *= 0.5;
+			X = X * 2.03 + 17.1;
+			Y = Y * 2.03 + 3.7;
+		}
+		return (float)(S / Norm);
+	}
+
+	FLinearColor Mix(const FLinearColor& A, const FLinearColor& B, double T)
+	{
+		return A + (B - A) * (float)FMath::Clamp(T, 0.0, 1.0);
+	}
+
+	/** Vertex buffers for procedural meshes. */
+	struct FMeshBuf
+	{
+		TArray<FVector> P;
+		TArray<FVector> N;
+		TArray<FVector2D> UV;
+		TArray<FLinearColor> C;
+		TArray<FProcMeshTangent> T;
+		TArray<int32> I;
+
+		/** A surface of revolution around Axis (from Base, t = 0..1). Radius(t) gives the profile. */
+		void Lathe(const FVector& Base, const FVector& Axis, const FVector& SideHint, int32 Rings, int32 Segs,
+			TFunctionRef<double(double)> Radius, TFunctionRef<FLinearColor(double, const FVector&)> Color,
+			double Lump, uint32 Seed, bool bWorldUV, double FlatZ = 1.0)
+		{
+			const FVector Ax = Axis.GetSafeNormal();
+			FVector U = (SideHint - Ax * FVector::DotProduct(SideHint, Ax)).GetSafeNormal();
+			if (U.IsNearlyZero())
+			{
+				U = FVector::CrossProduct(Ax, FVector::UpVector).GetSafeNormal();
+				if (U.IsNearlyZero()) U = FVector::RightVector;
+			}
+			const FVector V = FVector::CrossProduct(Ax, U);
+			const int32 Start = P.Num();
+			for (int32 R = 0; R <= Rings; ++R)
+			{
+				const double Tt = (double)R / Rings;
+				const FVector Ctr = Base + Axis * Tt;
+				for (int32 S = 0; S <= Segs; ++S)
+				{
+					const double A = 2.0 * PI * (S % Segs) / Segs;
+					double Rad = Radius(Tt);
+					if (Lump > 0.0)
+					{
+						Rad *= 1.0 + Lump * (VNoise(FMath::Cos(A) * 1.7 + Tt * 2.3 + 11.0, FMath::Sin(A) * 1.7 + Tt * 1.9, Seed) - 0.5) * 2.0;
+					}
+					const FVector Off = U * (FMath::Cos(A) * Rad) + V * (FMath::Sin(A) * Rad);
+					FVector Pt = Ctr + Off;
+					Pt.Z = Base.Z + (Pt.Z - Base.Z) * FlatZ;
+					P.Add(Pt);
+					N.Add(FVector::ZeroVector);
+					UV.Add(bWorldUV ? FVector2D(Pt.X / 100.0 + Pt.Z / 170.0, Pt.Y / 100.0 - Pt.Z / 130.0) : FVector2D(Tt, (double)S / Segs));
+					C.Add(Color(Tt, (Pt - Ctr) / FMath::Max(Rad, 1e-6)));
+					// Around the ring: always at right angles to the surface normal, so the normal detail is stable.
+					T.Add(FProcMeshTangent(-U * FMath::Sin(A) + V * FMath::Cos(A), false));
+				}
+			}
+			const int32 Row = Segs + 1;
+			for (int32 R = 0; R < Rings; ++R)
+			{
+				for (int32 S = 0; S < Segs; ++S)
+				{
+					const int32 A = Start + R * Row + S, B = A + 1, Cc = A + Row, D = Cc + 1;
+					I.Append({ A, Cc, B, B, Cc, D });
+				}
+			}
+			// Smooth normals, pointing away from the axis (or along it at the poles).
+			for (int32 K = I.Num() - Rings * Segs * 6; K < I.Num(); K += 3)
+			{
+				const FVector Fn = FVector::CrossProduct(P[I[K + 1]] - P[I[K]], P[I[K + 2]] - P[I[K]]);
+				N[I[K]] += Fn; N[I[K + 1]] += Fn; N[I[K + 2]] += Fn;
+			}
+			for (int32 R = 0; R <= Rings; ++R)
+			{
+				const int32 A = Start + R * Row, B = A + Segs;
+				const FVector Sum = N[A] + N[B];
+				N[A] = N[B] = Sum;
+				const double Tt = (double)R / Rings;
+				for (int32 S = 0; S <= Segs; ++S)
+				{
+					const int32 Idx = Start + R * Row + S;
+					const FVector Radial = P[Idx] - (Base + Axis * Tt);
+					FVector Nn = N[Idx].GetSafeNormal();
+					if (Nn.IsNearlyZero() || Radial.SizeSquared() < 1e-8)
+					{
+						Nn = Tt < 0.5 ? -Ax : Ax;
+					}
+					else if (FVector::DotProduct(Nn, Radial) < 0.0)
+					{
+						Nn = -Nn;
+					}
+					N[Idx] = Nn;
+				}
+			}
+		}
+	};
+
+	double RoundEnds(double T, double E)
+	{
+		const double X = FMath::Min(T, 1.0 - T) / E;
+		return X >= 1.0 ? 1.0 : FMath::Sqrt(FMath::Max(0.0, 1.0 - FMath::Square(1.0 - X)));
+	}
+
+	UStaticMesh* ToStaticMesh(UObject* Outer, const FMeshBuf& B, UMaterialInterface* Mat)
+	{
+		FMeshDescription MD;
+		FStaticMeshAttributes Attr(MD);
+		Attr.Register();
+		TVertexAttributesRef<FVector3f> Pos = Attr.GetVertexPositions();
+		TVertexInstanceAttributesRef<FVector3f> Nrm = Attr.GetVertexInstanceNormals();
+		TVertexInstanceAttributesRef<FVector3f> Tan = Attr.GetVertexInstanceTangents();
+		TVertexInstanceAttributesRef<float> Sign = Attr.GetVertexInstanceBinormalSigns();
+		TVertexInstanceAttributesRef<FVector2f> Uvs = Attr.GetVertexInstanceUVs();
+		TVertexInstanceAttributesRef<FVector4f> Col = Attr.GetVertexInstanceColors();
+		MD.ReserveNewVertices(B.P.Num());
+		MD.ReserveNewVertexInstances(B.P.Num());
+		TArray<FVertexInstanceID> Inst;
+		for (int32 K = 0; K < B.P.Num(); ++K)
+		{
+			const FVertexID V = MD.CreateVertex();
+			Pos[V] = FVector3f(B.P[K]);
+			const FVertexInstanceID VI = MD.CreateVertexInstance(V);
+			Nrm[VI] = FVector3f(B.N[K]);
+			FVector3f Tg = FVector3f::CrossProduct(FVector3f(B.N[K]), FVector3f::UpVector);
+			if (Tg.SizeSquared() < 1e-6f) Tg = FVector3f::ForwardVector;
+			Tan[VI] = Tg.GetSafeNormal();
+			Sign[VI] = 1.f;
+			Uvs.Set(VI, 0, FVector2f(B.UV[K]));
+			Col[VI] = FVector4f(B.C[K].R, B.C[K].G, B.C[K].B, B.C[K].A);
+			Inst.Add(VI);
+		}
+		const FPolygonGroupID G = MD.CreatePolygonGroup();
+		Attr.GetPolygonGroupMaterialSlotNames()[G] = FName(TEXT("Skin"));
+		for (int32 K = 0; K + 2 < B.I.Num(); K += 3)
+		{
+			const FVertexInstanceID Tri[3] = { Inst[B.I[K]], Inst[B.I[K + 1]], Inst[B.I[K + 2]] };
+			MD.CreateTriangle(G, Tri);
+		}
+		UStaticMesh* SM = NewObject<UStaticMesh>(Outer);
+		SM->GetStaticMaterials().Add(FStaticMaterial(Mat, FName(TEXT("Skin"))));
+		UStaticMesh::FBuildMeshDescriptionsParams Params;
+		Params.bBuildSimpleCollision = false;
+		Params.bFastBuild = true;
+		Params.bCommitMeshDescription = false;
+		TArray<const FMeshDescription*> List = { &MD };
+		SM->BuildFromMeshDescriptions(List, Params);
+		return SM;
+	}
+
+	FLinearColor CoatColor(const FLifeGenes& G)
+	{
+		// Natural, muted coat colours: red-brown, fawn, sandy grey-brown, grey, dark brown.
+		static const FLinearColor Pal[5] = {
+			FLinearColor(0.15f, 0.075f, 0.040f), FLinearColor(0.19f, 0.125f, 0.070f), FLinearColor(0.17f, 0.145f, 0.11f),
+			FLinearColor(0.13f, 0.125f, 0.115f), FLinearColor(0.065f, 0.048f, 0.036f) };
+		const double H = FMath::Fmod((double)G.Hue, 1.0) * 5.0;
+		const int32 A = (int32)H % 5, B = (A + 1) % 5;
+		FLinearColor C = Mix(Pal[A], Pal[B], H - FMath::Floor(H));
+		return C * (float)FMath::Lerp(1.25, 0.7, (double)G.Body.Hue2);
+	}
+}
+
+ANatureWorld::ANatureWorld()
+{
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.TickGroup = TG_PrePhysics;
+	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
+	Root->SetMobility(EComponentMobility::Movable);
+	SetRootComponent(Root);
+}
+
+ANatureWorld::~ANatureWorld() = default;
+
+bool ANatureWorld::FindLand(const FPlanetGenerator& Gen, const FVector3d& Dir, FVector3d& OutDir)
+{
+	const FVector3d D0 = Dir.GetSafeNormal();
+	FVector3d E = FVector3d::CrossProduct(FVector3d::UpVector, D0).GetSafeNormal();
+	if (E.IsNearlyZero()) E = FVector3d::ForwardVector;
+	const FVector3d Nn = FVector3d::CrossProduct(D0, E);
+	auto Good = [&Gen](const FVector3d& D)
+	{
+		if (Gen.Sample(D, 0).HeightM < 4.0) return false;
+		// Enough land around for the animals, not a speck of an island.
+		FVector3d E2 = FVector3d::CrossProduct(FVector3d::UpVector, D).GetSafeNormal();
+		const FVector3d N2 = FVector3d::CrossProduct(D, E2);
+		const double R = 500.0 / FPlanetGenerator::RadiusM;
+		return Gen.Sample((D + E2 * R).GetSafeNormal(), 0).HeightM > 0.0 && Gen.Sample((D - E2 * R).GetSafeNormal(), 0).HeightM > 0.0
+			&& Gen.Sample((D + N2 * R).GetSafeNormal(), 0).HeightM > 0.0 && Gen.Sample((D - N2 * R).GetSafeNormal(), 0).HeightM > 0.0;
+	};
+	if (Good(D0))
+	{
+		OutDir = D0;
+		return true;
+	}
+	for (int32 Ring = 1; Ring <= 40; ++Ring)
+	{
+		const double Ang = Ring * 3000.0 / FPlanetGenerator::RadiusM; // 3 km steps, up to 120 km.
+		const int32 Count = 6 * Ring;
+		for (int32 K = 0; K < Count; ++K)
+		{
+			const double A = 2.0 * PI * K / Count;
+			const FVector3d D = (D0 + (E * FMath::Cos(A) + Nn * FMath::Sin(A)) * FMath::Tan(Ang)).GetSafeNormal();
+			if (Good(D))
+			{
+				OutDir = D;
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+void ANatureWorld::SampleGrid(const FPlanetGenerator& Gen, FGrid& G, int32 N, double Half)
+{
+	G.N = N;
+	G.Half = Half;
+	G.H.SetNum(N * N);
+	G.Moist.SetNum(N * N);
+	G.Temp.SetNum(N * N);
+	const FVector3d O = CenterDir * FPlanetGenerator::RadiusM;
+	const FVector3d Ax = GetActorForwardVector(), Ay = GetActorRightVector();
+	ParallelFor(N, [&](int32 J)
+	{
+		for (int32 I = 0; I < N; ++I)
+		{
+			const double X = -Half + 2.0 * Half * I / (N - 1);
+			const double Y = -Half + 2.0 * Half * J / (N - 1);
+			const FPlanetSample S = Gen.Sample((O + Ax * X + Ay * Y).GetSafeNormal(), 4);
+			G.H[I + J * N] = (float)S.HeightM;
+			G.Moist[I + J * N] = S.Moisture;
+			G.Temp[I + J * N] = S.TemperatureC;
+		}
+	});
+}
+
+namespace
+{
+	double Cubic(const TArray<float>& F, int32 N, double Half, double X, double Y)
+	{
+		const double Step = 2.0 * Half / (N - 1);
+		const double Fx = FMath::Clamp((X + Half) / Step, 0.0, N - 1.001);
+		const double Fy = FMath::Clamp((Y + Half) / Step, 0.0, N - 1.001);
+		const int32 Ix = (int32)Fx, Iy = (int32)Fy;
+		const double Tx = Fx - Ix, Ty = Fy - Iy;
+		auto At = [&](int32 I, int32 J) { return (double)F[FMath::Clamp(I, 0, N - 1) + FMath::Clamp(J, 0, N - 1) * N]; };
+		auto CR = [](double P0, double P1, double P2, double P3, double T)
+		{
+			return P1 + 0.5 * T * (P2 - P0 + T * (2.0 * P0 - 5.0 * P1 + 4.0 * P2 - P3 + T * (3.0 * (P1 - P2) + P3 - P0)));
+		};
+		double Col[4];
+		for (int32 K = 0; K < 4; ++K)
+		{
+			Col[K] = CR(At(Ix - 1, Iy + K - 1), At(Ix, Iy + K - 1), At(Ix + 1, Iy + K - 1), At(Ix + 2, Iy + K - 1), Tx);
+		}
+		return CR(Col[0], Col[1], Col[2], Col[3], Ty);
+	}
+}
+
+double ANatureWorld::BaseM(double X, double Y) const
+{
+	const double M = FMath::Max(FMath::Abs(X), FMath::Abs(Y));
+	const double W = Sstep(Inner.Half * 0.88, Inner.Half * 0.98, M);
+	const double A = W < 1.0 ? Cubic(Inner.H, Inner.N, Inner.Half, X, Y) : 0.0;
+	const double B = W > 0.0 ? Cubic(Outer.H, Outer.N, Outer.Half, X, Y) : 0.0;
+	return FMath::Lerp(A, B, W);
+}
+
+void ANatureWorld::Climate(double X, double Y, float& Moist, float& Temp) const
+{
+	const bool bIn = FMath::Max(FMath::Abs(X), FMath::Abs(Y)) < Inner.Half;
+	const FGrid& G = bIn ? Inner : Outer;
+	Moist = (float)Cubic(G.Moist, G.N, G.Half, X, Y);
+	Temp = (float)Cubic(G.Temp, G.N, G.Half, X, Y);
+}
+
+double ANatureWorld::HeightM(double X, double Y) const
+{
+	const double Base = BaseM(X, Y);
+	// Low coastal land is flatter, and land stays land: no black puddles from the small bumps.
+	const double Rug = FMath::Clamp(0.6 + FMath::Abs(Base) / 900.0, 0.6, 3.5) * FMath::Lerp(0.2, 1.0, Sstep(2.0, 60.0, Base));
+	const double Detail = Rug * ((Fbm(X / 900.0, Y / 900.0, 4, NoiseSeed) - 0.5) * 30.0
+		+ (Fbm(X / 160.0, Y / 160.0, 3, NoiseSeed + 31) - 0.5) * 7.0
+		+ (Fbm(X / 35.0, Y / 35.0, 3, NoiseSeed + 57) - 0.5) * 1.4);
+	double H = Base + Detail;
+	if (Base > 0.0)
+	{
+		H = FMath::Max(H, FMath::Min(Base, 0.6));
+	}
+	return H - (X * X + Y * Y) / (2.0 * FPlanetGenerator::RadiusM);
+}
+
+double ANatureWorld::GroundCm(double X, double Y) const
+{
+	return FMath::Max(HeightM(X / 100.0, Y / 100.0), 0.0) * 100.0;
+}
+
+float ANatureWorld::TreeDensity(double X, double Y, float Moist, float Temp) const
+{
+	double T = Sstep(0.36, 0.75, Moist) * Sstep(-6.0, 2.0, Temp);
+	// Woods with crisp, ragged edges rather than soft blotches.
+	const double Wn = Fbm(X / 350.0, Y / 350.0, 3, NoiseSeed + 7) + (Fbm(X / 45.0, Y / 45.0, 2, NoiseSeed + 8) - 0.5) * 0.14;
+	T *= Sstep(0.46, 0.52, Wn) * 1.3;
+	// Open country where the animals live, so they can be seen; a soft round edge, not a square.
+	T *= FMath::Lerp(0.25, 1.0, Sstep(SimHalf * 0.7, SimHalf * 1.4, FMath::Sqrt(X * X + Y * Y)));
+	return (float)FMath::Clamp(T, 0.0, 1.0);
+}
+
+float ANatureWorld::Fertility(float X, float Y) const
+{
+	if (FMath::Abs(X) > SimHalf || FMath::Abs(Y) > SimHalf)
+	{
+		return -1.f;
+	}
+	const double H = HeightM(X, Y);
+	if (H < 0.4)
+	{
+		return -1.f;
+	}
+	float M, T;
+	Climate(X, Y, M, T);
+	double F = 0.25 + 0.6 * Sstep(0.18, 0.6, M);
+	F *= FMath::Lerp(1.0, 0.4, Sstep(5.0, -5.0, T));
+	F *= FMath::Lerp(0.45, 1.25, (double)Fbm(X / 120.0, Y / 120.0, 3, NoiseSeed + 13));
+	return (float)FMath::Clamp(F, 0.05, 1.0);
+}
+
+FLinearColor ANatureWorld::GroundColor(double X, double Y, double Hm, float Nz, float& OutAlpha) const
+{
+	static const FLinearColor Lush(0.062f, 0.115f, 0.030f), Meadow(0.11f, 0.15f, 0.045f), Dry(0.29f, 0.24f, 0.11f);
+	static const FLinearColor Sand(0.50f, 0.39f, 0.23f), Tundra(0.19f, 0.18f, 0.12f), Floor(0.045f, 0.06f, 0.025f);
+	static const FLinearColor Dirt(0.17f, 0.12f, 0.075f), Rock(0.24f, 0.22f, 0.20f), Snow(0.78f, 0.81f, 0.85f);
+	static const FLinearColor Shallow(0.03f, 0.07f, 0.07f), Deep(0.008f, 0.025f, 0.04f);
+	float M, T;
+	Climate(X, Y, M, T);
+	if (Hm < 0.0)
+	{
+		OutAlpha = 0.f;
+		return Mix(Shallow, Deep, Sstep(0.0, 8.0, -Hm));
+	}
+	OutAlpha = 1.f;
+	const FLinearColor Green = Mix(Dry, Mix(Meadow, Lush, Sstep(0.55, 0.8, M)), Sstep(0.28, 0.55, M));
+	FLinearColor C = Mix(Sand, Green, Sstep(0.15, 0.33, M));
+	C = Mix(C, Tundra, Sstep(12.0, 2.0, T));
+	C = Mix(C, Floor, TreeDensity(X, Y, M, T) * 0.75);
+	C = Mix(C, Dirt, Sstep(0.64, 0.76, Fbm(X / 35.0, Y / 35.0, 3, NoiseSeed + 3)) * 0.55);
+	C *= (float)FMath::Lerp(0.85, 1.15, (double)Fbm(X / 250.0, Y / 250.0, 3, NoiseSeed + 5));
+	C = Mix(C, Sand, Sstep(1.6, 0.3, Hm) * 0.8); // Beaches.
+	const double RockAmt = FMath::Max(Sstep(0.84, 0.70, Nz), Sstep(1900.0, 3300.0, Hm) * 0.7);
+	C = Mix(C, Rock * (float)FMath::Lerp(0.8, 1.2, (double)Fbm(X / 20.0, Y / 20.0, 2, NoiseSeed + 9)), RockAmt);
+	C = Mix(C, Snow, Sstep(-1.5, -8.0, T) * (Nz > 0.7f ? 1.0 : 0.5));
+	return C;
+}
+
+void ANatureWorld::Build(const FPlanetGenerator& Gen, const FVector3d& Dir, int32 Seed)
+{
+	CenterDir = Dir.GetSafeNormal();
+	NoiseSeed = (uint32)Seed * 7919u + 17u;
+	FVector3d North = (FVector3d::UpVector - CenterDir * CenterDir.Z).GetSafeNormal();
+	if (North.IsNearlyZero()) North = FVector3d::ForwardVector;
+	SetActorLocationAndRotation(FVector(CenterDir * FPlanetGenerator::RadiusCm), FRotationMatrix::MakeFromZX(FVector(CenterDir), FVector(North)).ToQuat());
+
+	const double T0 = FPlatformTime::Seconds();
+	SampleGrid(Gen, Inner, 97, 6200.0);
+	SampleGrid(Gen, Outer, 97, 50000.0);
+	CenterBaseM = BaseM(0.0, 0.0);
+	const double T1 = FPlatformTime::Seconds();
+
+	GroundMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Planet/M_NatureGround.M_NatureGround"));
+	SkinMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Planet/M_AnimalSkin.M_AnimalSkin"));
+	if (!GroundMaterial || !SkinMaterial)
+	{
+		UE_LOG(LogTemp, Error, TEXT("Nature: materials missing. Run Scripts/build_planet_assets.py."));
+	}
+	BuildTerrain();
+	const double T2 = FPlatformTime::Seconds();
+	BuildScenery();
+	const double T3 = FPlatformTime::Seconds();
+	CreateUnitMeshes();
+
+	Sim = MakeUnique<FLifeSim>(Seed, (float)SimHalf, [this](float X, float Y) { return Fertility(X, Y); });
+	Sim->Populate();
+	RunSim(300); // Thirty seconds of life before the camera arrives.
+	UE_LOG(LogTemp, Display, TEXT("Nature: built at height %.0f m. Sampling %.2f s, terrain %.2f s, scenery %.2f s, %d animals."),
+		CenterBaseM, T1 - T0, T2 - T1, T3 - T2, Sim->GetCreatures().Num());
+}
+
+void ANatureWorld::RunSim(int32 Ticks)
+{
+	for (int32 I = 0; I < Ticks && Sim; ++I)
+	{
+		Sim->Step();
+	}
+}
+
+void ANatureWorld::BuildTerrain()
+{
+	struct FLevel { double Half, Step, Hole, Sink; int32 Tiles; };
+	const FLevel Levels[] = {
+		{ DetailHalf, 4.0, 0.0, 0.0, 8 },
+		{ 6000.0, 40.0, DetailHalf - 40.0, 0.25, 4 },
+		{ 48000.0, 480.0, 6000.0 - 480.0, 3.0, 2 } };
+
+	for (const FLevel& L : Levels)
+	{
+		const int32 N = FMath::RoundToInt(2.0 * L.Half / L.Step) + 1;
+		const int32 Nb = N + 2;
+		TArray<double> Hs;
+		Hs.SetNum(Nb * Nb);
+		ParallelFor(Nb, [&](int32 J)
+		{
+			for (int32 I = 0; I < Nb; ++I)
+			{
+				Hs[I + J * Nb] = HeightM(-L.Half + (I - 1) * L.Step, -L.Half + (J - 1) * L.Step);
+			}
+		});
+		auto Hw = [&](int32 I, int32 J) { return FMath::Max(Hs[(I + 1) + (J + 1) * Nb], 0.0); };
+
+		const int32 Cpt = FMath::DivideAndRoundUp(N - 1, L.Tiles);
+		TArray<FMeshBuf> Tiles;
+		Tiles.SetNum(L.Tiles * L.Tiles);
+		ParallelFor(L.Tiles * L.Tiles, [&](int32 Tile)
+		{
+			const int32 Tx = Tile % L.Tiles, Ty = Tile / L.Tiles;
+			const int32 I0 = Tx * Cpt, I1 = FMath::Min(N - 1, I0 + Cpt);
+			const int32 J0 = Ty * Cpt, J1 = FMath::Min(N - 1, J0 + Cpt);
+			FMeshBuf& B = Tiles[Tile];
+			const int32 W = I1 - I0 + 1;
+			for (int32 J = J0; J <= J1; ++J)
+			{
+				for (int32 I = I0; I <= I1; ++I)
+				{
+					const double X = -L.Half + I * L.Step, Y = -L.Half + J * L.Step;
+					const double H = Hs[(I + 1) + (J + 1) * Nb];
+					const FVector Nrm = FVector(Hw(I - 1, J) - Hw(I + 1, J), Hw(I, J - 1) - Hw(I, J + 1), 2.0 * L.Step).GetSafeNormal();
+					float Alpha = 1.f;
+					const FLinearColor Col = GroundColor(X, Y, H, (float)Nrm.Z, Alpha);
+					B.P.Add(FVector(X * 100.0, Y * 100.0, (FMath::Max(H, 0.0) - L.Sink) * 100.0));
+					B.N.Add(Nrm);
+					B.UV.Add(FVector2D(X, Y));
+					B.C.Add(FLinearColor(Col.R, Col.G, Col.B, Alpha));
+					B.T.Add(FProcMeshTangent(1.0, 0.0, 0.0));
+				}
+			}
+			for (int32 J = J0; J < J1; ++J)
+			{
+				for (int32 I = I0; I < I1; ++I)
+				{
+					const double X0 = -L.Half + I * L.Step, Y0 = -L.Half + J * L.Step;
+					if (L.Hole > 0.0 && FMath::Max(FMath::Abs(X0), FMath::Abs(X0 + L.Step)) < L.Hole
+						&& FMath::Max(FMath::Abs(Y0), FMath::Abs(Y0 + L.Step)) < L.Hole)
+					{
+						continue;
+					}
+					const int32 A = (I - I0) + (J - J0) * W, Bq = A + 1, Cq = A + W, D = Cq + 1;
+					B.I.Append({ A, Cq, Bq, Bq, Cq, D });
+				}
+			}
+		});
+		for (FMeshBuf& B : Tiles)
+		{
+			if (B.I.Num() == 0)
+			{
+				continue;
+			}
+			UProceduralMeshComponent* Pm = NewObject<UProceduralMeshComponent>(this);
+			Pm->SetupAttachment(Root);
+			Pm->bUseAsyncCooking = true;
+			Pm->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Pm->CreateMeshSection_LinearColor(0, B.P, B.I, B.N, B.UV, B.C, B.T, false);
+			Pm->SetMaterial(0, GroundMaterial);
+			Pm->RegisterComponent();
+			Meshes.Add(Pm);
+		}
+	}
+}
+
+void ANatureWorld::BuildScenery()
+{
+	FRandomStream Rng((int32)NoiseSeed);
+	const int32 TilesN = 8;
+	TArray<FMeshBuf> Tiles;
+	Tiles.SetNum(TilesN * TilesN);
+	auto TileFor = [&](double X, double Y) -> FMeshBuf&
+	{
+		const int32 Tx = FMath::Clamp((int32)((X + DetailHalf) / (2.0 * DetailHalf) * TilesN), 0, TilesN - 1);
+		const int32 Ty = FMath::Clamp((int32)((Y + DetailHalf) / (2.0 * DetailHalf) * TilesN), 0, TilesN - 1);
+		return Tiles[Tx + Ty * TilesN];
+	};
+	auto Slope = [this](double X, double Y)
+	{
+		const double E = 2.0;
+		return FVector(HeightM(X - E, Y) - HeightM(X + E, Y), HeightM(X, Y - E) - HeightM(X, Y + E), 2.0 * E).GetSafeNormal().Z;
+	};
+
+	// Trees.
+	int32 Trees = 0;
+	const double TreeStep = 7.0;
+	for (double Y = -DetailHalf; Y < DetailHalf && Trees < 3500; Y += TreeStep)
+	{
+		for (double X = -DetailHalf; X < DetailHalf && Trees < 3500; X += TreeStep)
+		{
+			const double Px = X + Rng.FRand() * TreeStep, Py = Y + Rng.FRand() * TreeStep;
+			float M, T;
+			Climate(Px, Py, M, T);
+			const float Td = TreeDensity(Px, Py, M, T);
+			const float Roll = Rng.FRand();
+			const double H = HeightM(Px, Py);
+			if (Roll > Td * 0.55f || H < 1.0 || H > 2900.0 || Slope(Px, Py) < 0.8)
+			{
+				continue;
+			}
+			++Trees;
+			FMeshBuf& B = TileFor(Px, Py);
+			const FVector Base(Px * 100.0, Py * 100.0, H * 100.0 - 20.0);
+			const float Var = 0.8f + 0.4f * Rng.FRand();
+			const FLinearColor Bark(0.07f * Var, 0.05f * Var, 0.035f * Var, 0.5f);
+			const uint32 Sd = Rng.GetUnsignedInt();
+			const bool bConifer = T < 9.f || (T < 16.f && Rng.FRand() < 0.4f);
+			if (bConifer)
+			{
+				const double Ht = (900.0 + Rng.FRand() * 1100.0);
+				B.Lathe(Base, FVector(0, 0, Ht * 0.4), FVector::ForwardVector, 1, 6, [Ht](double) { return Ht * 0.018; },
+					[&](double, const FVector&) { return Bark; }, 0.0, Sd, true);
+				const FLinearColor Needle(0.022f * Var, 0.05f * Var, 0.026f * Var, 0.5f);
+				for (int32 K = 0; K < 3; ++K)
+				{
+					const double Z0 = Ht * (0.14 + 0.24 * K), Len = Ht * (0.55 - 0.1 * K), Rad = Ht * (0.21 - 0.045 * K);
+					B.Lathe(Base + FVector(0, 0, Z0), FVector(0, 0, Len), FVector::ForwardVector, 4, 9,
+						[Rad](double Tt) { return Rad * FMath::Pow(1.0 - Tt, 0.85) * FMath::Min(1.0, 0.35 + Tt * 6.0); },
+						[&](double Tt, const FVector&) { return Needle * (float)(0.75 + 0.5 * Tt); }, 0.22, Sd + K, true);
+				}
+			}
+			else
+			{
+				const double Ht = 650.0 + Rng.FRand() * 750.0;
+				B.Lathe(Base, FVector(0, 0, Ht * 0.6), FVector::ForwardVector, 2, 6, [Ht](double Tt) { return Ht * (0.03 - 0.012 * Tt); },
+					[&](double, const FVector&) { return Bark; }, 0.0, Sd, true);
+				const FLinearColor Leaf(0.045f * Var, 0.085f * Var, 0.025f * Var, 0.5f);
+				const int32 Blobs = 3 + (int32)(Rng.FRand() * 3.f);
+				for (int32 K = 0; K < Blobs; ++K)
+				{
+					const double A = 2.0 * PI * K / Blobs + Rng.FRand();
+					const double Rr = Ht * (0.2 + 0.08 * Rng.FRand());
+					const FVector Ctr = Base + FVector(FMath::Cos(A) * Ht * 0.17, FMath::Sin(A) * Ht * 0.17, Ht * (0.62 + 0.18 * Rng.FRand()));
+					B.Lathe(Ctr - FVector(0, 0, Rr), FVector(0, 0, 2.0 * Rr), FVector::ForwardVector, 6, 9,
+						[Rr](double Tt) { return Rr * FMath::Sqrt(FMath::Max(0.0, 1.0 - FMath::Square(2.0 * Tt - 1.0))); },
+						[&](double Tt, const FVector&) { return Leaf * (float)(0.7 + 0.6 * Tt); }, 0.3, Sd + K, true);
+				}
+			}
+		}
+	}
+
+	// Boulders.
+	for (int32 K = 0; K < 320; ++K)
+	{
+		const double Px = (Rng.FRand() * 2.0 - 1.0) * DetailHalf, Py = (Rng.FRand() * 2.0 - 1.0) * DetailHalf;
+		const double H = HeightM(Px, Py);
+		if (H < 0.5)
+		{
+			continue;
+		}
+		const double Rr = 40.0 + FMath::Pow(Rng.FRand(), 2.5f) * 220.0;
+		const float Var = 0.75f + 0.5f * Rng.FRand();
+		const FLinearColor Stone(0.23f * Var, 0.215f * Var, 0.195f * Var, 0.5f);
+		FMeshBuf& B = TileFor(Px, Py);
+		B.Lathe(FVector(Px * 100.0, Py * 100.0, H * 100.0 - Rr * 0.9), FVector(0, 0, 2.0 * Rr), FVector::ForwardVector, 7, 10,
+			[Rr](double Tt) { return Rr * 1.15 * FMath::Sqrt(FMath::Max(0.0, 1.0 - FMath::Square(2.0 * Tt - 1.0))); },
+			[&](double Tt, const FVector&) { return Stone * (float)(0.8 + 0.3 * Tt); }, 0.35, Rng.GetUnsignedInt(), true, 0.65);
+	}
+
+	// Grass tufts where the ground is green.
+	const double GrassStep = 2.2;
+	for (double Y = -GrassHalf; Y < GrassHalf; Y += GrassStep)
+	{
+		for (double X = -GrassHalf; X < GrassHalf; X += GrassStep)
+		{
+			const double Px = X + Rng.FRand() * GrassStep, Py = Y + Rng.FRand() * GrassStep;
+			const double H = HeightM(Px, Py);
+			if (H < 0.8)
+			{
+				continue;
+			}
+			float M, T;
+			Climate(Px, Py, M, T);
+			const double Want = Sstep(0.16, 0.4, M) * Sstep(-4.0, 4.0, T) * (1.0 - 0.6 * TreeDensity(Px, Py, M, T));
+			if (Rng.FRand() > Want)
+			{
+				continue;
+			}
+			const double Nz = Slope(Px, Py);
+			if (Nz < 0.82)
+			{
+				continue;
+			}
+			float Alpha;
+			const FLinearColor G = GroundColor(Px, Py, H, (float)Nz, Alpha);
+			const FLinearColor TipC = Mix(G * 1.35f, FLinearColor(0.33f, 0.29f, 0.14f), Sstep(0.5, 0.25, M) * 0.6 + Rng.FRand() * 0.15);
+			FMeshBuf& B = TileFor(Px, Py);
+			const double Hh = (22.0 + Rng.FRand() * 30.0) * FMath::Lerp(0.6, 1.25, Sstep(0.2, 0.7, M));
+			for (int32 K = 0; K < 6; ++K)
+			{
+				const double A = Rng.FRand() * 2.0 * PI;
+				const FVector Lean(FMath::Cos(A), FMath::Sin(A), 0.0);
+				const FVector Side(-Lean.Y, Lean.X, 0.0);
+				const FVector BladeRoot(Px * 100.0 + Lean.X * 6.0, Py * 100.0 + Lean.Y * 6.0, H * 100.0 - 2.0);
+				const double Bh = Hh * (0.7 + 0.5 * Rng.FRand());
+				const int32 S = B.P.Num();
+				B.P.Add(BladeRoot - Side * 3.5);
+				B.P.Add(BladeRoot + Side * 3.5);
+				B.P.Add(BladeRoot + FVector(0, 0, Bh) + Lean * Bh * (0.25 + 0.3 * Rng.FRand()));
+				for (int32 V = 0; V < 3; ++V)
+				{
+					B.N.Add(FVector(Lean.X * 0.25, Lean.Y * 0.25, 1.0).GetSafeNormal());
+					B.UV.Add(FVector2D(Px, Py));
+					B.C.Add(V < 2 ? FLinearColor(G.R * 0.75f, G.G * 0.75f, G.B * 0.75f, 0.5f) : FLinearColor(TipC.R, TipC.G, TipC.B, 0.5f));
+					B.T.Add(FProcMeshTangent(1.0, 0.0, 0.0));
+				}
+				B.I.Append({ S, S + 1, S + 2 });
+			}
+		}
+	}
+
+	for (FMeshBuf& B : Tiles)
+	{
+		if (B.I.Num() == 0)
+		{
+			continue;
+		}
+		UProceduralMeshComponent* Pm = NewObject<UProceduralMeshComponent>(this);
+		Pm->SetupAttachment(Root);
+		Pm->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Pm->CreateMeshSection_LinearColor(0, B.P, B.I, B.N, B.UV, B.C, B.T, false);
+		Pm->SetMaterial(0, GroundMaterial);
+		Pm->RegisterComponent();
+		Meshes.Add(Pm);
+	}
+	UE_LOG(LogTemp, Display, TEXT("Nature: %d trees."), Trees);
+}
+
+void ANatureWorld::CreateUnitMeshes()
+{
+	auto Ellipsoid = [](double Tt) { return FMath::Sqrt(FMath::Max(0.0, 1.0 - FMath::Square(2.0 * Tt - 1.0))); };
+	auto BellyColor = [](double, const FVector& Dir) { return FLinearColor((float)FMath::Clamp(-Dir.Z * 1.4 + 0.1, 0.0, 1.0), 0.f, 0.f, 1.f); };
+	auto AlongColor = [](double Tt, const FVector&) { return FLinearColor((float)Tt, 0.f, 0.f, 1.f); };
+
+	FMeshBuf Bufs[MNum];
+	Bufs[MEllipsoid].Lathe(FVector(-1, 0, 0), FVector(2, 0, 0), FVector(0, 1, 0), 16, 22, Ellipsoid, BellyColor, 0.0, 1, false);
+	Bufs[MLimb].Lathe(FVector::ZeroVector, FVector(1, 0, 0), FVector(0, 1, 0), 12, 12,
+		[](double Tt) { return FMath::Lerp(1.0, 0.6, Tt) * RoundEnds(Tt, 0.12); }, AlongColor, 0.0, 1, false);
+	Bufs[MThin].Lathe(FVector::ZeroVector, FVector(1, 0, 0), FVector(0, 1, 0), 12, 10,
+		[](double Tt) { return FMath::Lerp(1.0, 0.35, Tt) * RoundEnds(Tt, 0.12); }, AlongColor, 0.0, 1, false);
+	Bufs[MCone].Lathe(FVector::ZeroVector, FVector(1, 0, 0), FVector(0, 1, 0), 10, 10,
+		[](double Tt) { return FMath::Lerp(1.0, 0.06, Tt) * (Tt < 0.1 ? FMath::Sqrt(Tt / 0.1) : 1.0) * (Tt > 0.97 ? 0.3 : 1.0); }, AlongColor, 0.0, 1, false);
+	Bufs[MBush].Lathe(FVector(-1, 0, 0), FVector(2, 0, 0), FVector(0, 1, 0), 9, 12, Ellipsoid,
+		[](double, const FVector& Dir) { return FLinearColor((float)FMath::Clamp(-Dir.Z, 0.0, 1.0), 0.f, 0.f, 1.f); }, 0.3, 5, false);
+
+	PartXf.SetNum(MNum);
+	PartData.SetNum(MNum);
+	for (int32 M = 0; M < MNum; ++M)
+	{
+		UStaticMesh* Sm = ToStaticMesh(this, Bufs[M], SkinMaterial);
+		UnitMeshes.Add(Sm);
+		UInstancedStaticMeshComponent* Ism = NewObject<UInstancedStaticMeshComponent>(this);
+		Ism->SetupAttachment(Root);
+		Ism->SetStaticMesh(Sm);
+		Ism->SetMaterial(0, SkinMaterial);
+		Ism->SetMobility(EComponentMobility::Movable);
+		Ism->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Ism->SetNumCustomDataFloats(6);
+		Ism->RegisterComponent();
+		if (M == MBush)
+		{
+			FoodParts = Ism;
+		}
+		else
+		{
+			Parts.Add(Ism);
+		}
+	}
+	// One food instance per simulation slot; empty slots are shrunk away.
+	TArray<FTransform> Hidden;
+	Hidden.Init(FTransform(FQuat::Identity, FVector(0, 0, -100000.0), FVector(0.001)), FLifeSim::MaxFood);
+	FoodParts->AddInstances(Hidden, false);
+}
+
+void ANatureWorld::UpdateFood()
+{
+	TArray<int32> Changed;
+	Sim->ConsumeFoodChanges(Changed);
+	if (Changed.Num() == 0 || !FoodParts)
+	{
+		return;
+	}
+	const TArray<FLifeFood>& Food = Sim->GetFood();
+	for (int32 I : Changed)
+	{
+		const FLifeFood& F = Food[I];
+		FTransform Xf(FQuat::Identity, FVector(0, 0, -100000.0), FVector(0.001));
+		float D[6] = { 0, 0, 0, 0, 0, 0 };
+		if (F.bAlive)
+		{
+			const float R = Hash2(I, 7, NoiseSeed);
+			const double X = F.Pos.X * 100.0, Y = F.Pos.Y * 100.0;
+			if (F.Type == 0)
+			{
+				const double S = 30.0 + 25.0 * R;
+				Xf = FTransform(FRotator(0.0, R * 360.0, 0.0).Quaternion(), FVector(X, Y, GroundCm(X, Y) + S * 0.25), FVector(S, S * 0.9, S * 0.75));
+				const float V = 0.8f + 0.4f * Hash2(I, 11, NoiseSeed);
+				const float Flower = Hash2(I, 13, NoiseSeed) < 0.3f ? 1.f : 0.f;
+				D[0] = (0.06f + 0.05f * Flower) * V; D[1] = (0.11f + 0.01f * Flower) * V; D[2] = (0.025f + 0.02f * Flower) * V;
+				D[3] = 0.035f; D[4] = 0.065f; D[5] = 0.02f;
+			}
+			else
+			{
+				Xf = FTransform(FRotator(0.0, R * 360.0, 0.0).Quaternion(), FVector(X, Y, GroundCm(X, Y) + 6.0), FVector(38.0, 20.0, 12.0));
+				D[0] = 0.17f; D[1] = 0.05f; D[2] = 0.035f; D[3] = 0.10f; D[4] = 0.035f; D[5] = 0.03f;
+			}
+		}
+		FoodParts->UpdateInstanceTransform(I, Xf, false, false, true);
+		FoodParts->SetCustomData(I, TArrayView<const float>(D, 6), false);
+	}
+	FoodParts->MarkRenderStateDirty();
+}
+
+void ANatureWorld::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	if (!Sim)
+	{
+		return;
+	}
+	Accum += DeltaSeconds * TimeScale;
+	int32 Steps = 0;
+	while (Accum >= FLifeSim::TickSeconds && Steps < 8)
+	{
+		Sim->Step();
+		Accum -= FLifeSim::TickSeconds;
+		++Steps;
+	}
+	if (Steps == 8)
+	{
+		Accum = 0.0;
+	}
+	UpdateFood();
+	UpdateAnimals(DeltaSeconds, Accum / FLifeSim::TickSeconds);
+}
+
+void ANatureWorld::UpdateAnimals(double Dt, double Alpha)
+{
+	for (int32 M = 0; M < MNum; ++M)
+	{
+		PartXf[M].Reset();
+		PartData[M].Reset();
+	}
+	for (TPair<int32, FNatureAnim>& It : Anim)
+	{
+		It.Value.bSeen = false;
+	}
+	for (const FCreature& C : Sim->GetCreatures())
+	{
+		FNatureAnim* A = Anim.Find(C.Id);
+		if (!A)
+		{
+			A = &Anim.Add(C.Id);
+			A->Yaw = FMath::Atan2(C.Dir.Y, C.Dir.X);
+			A->Phase = Hash2(C.Id, 3, 1);
+			A->Pos = FVector2D(C.Pos);
+		}
+		A->bSeen = true;
+		const FVector2D Target = FMath::Lerp(FVector2D(C.PrevPos), FVector2D(C.Pos), FMath::Clamp(Alpha, 0.0, 1.0));
+		A->Pos = Target;
+		const double V = (C.Pos - C.PrevPos).Size() / FLifeSim::TickSeconds;
+		A->Speed += (V - A->Speed) * FMath::Min(1.0, Dt * 4.0);
+		double Want = FMath::Atan2(C.Dir.Y, C.Dir.X);
+		double Delta = FMath::UnwindRadians(Want - A->Yaw);
+		A->Yaw = FMath::UnwindRadians(A->Yaw + Delta * FMath::Min(1.0, Dt * 6.0));
+		PoseAnimal(C, *A, Dt);
+	}
+	for (auto It = Anim.CreateIterator(); It; ++It)
+	{
+		if (!It.Value().bSeen)
+		{
+			It.RemoveCurrent();
+		}
+	}
+
+	for (int32 M = 0; M < MEllipsoid + 4; ++M)
+	{
+		UInstancedStaticMeshComponent* Ism = Parts[M];
+		const int32 Need = PartXf[M].Num();
+		int32 Have = Ism->GetInstanceCount();
+		if (Have < Need)
+		{
+			TArray<FTransform> Extra;
+			Extra.Init(FTransform(FQuat::Identity, FVector(0, 0, -100000.0), FVector(0.001)), Need - Have + 64);
+			Ism->AddInstances(Extra, false);
+			Have = Ism->GetInstanceCount();
+		}
+		while (PartXf[M].Num() < Have)
+		{
+			PartXf[M].Add(FTransform(FQuat::Identity, FVector(0, 0, -100000.0), FVector(0.001)));
+			PartData[M].AddZeroed(6);
+		}
+		Ism->BatchUpdateInstancesTransforms(0, PartXf[M], false, false, true);
+		for (int32 I = 0; I < Have; ++I)
+		{
+			Ism->SetCustomData(I, TArrayView<const float>(&PartData[M][I * 6], 6), false);
+		}
+		Ism->MarkRenderStateDirty();
+	}
+}
+
+void ANatureWorld::PoseAnimal(const FCreature& C, FNatureAnim& A, double Dt)
+{
+	const FLifeGenes& G = C.Genes;
+	const FLifeBody& B = G.Body;
+	const double Grow = FMath::Lerp(0.45, 1.0, FMath::Clamp((double)C.Age / FMath::Max(1, C.Maturity), 0.0, 1.0));
+	const double S = 100.0 * G.Size * Grow;
+	const double HK = 1.25 * B.Head * FMath::Lerp(1.3, 1.0, Grow); // Young ones have big heads...
+	const double LL = 0.62 * S * B.Hgt * FMath::Lerp(1.15, 1.0, Grow); // ...and long legs.
+	const double BL = 0.85 * S * B.Len;
+	const double Hd = 0.20 * S * (0.45 + 0.55 * B.Wid);
+	const double Wd = 0.17 * S * (0.3 + 0.7 * B.Wid);
+	const double Hc = LL + Hd * 0.55;
+
+	// Colours.
+	const FLinearColor Coat = CoatColor(G);
+	const FLinearColor Belly = Mix(Coat * 0.9f, FLinearColor(0.42f, 0.38f, 0.32f), B.Pat * 0.8);
+	const FLinearColor Dark(0.018f, 0.015f, 0.012f);
+	const FLinearColor Sock = Coat * 0.8f;
+	const FLinearColor Bone0(0.09f, 0.065f, 0.045f), Bone1(0.26f, 0.22f, 0.17f);
+	const FLinearColor Ivory0(0.50f, 0.45f, 0.36f), Ivory1(0.72f, 0.69f, 0.60f);
+
+	// Gait: walk, trot or gallop by speed; legs blend between patterns.
+	const double V = A.Speed;
+	const int32 Gait = V < 0.08 ? 0 : V < 2.6 ? 1 : V < 6.0 ? 2 : 3;
+	static const double Off[4][4] = { { 0.25, 0.75, 0.0, 0.5 }, { 0.25, 0.75, 0.0, 0.5 }, { 0.0, 0.5, 0.5, 0.0 }, { 0.6, 0.5, 0.0, 0.1 } };
+	static const double DutyT[4] = { 0.62, 0.62, 0.5, 0.35 };
+	static const double LiftT[4] = { 0.0, 0.11, 0.16, 0.22 };
+	const double Bl = 1.0 - FMath::Exp(-Dt * 5.0);
+	for (int32 K = 0; K < 4; ++K)
+	{
+		double D = Off[Gait][K] - A.Offsets[K];
+		D -= FMath::RoundToDouble(D);
+		A.Offsets[K] = FMath::Frac(A.Offsets[K] + D * Bl + 1.0);
+	}
+	A.Duty += (DutyT[Gait] - A.Duty) * Bl;
+	A.Lift += (LiftT[Gait] * LL - A.Lift) * Bl;
+	const double LegScale = FMath::Sqrt(FMath::Max(LL, 10.0) / 85.0);
+	double Period = Gait <= 1 ? FMath::Clamp(1.15 - 0.12 * V, 0.75, 1.2) : Gait == 2 ? 0.6 : 0.45;
+	Period *= LegScale;
+	if (V > 0.08)
+	{
+		A.Phase = FMath::Frac(A.Phase + Dt / Period);
+	}
+	const double Stride = FMath::Min(V * 100.0 * A.Duty * Period, 1.7 * LL);
+	const double Ph = A.Phase;
+
+	const bool bHeadDown = C.Activity == ELifeActivity::Grazing || C.EatTicks > 0;
+	A.HeadDown += ((bHeadDown ? 1.0 : 0.0) - A.HeadDown) * FMath::Min(1.0, Dt * 2.5);
+
+	// Body frame.
+	const FVector2D Fw(FMath::Cos(A.Yaw), FMath::Sin(A.Yaw));
+	const FVector2D Rt(-Fw.Y, Fw.X);
+	const FVector2D P = A.Pos * 100.0;
+	const FVector2D Front = P + Fw * (0.30 * BL), Hind = P - Fw * (0.32 * BL);
+	const double Zf = GroundCm(Front.X, Front.Y), Zh = GroundCm(Hind.X, Hind.Y);
+	double PitchDeg = FMath::RadiansToDegrees(FMath::Atan2(Zf - Zh, 0.62 * BL));
+	PitchDeg = FMath::Clamp(PitchDeg, -25.0, 25.0);
+	double Bob = 0.0;
+	if (Gait == 1) Bob = 0.012 * S * FMath::Cos(4.0 * PI * Ph);
+	else if (Gait == 2) Bob = 0.028 * S * FMath::Cos(4.0 * PI * Ph);
+	else if (Gait == 3) { Bob = 0.045 * S * FMath::Sin(2.0 * PI * Ph); PitchDeg += 4.0 * FMath::Sin(2.0 * PI * Ph + 1.0); }
+	PitchDeg -= 5.0 * A.HeadDown;
+	const double BodyZ = (Zf + Zh) * 0.5 + Hc + Bob - A.HeadDown * 0.03 * S;
+	const FQuat Qb = FRotator(PitchDeg, FMath::RadiansToDegrees(A.Yaw), 0.0).Quaternion();
+	const FVector O(P.X, P.Y, BodyZ);
+	auto BF = [&](double X, double Y, double Z) { return O + Qb.RotateVector(FVector(X, Y, Z)); };
+	auto BD = [&](const FVector& Dv) { return Qb.RotateVector(Dv); };
+	const FVector Fwd = BD(FVector::ForwardVector), Up = BD(FVector::UpVector), Right = BD(FVector::RightVector);
+	A.Center = O;
+	A.Radius = FMath::Max(BL * 0.7, Hc * 0.8);
+
+	auto Push = [&](int32 M, const FVector& Pos, const FQuat& Q, const FVector& Sc, const FLinearColor& Ca, const FLinearColor& Cb)
+	{
+		PartXf[M].Add(FTransform(Q, Pos, Sc));
+		const float D[6] = { Ca.R, Ca.G, Ca.B, Cb.R, Cb.G, Cb.B };
+		PartData[M].Append(D, 6);
+	};
+	auto Seg = [&](int32 M, const FVector& P0, const FVector& P1, double R0, const FVector& UpHint,
+		const FLinearColor& Ca, const FLinearColor& Cb, double Flat = 1.0)
+	{
+		const FVector D = P1 - P0;
+		const double L = D.Size();
+		if (L < 0.01)
+		{
+			return;
+		}
+		const FVector X = D / L;
+		const FVector Z = FMath::Abs(FVector::DotProduct(X, UpHint.GetSafeNormal())) > 0.98 ? Fwd : UpHint;
+		Push(M, P0, FRotationMatrix::MakeFromXZ(X, Z).ToQuat(), FVector(L, R0, R0 * Flat), Ca, Cb);
+	};
+
+	// Torso: chest, belly and rump.
+	Push(MEllipsoid, BF(0.22 * BL, 0, 0.05 * Hd), Qb, FVector(0.36 * BL, Wd, Hd * 1.05), Coat, Belly);
+	Push(MEllipsoid, BF(0.0, 0, -0.08 * Hd), Qb, FVector(0.36 * BL, Wd * 0.98, Hd * 0.92), Coat, Belly);
+	Push(MEllipsoid, BF(-0.25 * BL, 0, 0.02 * Hd), Qb, FVector(0.31 * BL, Wd * 0.95, Hd * 0.97), Coat, Belly);
+
+	// Legs: two-bone reach to a foot that steps on the real ground.
+	// The upper leg starts high inside the body, like a shoulder or haunch, so the leg grows out of it.
+	const double Lr = LL + 0.55 * Hd;
+	const double La = 0.47 * Lr, Lb = 0.6 * Lr;
+	const double Rl = 0.03 * S * (0.6 + 0.5 * B.Wid);
+	for (int32 K = 0; K < 4; ++K)
+	{
+		const bool bFront = K < 2;
+		const double Side = (K % 2 == 0) ? -1.0 : 1.0;
+		const double Jx = bFront ? 0.28 * BL : -0.3 * BL;
+		const FVector J = BF(Jx, Side * (bFront ? 0.5 : 0.55) * Wd, 0.0);
+		const double Lp = FMath::Frac(Ph + A.Offsets[K]);
+		double Along, Lift;
+		if (Lp < A.Duty)
+		{
+			Along = Stride * (0.5 - Lp / A.Duty);
+			Lift = 0.0;
+		}
+		else
+		{
+			const double W = (Lp - A.Duty) / (1.0 - A.Duty);
+			Along = Stride * (-0.5 + W * W * (3.0 - 2.0 * W));
+			Lift = FMath::Sin(PI * W) * A.Lift;
+		}
+		const FVector2D Fxy = P + Fw * (Jx + Along) + Rt * (Side * Wd * 0.5);
+		const double HoofR = Rl * 1.1;
+		FVector Foot(Fxy.X, Fxy.Y, GroundCm(Fxy.X, Fxy.Y) + HoofR * 0.7 + Lift);
+		FVector D = Foot - J;
+		double Dl = D.Size();
+		const FVector Dir = Dl > 1e-3 ? D / Dl : -Up;
+		Dl = FMath::Clamp(Dl, FMath::Abs(La - Lb) + 1.0, La + Lb - 0.5);
+		Foot = J + Dir * Dl;
+		const double Xk = (La * La - Lb * Lb + Dl * Dl) / (2.0 * Dl);
+		const double Hk = FMath::Sqrt(FMath::Max(0.0, La * La - Xk * Xk));
+		const FVector Hint = Fwd * (bFront ? 1.0 : -1.0);
+		const FVector Perp = (Hint - Dir * FVector::DotProduct(Hint, Dir)).GetSafeNormal();
+		const FVector Knee = J + Dir * Xk + Perp * Hk;
+		const double Ru = (bFront ? 0.5 : 0.68) * Wd;
+		const double Rk = Rl * 1.3;
+		Seg(MThin, J, Knee + (Knee - J).GetSafeNormal() * Rk * 0.5, Ru, Fwd, Coat, Coat);
+		// Muscle: a haunch or shoulder that blends the leg into the body, wide front to back.
+		{
+			const FVector Ud = (Knee - J).GetSafeNormal();
+			const double Ulen = (Knee - J).Size();
+			Push(MEllipsoid, J + Ud * (Ulen * 0.22), FRotationMatrix::MakeFromXZ(Ud, Fwd).ToQuat(),
+				FVector(Ulen * 0.5, Ru * 0.8, Ru * (bFront ? 1.25 : 1.5)), Coat, Coat);
+		}
+		Push(MEllipsoid, Knee, Qb, FVector(Rk), Coat, Coat);
+		Seg(MLimb, Knee, Foot, Rk, Fwd, Coat, Sock);
+		Push(MEllipsoid, Foot - FVector(0, 0, HoofR * 0.25), FRotator(0.0, FMath::RadiansToDegrees(A.Yaw), 0.0).Quaternion(),
+			FVector(HoofR * 1.35, HoofR * 1.05, HoofR * 0.85), Dark, Dark);
+	}
+
+	// Neck and head.
+	const double NeckA = FMath::DegreesToRadians(FMath::Lerp(FMath::Lerp(18.0, 55.0, (double)B.Neck), -50.0, A.HeadDown));
+	const FVector Nd(FMath::Cos(NeckA), 0.0, FMath::Sin(NeckA));
+	const FVector Nb(0.38 * BL, 0.0, 0.25 * Hd);
+	const double NLen = S * (0.16 + 0.5 * B.Neck);
+	const double Rn = 0.55 * Hd;
+	Seg(MLimb, BF(Nb.X - Nd.X * Rn * 0.4, 0, Nb.Z - Nd.Z * Rn * 0.4), BF(Nb.X + Nd.X * NLen, 0, Nb.Z + Nd.Z * NLen), Rn, Up, Coat, Coat);
+	// Base of the neck, so it flows out of the chest instead of sticking out of it.
+	Push(MEllipsoid, BF(Nb.X, 0, Nb.Z - 0.1 * Hd), Qb * FRotator(FMath::RadiansToDegrees(NeckA) * 0.5, 0.0, 0.0).Quaternion(),
+		FVector(Rn * 1.5, Wd * 0.85, Rn * 1.15), Coat, Belly);
+	const double HeadA = FMath::DegreesToRadians(FMath::Lerp(-28.0, -95.0, A.HeadDown));
+	const FVector Hf = BD(FVector(FMath::Cos(HeadA), 0.0, FMath::Sin(HeadA)));
+	const FVector Hu = BD(FVector(-FMath::Sin(HeadA), 0.0, FMath::Cos(HeadA)));
+	const FQuat Qh = Qb * FRotator(FMath::RadiansToDegrees(HeadA), 0.0, 0.0).Quaternion();
+	const FVector Hp = BF(Nb.X + Nd.X * NLen, 0, Nb.Z + Nd.Z * NLen) + Hf * (0.05 * S * HK);
+	Push(MEllipsoid, Hp, Qh, FVector(0.11, 0.07, 0.075) * S * HK, Coat, Belly);
+	const FVector SnoutDir = (Hf - Hu * 0.14).GetSafeNormal();
+	const FVector S0 = Hp + Hf * (0.05 * S * HK) - Hu * (0.012 * S * HK);
+	const double SLen = 0.13 * S * HK * B.Snout;
+	const FVector S1 = S0 + SnoutDir * SLen;
+	Seg(MLimb, S0, S1, 0.048 * S * HK * (0.8 + 0.2 * B.Wid), Hu, Coat, Belly);
+	Push(MEllipsoid, S1, Qh, FVector(0.6, 1.0, 0.8) * (0.03 * S * HK * (0.7 + 0.3 * B.Snout)), Dark, Dark);
+	for (int32 Sd = -1; Sd <= 1; Sd += 2)
+	{
+		Push(MEllipsoid, Hp + Hf * (0.05 * S * HK) + Hu * (0.025 * S * HK) + Right * (Sd * 0.055 * S * HK), Qh,
+			FVector(0.016 * S * HK), Dark, Dark);
+		const FVector EarBase = Hp - Hf * (0.03 * S * HK) + Hu * (0.05 * S * HK) + Right * (Sd * 0.04 * S * HK);
+		const FVector EarDir = (Hu - Hf * 0.45 + Right * (Sd * 0.7)).GetSafeNormal();
+		Seg(MCone, EarBase, EarBase + EarDir * (0.08 * S * HK * (0.5 + B.Ears)), 0.03 * S * HK * (0.6 + 0.5 * B.Ears), Hf, Coat, Coat * 0.6f, 0.35);
+		if (B.Horn > 0.45f && B.HornType >= 0.4f && Grow > 0.75)
+		{
+			const FVector Ab = Hp + Hu * (0.07 * S * HK) - Hf * (0.01 * S * HK) + Right * (Sd * 0.03 * S * HK);
+			const FVector Beam = (Hu - Hf * 0.35 + Right * (Sd * 0.55)).GetSafeNormal();
+			const double BLen = 0.3 * S * B.Horn;
+			Seg(MThin, Ab, Ab + Beam * BLen, 0.016 * S, Hf, Bone0, Bone1);
+			for (int32 T = 1; T <= 2; ++T)
+			{
+				const FVector Tb = Ab + Beam * (BLen * 0.33 * T);
+				Seg(MCone, Tb, Tb + (Hu * 0.8 + Hf * 0.7 + Right * (Sd * 0.1)).GetSafeNormal() * (0.11 * S * B.Horn), 0.009 * S, Hu, Bone0, Bone1);
+			}
+			const FVector Tip = Ab + Beam * BLen * 0.98;
+			Seg(MCone, Tip, Tip + (Beam + Hf * 0.5).GetSafeNormal() * (0.09 * S * B.Horn), 0.008 * S, Hu, Bone0, Bone1);
+		}
+		if (B.Horn > 0.2f && B.HornType < 0.4f && Grow > 0.6)
+		{
+			const FVector Tb = S0 + SnoutDir * (SLen * 0.65) + Right * (Sd * 0.035 * S * HK);
+			Seg(MCone, Tb, Tb + (Hu * 0.9 + Hf * 0.4 + Right * (Sd * 0.35)).GetSafeNormal() * (0.07 * S * B.Horn * 1.6), 0.013 * S, Hf, Ivory0, Ivory1);
+		}
+	}
+
+	// Tail, swinging with the stride.
+	const double TLen = S * (0.05 + 0.5 * B.Tail);
+	const double Sway = FMath::Sin(2.0 * PI * Ph) * 0.25 * FMath::Min(V, 3.0) / 3.0 + 0.08 * FMath::Sin(C.Id * 1.7 + A.Phase * 2.0 * PI);
+	const double D1 = FMath::DegreesToRadians(-(62.0 - 40.0 * B.Tail)) + (Gait == 3 ? 0.5 : 0.0);
+	const FVector T0 = BF(-0.52 * BL, 0, 0.3 * Hd);
+	const FVector T1 = T0 + BD(FVector(-FMath::Cos(D1), FMath::Sin(Sway), FMath::Sin(D1)).GetSafeNormal()) * (TLen * 0.5);
+	const double D2 = D1 - 0.5;
+	const FVector T2 = T1 + BD(FVector(-FMath::Cos(D2), FMath::Sin(Sway * 1.6), FMath::Sin(D2)).GetSafeNormal()) * (TLen * 0.5);
+	const double Rtail = 0.035 * S * (0.5 + B.Tail);
+	Seg(MLimb, T0, T1, Rtail, Up, Coat, Coat);
+	Seg(MThin, T1, T2, Rtail * 0.75, Up, Coat, Belly);
+}
+
+FVector ANatureWorld::HerdCenter() const
+{
+	if (!Sim || Sim->GetCreatures().Num() == 0)
+	{
+		return FVector(0, 0, GroundCm(0, 0));
+	}
+	// The grazer with the most herd-mates within 40 m.
+	const TArray<FCreature>& Cs = Sim->GetCreatures();
+	int32 Best = 0, BestN = -1;
+	for (int32 I = 0; I < Cs.Num(); ++I)
+	{
+		if (Cs[I].Genes.Diet > 0.4f) continue;
+		int32 Nn = 0;
+		for (const FCreature& O : Cs)
+		{
+			Nn += (O.Genes.Diet <= 0.4f && (O.Pos - Cs[I].Pos).SizeSquared() < 1600.f) ? 1 : 0;
+		}
+		if (Nn > BestN) { BestN = Nn; Best = I; }
+	}
+	const FVector2f P = Cs[Best].Pos;
+	return FVector(P.X * 100.0, P.Y * 100.0, GroundCm(P.X * 100.0, P.Y * 100.0));
+}
+
+int32 ANatureWorld::FindChasingHunter() const
+{
+	if (!Sim) return 0;
+	for (const FCreature& C : Sim->GetCreatures())
+	{
+		if (C.Genes.Diet > 0.6f && C.Activity == ELifeActivity::Chasing) return C.Id;
+	}
+	return 0;
+}
+
+int32 ANatureWorld::FindAnyHunter() const
+{
+	if (!Sim) return 0;
+	for (const FCreature& C : Sim->GetCreatures())
+	{
+		if (C.Genes.Diet > 0.6f) return C.Id;
+	}
+	return 0;
+}
+
+bool ANatureWorld::GetAnimal(int32 Id, FVector& OutCenter, FVector2D& OutDir, int32& OutActivity) const
+{
+	const FNatureAnim* A = Anim.Find(Id);
+	if (!A || !Sim) return false;
+	OutCenter = A->Center;
+	OutDir = FVector2D(FMath::Cos(A->Yaw), FMath::Sin(A->Yaw));
+	OutActivity = 0;
+	for (const FCreature& C : Sim->GetCreatures())
+	{
+		if (C.Id == Id) { OutActivity = (int32)C.Activity; break; }
+	}
+	return true;
+}
+
+int32 ANatureWorld::PickAnimal(const FVector& WorldOrigin, const FVector& WorldDir) const
+{
+	const FTransform Xf = GetActorTransform();
+	const FVector O = Xf.InverseTransformPosition(WorldOrigin);
+	const FVector D = Xf.InverseTransformVectorNoScale(WorldDir).GetSafeNormal();
+	int32 Best = 0;
+	double BestT = 1e12;
+	for (const TPair<int32, FNatureAnim>& It : Anim)
+	{
+		const FVector Oc = It.Value.Center - O;
+		const double T = FVector::DotProduct(Oc, D);
+		if (T < 0.0) continue;
+		const double Miss = (Oc - D * T).Size();
+		if (Miss < It.Value.Radius * 1.2 + T * 0.004 && T < BestT)
+		{
+			BestT = T;
+			Best = It.Key;
+		}
+	}
+	return Best;
+}
+
+bool ANatureWorld::PickGround(const FVector& WorldOrigin, const FVector& WorldDir, FVector& OutLocal) const
+{
+	const FTransform Xf = GetActorTransform();
+	FVector P = Xf.InverseTransformPosition(WorldOrigin);
+	const FVector D = Xf.InverseTransformVectorNoScale(WorldDir).GetSafeNormal();
+	double Step = 50.0;
+	for (int32 I = 0; I < 4000; ++I)
+	{
+		const FVector Q = P + D * Step;
+		if (Q.Z < GroundCm(Q.X, Q.Y))
+		{
+			OutLocal = FVector(Q.X, Q.Y, GroundCm(Q.X, Q.Y));
+			return true;
+		}
+		P = Q;
+		Step = FMath::Min(Step * 1.02, 2000.0);
+	}
+	return false;
+}
+
+FVector ANatureWorld::LocalSunDir() const
+{
+	return GetActorTransform().InverseTransformVectorNoScale(FVector(APlanetWorld::GetSunDirection()));
+}
+
+FString ANatureWorld::HudLine() const
+{
+	if (!Sim) return FString();
+	static const TCHAR* Seasons[] = { TEXT("spring"), TEXT("summer"), TEXT("autumn"), TEXT("winter") };
+	FString S = FString::Printf(TEXT("%d animals"), Sim->GetCreatures().Num());
+	int32 Shown = 0;
+	for (const FLifeSpecies& Sp : Sim->GetSpecies())
+	{
+		if (Shown++ >= 4) break;
+		S += FString::Printf(TEXT("   %s %d (%s)"), *Sp.Name, Sp.Count, *FLifeSim::Describe(Sp.Rep));
+	}
+	S += FString::Printf(TEXT("   |   Year %d, %s"), Sim->GetTick() / FLifeSim::YearTicks + 1, Seasons[Sim->GetSeason()]);
+	if (TimeScale != 1.0) S += FString::Printf(TEXT("   x%.0f"), TimeScale);
+	return S;
+}
+
+FString ANatureWorld::AnimalPanel(int32 Id) const
+{
+	if (!Sim) return FString();
+	const FCreature* C = Sim->GetCreatures().FindByPredicate([Id](const FCreature& X) { return X.Id == Id; });
+	if (!C) return FString();
+	static const TCHAR* Acts[] = { TEXT("resting"), TEXT("walking"), TEXT("grazing"), TEXT("fleeing"), TEXT("chasing prey"), TEXT("running") };
+	const FLifeSpecies* Sp = Sim->FindSpecies(C->SpeciesId);
+	const double Years = (double)C->Age / FLifeSim::YearTicks;
+	const TCHAR* Stage = C->Age < C->Maturity ? TEXT("young") : C->Age > C->Lifespan * 0.8 ? TEXT("old") : TEXT("adult");
+	const TCHAR* Doing = (C->Activity == ELifeActivity::Grazing && C->Genes.Diet > 0.6f) ? TEXT("eating") : Acts[(int32)C->Activity];
+	return FString::Printf(TEXT("%s\nSpecies: %s, %s\nAge: %.1f years (%s)\nEnergy: %.0f%%\nGeneration %d, %d young\nNow: %s"),
+		*FLifeSim::MakeName((uint32)C->Id * 31u + 7u), Sp ? *Sp->Name : TEXT("?"), *FLifeSim::Describe(C->Genes),
+		Years, Stage, 100.0 * C->Energy / (100.0 * C->Genes.Size), C->Gen, C->Kids, Doing);
+}

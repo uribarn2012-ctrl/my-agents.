@@ -2,6 +2,7 @@
 
 #include "PlanetGenerator.h"
 #include "PlanetWorld.h"
+#include "../Life/NatureWorld.h"
 #include "Camera/CameraComponent.h"
 #include "Components/InputComponent.h"
 #include "Engine/Canvas.h"
@@ -22,6 +23,10 @@ namespace
 	constexpr double MinAltitudeM = 1500000.0;
 	constexpr double MaxAltitudeM = 60000000.0;
 	constexpr double DragRadiansPerPixel = 0.0024;
+	// Nature camera distance limits (cm). Zooming out past the far limit goes back up to the planet.
+	constexpr double NatureMinDist = 300.0;
+	constexpr double NatureMaxDist = 900000.0;
+	constexpr double NatureDefaultDist = 4500.0;
 
 	/** Camera tilt grows as it descends, so space looks straight down and the ground shows a horizon. */
 	double TiltForAltitude(double AltitudeM)
@@ -111,9 +116,9 @@ void APlanetPawn::Drag(const FVector2D& ScreenDelta)
 {
 	// Movement slows as the camera nears the ground so the surface follows the hand.
 	const double Scale = FMath::Clamp(AltitudeM / 4000000.0, 0.0004, 1.0) * DragRadiansPerPixel;
-	const FQuat Pitch(FVector::RightVector, -ScreenDelta.Y * Scale);
+	const FQuat PitchQ(FVector::RightVector, -ScreenDelta.Y * Scale);
 	const FQuat Roll(FVector::ForwardVector, ScreenDelta.X * Scale);
-	TargetOrientation = (TargetOrientation * Pitch * Roll).GetNormalized();
+	TargetOrientation = (TargetOrientation * PitchQ * Roll).GetNormalized();
 }
 
 void APlanetPawn::Turn(float ScreenDeltaX)
@@ -124,6 +129,26 @@ void APlanetPawn::Turn(float ScreenDeltaX)
 
 void APlanetPawn::Zoom(float WheelSteps)
 {
+	if (View == ECreatorView::Nature)
+	{
+		if (WheelSteps < 0.f && TargetDist >= NatureMaxDist * 0.999)
+		{
+			BeginAscent();
+			return;
+		}
+		TargetDist = FMath::Clamp(TargetDist * FMath::Pow(0.82, (double)WheelSteps), NatureMinDist, NatureMaxDist);
+		return;
+	}
+	if (View != ECreatorView::Planet)
+	{
+		return;
+	}
+	// Zooming in past the closest planet view keeps going: down into the nature view.
+	if (WheelSteps > 0.f && TargetAltitudeM <= MinAltitudeM * 1.001 && AltitudeM < MinAltitudeM * 1.08)
+	{
+		BeginDescent(ScreenCenterDir());
+		return;
+	}
 	TargetAltitudeM = FMath::Clamp(TargetAltitudeM * FMath::Pow(0.82, (double)WheelSteps), MinAltitudeM, MaxAltitudeM);
 }
 
@@ -146,7 +171,40 @@ void APlanetPawn::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
-	const double Blend = 1.0 - FMath::Exp(-DeltaSeconds * 8.0);
+	if (View == ECreatorView::Nature || View == ECreatorView::Ascending)
+	{
+		if (View == ECreatorView::Nature)
+		{
+			Fade = FMath::Max(0.f, Fade - DeltaSeconds / 0.9f);
+		}
+		else
+		{
+			Fade = FMath::Min(1.f, Fade + DeltaSeconds / 0.55f);
+			TargetDist = NatureMaxDist * 3.0;
+		}
+		TickNatureCamera(DeltaSeconds);
+		if (View == ECreatorView::Ascending && Fade >= 1.f)
+		{
+			LeaveNature();
+		}
+		return;
+	}
+	if (View == ECreatorView::Descending)
+	{
+		Fade = FMath::Min(1.f, Fade + DeltaSeconds / 0.55f);
+		if (Fade >= 1.f)
+		{
+			EnterNatureNow(DescentDir, 2500.0);
+			Fade = 1.f;
+			return;
+		}
+	}
+	else
+	{
+		Fade = FMath::Max(0.f, Fade - DeltaSeconds / 0.8f);
+	}
+
+	const double Blend = 1.0 - FMath::Exp(-DeltaSeconds * (View == ECreatorView::Descending ? 3.0 : 8.0));
 	AltitudeM = FMath::Exp(FMath::Lerp(FMath::Loge(AltitudeM), FMath::Loge(TargetAltitudeM), Blend));
 	Orientation = FQuat::Slerp(Orientation, TargetOrientation, Blend).GetNormalized();
 
@@ -156,6 +214,239 @@ void APlanetPawn::Tick(float DeltaSeconds)
 		GroundM = W->GroundHeightM(Orientation.GetAxisZ());
 	}
 	UpdateCamera(GroundM);
+}
+
+FVector3d APlanetPawn::ScreenCenterDir() const
+{
+	FVector3d Dir;
+	if (!RayToPlanet(GetActorLocation(), GetActorForwardVector(), Dir))
+	{
+		Dir = Orientation.GetAxisZ();
+	}
+	return Dir;
+}
+
+bool APlanetPawn::RayToPlanet(const FVector& Origin, const FVector& Dir, FVector3d& OutDir) const
+{
+	const FVector3d O(Origin), D = FVector3d(Dir).GetSafeNormal();
+	const double R = FPlanetGenerator::RadiusCm;
+	const double B = FVector3d::DotProduct(O, D);
+	const double C = O.SizeSquared() - R * R;
+	const double Disc = B * B - C;
+	if (Disc < 0.0)
+	{
+		return false;
+	}
+	const double T = -B - FMath::Sqrt(Disc);
+	if (T < 0.0)
+	{
+		return false;
+	}
+	OutDir = (O + D * T).GetSafeNormal();
+	return true;
+}
+
+bool APlanetPawn::BeginDescent(const FVector3d& Dir)
+{
+	APlanetWorld* W = FindWorld();
+	if (View != ECreatorView::Planet || !W || !W->GetGenerator())
+	{
+		return false;
+	}
+	FVector3d Land;
+	if (!ANatureWorld::FindLand(*W->GetGenerator(), Dir, Land))
+	{
+		Message = TEXT("Only open sea here - aim at land to go down.");
+		MessageUntil = FPlatformTime::Seconds() + 3.0;
+		return false;
+	}
+	DescentDir = Land;
+	View = ECreatorView::Descending;
+	// Keep flying down toward the spot while the view fades through haze.
+	JumpTo(Land, AltitudeM / 1000.0);
+	TargetAltitudeM = 250000.0;
+	return true;
+}
+
+void APlanetPawn::EnterNatureNow(const FVector3d& Dir, double DistM)
+{
+	APlanetWorld* W = FindWorld();
+	if (!W || !W->GetGenerator())
+	{
+		return;
+	}
+	if (Nature.IsValid())
+	{
+		Nature->Destroy();
+	}
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ANatureWorld* N = GetWorld()->SpawnActor<ANatureWorld>(ANatureWorld::StaticClass(), FTransform::Identity, Params);
+	const uint32 Spot = GetTypeHash(FIntVector((int32)(Dir.X * 1e5), (int32)(Dir.Y * 1e5), (int32)(Dir.Z * 1e5)));
+	N->Build(*W->GetGenerator(), Dir, (int32)(HashCombine((uint32)W->GetSeed(), Spot) & 0x7fffffff));
+	Nature = N;
+	W->SetSurfaceVisible(false);
+	DescentDir = Dir;
+	View = ECreatorView::Nature;
+	FollowId = 0;
+	Focus = FocusTarget = N->HerdCenter() + FVector(0, 0, 60.0);
+	// Look with the sun behind and a little to the side, so the animals are lit from the front.
+	const FVector Sun = N->LocalSunDir();
+	Yaw = FMath::Atan2(-Sun.Y, -Sun.X) + FMath::DegreesToRadians(35.0);
+	Pitch = -14.0;
+	Dist = DistM * 100.0;
+	TargetDist = DistM > 100.0 ? NatureDefaultDist : Dist;
+	TickNatureCamera(0.f);
+}
+
+void APlanetPawn::BeginAscent()
+{
+	if (View == ECreatorView::Nature)
+	{
+		View = ECreatorView::Ascending;
+	}
+}
+
+void APlanetPawn::LeaveNature()
+{
+	if (Nature.IsValid())
+	{
+		Nature->Destroy();
+	}
+	Nature.Reset();
+	if (APlanetWorld* W = FindWorld())
+	{
+		W->SetSurfaceVisible(true);
+	}
+	View = ECreatorView::Planet;
+	FollowId = 0;
+	JumpTo(DescentDir, MinAltitudeM / 1000.0 * 1.15);
+}
+
+void APlanetPawn::TickNatureCamera(float DeltaSeconds)
+{
+	ANatureWorld* N = Nature.Get();
+	if (!N)
+	{
+		return;
+	}
+	Dist = FMath::Exp(FMath::Lerp(FMath::Loge(Dist), FMath::Loge(TargetDist), 1.0 - FMath::Exp(-DeltaSeconds * 2.6)));
+
+	if (bHuntShot)
+	{
+		int32 Act = 0;
+		FVector C;
+		FVector2D D;
+		const bool bHave = FollowId && N->GetAnimal(FollowId, C, D, Act);
+		if (!bHave || Act != 4)
+		{
+			ChaseSeen = 0.0;
+			if (const int32 Id = N->FindChasingHunter())
+			{
+				FollowId = Id;
+			}
+			else if (!bHave)
+			{
+				FollowId = N->FindAnyHunter();
+			}
+		}
+		else
+		{
+			ChaseSeen += DeltaSeconds;
+		}
+	}
+
+	if (FollowId)
+	{
+		FVector C;
+		FVector2D D;
+		int32 Act = 0;
+		if (N->GetAnimal(FollowId, C, D, Act))
+		{
+			FocusTarget = C;
+			if (bHuntShot)
+			{
+				// From the side and a little behind, so the hunter and the prey ahead are both in frame.
+				FocusTarget += FVector(D.X, D.Y, 0.0) * 700.0;
+				const double Want = FMath::Atan2(D.Y, D.X) + FMath::DegreesToRadians(-62.0);
+				Yaw += FMath::UnwindRadians(Want - Yaw) * FMath::Min(1.0, DeltaSeconds * 1.5);
+			}
+		}
+		else
+		{
+			FollowId = 0;
+		}
+	}
+	Focus += (FocusTarget - Focus) * (DeltaSeconds <= 0.f ? 1.0 : FMath::Min(1.0, DeltaSeconds * 4.0));
+
+	// High up, the view tips down so the descent looks at the land, not the horizon.
+	const double High = FMath::Clamp(FMath::LogX(10.0, FMath::Max(Dist, 1.0) / 30000.0) / 1.3, 0.0, 1.0);
+	const double P = FMath::DegreesToRadians(FMath::Lerp(Pitch, -52.0, High));
+	const FVector Fwd(FMath::Cos(P) * FMath::Cos(Yaw), FMath::Cos(P) * FMath::Sin(Yaw), FMath::Sin(P));
+	FVector Cam = Focus - Fwd * Dist;
+	const double Ground = N->GroundCm(Cam.X, Cam.Y) + 150.0;
+	Cam.Z = FMath::Max(Cam.Z, Ground);
+	const FVector Look = (Focus - Cam).GetSafeNormal();
+	const FTransform Xf = N->GetActorTransform();
+	SetActorLocationAndRotation(Xf.TransformPosition(Cam), Xf.TransformRotation(FRotationMatrix::MakeFromXZ(Look, FVector::UpVector).ToQuat()));
+}
+
+void APlanetPawn::NatureOrbit(const FVector2D& Delta)
+{
+	Yaw += Delta.X * 0.005;
+	Pitch = FMath::Clamp(Pitch - Delta.Y * 0.2, -85.0, -2.0);
+}
+
+void APlanetPawn::NaturePan(const FVector2D& Delta)
+{
+	ANatureWorld* N = Nature.Get();
+	if (!N)
+	{
+		return;
+	}
+	FollowId = 0;
+	bHuntShot = false;
+	const FVector F(FMath::Cos(Yaw), FMath::Sin(Yaw), 0.0), R(-FMath::Sin(Yaw), FMath::Cos(Yaw), 0.0);
+	FocusTarget += (-R * Delta.X - F * Delta.Y) * (Dist * 0.0016);
+	FocusTarget.X = FMath::Clamp(FocusTarget.X, -500000.0, 500000.0);
+	FocusTarget.Y = FMath::Clamp(FocusTarget.Y, -500000.0, 500000.0);
+	FocusTarget.Z = N->GroundCm(FocusTarget.X, FocusTarget.Y) + 60.0;
+}
+
+void APlanetPawn::ClickAt(const FVector& Origin, const FVector& Dir)
+{
+	ANatureWorld* N = Nature.Get();
+	if (View == ECreatorView::Planet)
+	{
+		FVector3d Hit;
+		if (RayToPlanet(Origin, Dir, Hit))
+		{
+			BeginDescent(Hit);
+		}
+		return;
+	}
+	if (View != ECreatorView::Nature || !N)
+	{
+		return;
+	}
+	bHuntShot = false;
+	if (const int32 Id = N->PickAnimal(Origin, Dir))
+	{
+		FollowId = Id;
+		TargetDist = FMath::Min(TargetDist, 2500.0);
+		return;
+	}
+	FollowId = 0;
+	FVector G;
+	if (N->PickGround(Origin, Dir, G))
+	{
+		FocusTarget = G + FVector(0, 0, 60.0);
+	}
+}
+
+bool APlanetPawn::IsShotReady() const
+{
+	return !bHuntShot || ChaseSeen > 1.2;
 }
 
 APlanetPlayerController::APlanetPlayerController()
@@ -179,6 +470,38 @@ void APlanetPlayerController::SetupInputComponent()
 	Super::SetupInputComponent();
 	InputComponent->BindAxisKey(EKeys::MouseWheelAxis, this, &APlanetPlayerController::OnWheel);
 	InputComponent->BindKey(EKeys::N, IE_Pressed, this, &APlanetPlayerController::OnNewSeed);
+	InputComponent->BindKey(EKeys::E, IE_Pressed, this, &APlanetPlayerController::OnEnter);
+	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &APlanetPlayerController::OnLeave);
+	InputComponent->BindKey(EKeys::Q, IE_Pressed, this, &APlanetPlayerController::OnLeave);
+	InputComponent->BindKey(EKeys::T, IE_Pressed, this, &APlanetPlayerController::OnTime);
+}
+
+void APlanetPlayerController::OnEnter()
+{
+	if (APlanetPawn* P = Cast<APlanetPawn>(GetPawn()))
+	{
+		if (P->GetView() == ECreatorView::Planet)
+		{
+			P->BeginDescent(P->ScreenCenterDir());
+		}
+	}
+}
+
+void APlanetPlayerController::OnLeave()
+{
+	if (APlanetPawn* P = Cast<APlanetPawn>(GetPawn()))
+	{
+		P->BeginAscent();
+	}
+}
+
+void APlanetPlayerController::OnTime()
+{
+	APlanetPawn* P = Cast<APlanetPawn>(GetPawn());
+	if (ANatureWorld* N = P ? P->GetNature() : nullptr)
+	{
+		N->TimeScale = N->TimeScale == 1.0 ? 5.0 : 1.0;
+	}
 }
 
 void APlanetPlayerController::OnWheel(float Value)
@@ -194,6 +517,11 @@ void APlanetPlayerController::OnWheel(float Value)
 
 void APlanetPlayerController::OnNewSeed()
 {
+	const APlanetPawn* P = Cast<APlanetPawn>(GetPawn());
+	if (P && P->GetView() != ECreatorView::Planet)
+	{
+		return;
+	}
 	for (TActorIterator<APlanetWorld> It(GetWorld()); It; ++It)
 	{
 		It->SetSeed(FMath::RandRange(1, 2000000000));
@@ -212,15 +540,34 @@ void APlanetPlayerController::PlayerTick(float DeltaTime)
 	{
 		// Screen Y grows downward; the pawn expects positive Y to mean a move up the screen.
 		const FVector2D Delta(X - LastMouse.X, LastMouse.Y - Y);
+		const bool bNature = P->GetView() == ECreatorView::Nature;
 		if (IsInputKeyDown(EKeys::LeftMouseButton))
 		{
-			P->Drag(Delta);
+			PressMoved += Delta.Size();
+			if (bNature) P->NatureOrbit(Delta);
+			else if (P->GetView() == ECreatorView::Planet) P->Drag(Delta);
 		}
 		else if (IsInputKeyDown(EKeys::RightMouseButton))
 		{
-			P->Turn((float)Delta.X);
+			if (bNature) P->NaturePan(Delta);
+			else if (P->GetView() == ECreatorView::Planet) P->Turn((float)Delta.X);
 		}
 	}
+	// A click (press and release without dragging) picks an animal, or goes down to the land.
+	const bool bDown = IsInputKeyDown(EKeys::LeftMouseButton);
+	if (bDown && !bWasDown)
+	{
+		PressMoved = 0.0;
+	}
+	if (!bDown && bWasDown && PressMoved < 6.0 && P && bHasMouse)
+	{
+		FVector O, D;
+		if (DeprojectScreenPositionToWorld(X, Y, O, D))
+		{
+			P->ClickAt(O, D);
+		}
+	}
+	bWasDown = bDown;
 	bHadMouse = bHasMouse;
 	if (bHasMouse)
 	{
@@ -231,8 +578,45 @@ void APlanetPlayerController::PlayerTick(float DeltaTime)
 void APlanetHUD::DrawHUD()
 {
 	Super::DrawHUD();
-	if (!Canvas || !GEngine || FParse::Param(FCommandLine::Get(), TEXT("CreatorNoHud")))
+	if (!Canvas || !GEngine)
 	{
+		return;
+	}
+	const APlanetPawn* Pawn = Cast<APlanetPawn>(GetOwningPawn());
+	if (Pawn && Pawn->GetFade() > 0.f)
+	{
+		// The fly-through haze between the planet and the ground.
+		DrawRect(FLinearColor(0.80f, 0.86f, 0.93f, Pawn->GetFade()), 0.f, 0.f, Canvas->SizeX, Canvas->SizeY);
+	}
+	if (FParse::Param(FCommandLine::Get(), TEXT("CreatorNoHud")))
+	{
+		return;
+	}
+	const FLinearColor TextColor(0.75f, 0.85f, 1.0f, 0.9f);
+	if (Pawn && !Pawn->Message.IsEmpty() && FPlatformTime::Seconds() < Pawn->MessageUntil)
+	{
+		DrawText(Pawn->Message, FLinearColor(1.f, 0.85f, 0.6f, 1.f), 24.f, Canvas->SizeY - 80.f, GEngine->GetMediumFont());
+	}
+	if (Pawn && Pawn->GetView() == ECreatorView::Nature)
+	{
+		if (const ANatureWorld* N = Pawn->GetNature())
+		{
+			DrawText(N->HudLine(), TextColor, 24.f, Canvas->SizeY - 70.f, GEngine->GetMediumFont());
+			DrawText(TEXT("Drag orbit   Right drag move   Wheel zoom (all the way out = back to the planet)   Click an animal to follow   T time x5   Esc / Q planet"),
+				TextColor, 24.f, Canvas->SizeY - 44.f, GEngine->GetMediumFont());
+			const FString Panel = Pawn->GetFollowId() ? N->AnimalPanel(Pawn->GetFollowId()) : FString();
+			if (!Panel.IsEmpty())
+			{
+				TArray<FString> Lines;
+				Panel.ParseIntoArrayLines(Lines);
+				DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.45f), 16.f, 16.f, 430.f, 16.f + 24.f * Lines.Num());
+				for (int32 I = 0; I < Lines.Num(); ++I)
+				{
+					DrawText(Lines[I], I == 0 ? FLinearColor(1.f, 0.92f, 0.7f, 1.f) : FLinearColor(0.9f, 0.92f, 0.95f, 1.f),
+						28.f, 24.f + 24.f * I, GEngine->GetMediumFont());
+				}
+			}
+		}
 		return;
 	}
 	int32 Seed = 0;
@@ -246,8 +630,8 @@ void APlanetHUD::DrawHUD()
 	{
 		Altitude = P->GetAltitudeKm();
 	}
-	const FString Text = FString::Printf(TEXT("World %d   |   %.0f km   |   N new world   Drag rotate   Right drag turn   Wheel zoom"), Seed, Altitude);
-	DrawText(Text, FLinearColor(0.75f, 0.85f, 1.0f, 0.9f), 24.f, Canvas->SizeY - 44.f, GEngine->GetMediumFont());
+	const FString Text = FString::Printf(TEXT("World %d   |   %.0f km   |   N new world   Drag rotate   Right drag turn   Wheel zoom (keep going in to land)   E or click land: go down to the animals"), Seed, Altitude);
+	DrawText(Text, TextColor, 24.f, Canvas->SizeY - 44.f, GEngine->GetMediumFont());
 }
 
 APlanetGameMode::APlanetGameMode()
@@ -308,6 +692,39 @@ void APlanetGameMode::StartPlay()
 		}
 	}
 
+	// -CreatorNature starts on the ground at a sunlit spot. Options: -CreatorNatureDist=<m> camera distance,
+	// -CreatorPitch=<deg>, -CreatorSimSeconds=<s> extra life before the shot, -CreatorFollow=hunt.
+	if (FParse::Param(FCommandLine::Get(), TEXT("CreatorNature")))
+	{
+		APlayerController* PC = GetWorld()->GetFirstPlayerController();
+		APlanetPawn* Pawn = PC ? Cast<APlanetPawn>(PC->GetPawn()) : nullptr;
+		if (Pawn && PlanetWorld->GetGenerator())
+		{
+			FVector3d Spot = PlanetWorld->FindScenicSpot(0), Land;
+			if (ANatureWorld::FindLand(*PlanetWorld->GetGenerator(), Spot, Land))
+			{
+				Spot = Land;
+			}
+			double DistM = 45.0, PitchDeg = -14.0;
+			int32 SimSeconds = 0;
+			FString Follow;
+			FParse::Value(FCommandLine::Get(), TEXT("CreatorNatureDist="), DistM);
+			FParse::Value(FCommandLine::Get(), TEXT("CreatorPitch="), PitchDeg);
+			FParse::Value(FCommandLine::Get(), TEXT("CreatorSimSeconds="), SimSeconds);
+			Pawn->EnterNatureNow(Spot, DistM);
+			Pawn->SetNaturePitch(PitchDeg);
+			Pawn->SetNatureDist(DistM);
+			if (SimSeconds > 0 && Pawn->GetNature())
+			{
+				Pawn->GetNature()->RunSim(SimSeconds * 10);
+			}
+			if (FParse::Value(FCommandLine::Get(), TEXT("CreatorFollow="), Follow) && Follow == TEXT("hunt"))
+			{
+				Pawn->StartHuntShot();
+			}
+		}
+	}
+
 	FParse::Value(FCommandLine::Get(), TEXT("CreatorShot="), ShotPath);
 	FParse::Value(FCommandLine::Get(), TEXT("CreatorWait="), ShotWait);
 }
@@ -334,7 +751,11 @@ void APlanetGameMode::CaptureTick(float DeltaSeconds)
 		return;
 	}
 
-	if (PlanetWorld && PlanetWorld->IsSettled())
+	APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	const APlanetPawn* Pawn = PC ? Cast<APlanetPawn>(PC->GetPawn()) : nullptr;
+	// A hunt shot waits (up to a minute) until a hunter is really chasing.
+	const bool bPawnReady = !Pawn || Pawn->IsShotReady() || SecondsTotal > 60.0;
+	if (PlanetWorld && PlanetWorld->IsSettled() && (bPawnReady || SettledTime < ShotWait))
 	{
 		SettledTime += DeltaSeconds;
 		SecondsTotal += DeltaSeconds;

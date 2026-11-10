@@ -9,6 +9,8 @@ struct FPlanetSample
 	FVector3f Albedo = FVector3f::ZeroVector; // Linear colour.
 	float Ocean = 0.0f;       // 1 = open water, 0 = land or ice.
 	float Roughness = 0.8f;
+	float TemperatureC = 15.0f; // Climate, used by the nature view.
+	float Moisture = 0.5f;
 };
 
 class FPlanetGenerator

@@ -263,8 +263,14 @@ def build_clouds():
     light = custom(mat, "Cloud light", CLOUD_LIGHT_CODE, F3,
                    {"Pos": pos, "SunDir": sun, "Sun": illum, "Albedo": albedo, "Op": opacity}, -400, 0)
 
+    # "Fade" lets the game thin the clouds out as the camera comes down, so they never smear the view.
+    fade = scalar(mat, "Fade", 1.0, -700, 450)
+    faded = node(mat, unreal.MaterialExpressionMultiply, -300, 250)
+    LIB.connect_material_expressions(opacity, "", faded, "A")
+    LIB.connect_material_expressions(fade, "", faded, "B")
+
     LIB.connect_material_property(light, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-    LIB.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
+    LIB.connect_material_property(faded, "", unreal.MaterialProperty.MP_OPACITY)
     LIB.recompile_material(mat)
     SUBSYS.save_loaded_asset(mat, False)
 
@@ -284,7 +290,133 @@ def build_stars():
     SUBSYS.save_loaded_asset(mat, False)
 
 
+NOISE_LIB = """
+struct FN
+{
+    float H(float2 i)
+    {
+        uint2 q = (uint2)(int2(i) + 1048576);
+        uint h = q.x * 1597334677u ^ q.y * 3812015801u;
+        h = h * 1597334677u;
+        h ^= h >> 16;
+        return float(h & 0xffffffu) / 16777216.0;
+    }
+    float N(float2 p)
+    {
+        float2 i = floor(p);
+        float2 f = p - i;
+        float2 u = f * f * (3.0 - 2.0 * f);
+        return lerp(lerp(H(i), H(i + float2(1, 0)), u.x), lerp(H(i + float2(0, 1)), H(i + float2(1, 1)), u.x), u.y);
+    }
+    float F(float2 p)
+    {
+        return N(p) * 0.5 + N(p * 2.03 + 17.1) * 0.25 + N(p * 4.07 + 3.7) * 0.125 + N(p * 8.13 + 9.2) * 0.0625;
+    }
+};
+FN Nz;
+"""
+
+# Ground, grass, trees and rocks of the nature view. Vertex colour = albedo; alpha 1 = ground with full
+# detail, 0.5 = foliage, 0 = water. UV0 = position in metres, so the fine detail stays crisp up close.
+GROUND_COLOR = NOISE_LIB + """
+float d = saturate(VC.a * 2.0);
+float w = saturate(1.0 - VC.a * 2.0);
+float fol = saturate(1.0 - abs(VC.a - 0.5) * 4.0);
+float m = lerp(0.72, 1.2, Nz.F(UV * 0.7)) * lerp(0.86, 1.12, Nz.F(UV * 0.06 + 5.0)) * lerp(0.9, 1.08, Nz.F(UV * 5.0));
+float mf = lerp(0.85, 1.12, Nz.F(UV * 3.0));
+float3 c = VC.rgb * lerp(1.0, lerp(m, mf, fol), d);
+return c;
+"""
+
+GROUND_NORMAL = NOISE_LIB + """
+float d = saturate(VC.a * 2.0 - 1.0);
+float fade = saturate(1.0 - Dist / 6000.0) * d;
+float e = 0.04;
+float2 p = UV;
+#define HF(q) (Nz.F((q) * 1.6) * 0.18 + Nz.F((q) * 7.0) * 0.035)
+float h0 = HF(p);
+float hx = HF(p + float2(e, 0));
+float hy = HF(p + float2(0, e));
+float3 n = normalize(float3(-(hx - h0) / e * fade * 2.5, -(hy - h0) / e * fade * 2.5, 1.0));
+// Grass blades are seen from both sides: undo the back-face flip so they stay lit like the ground.
+float fol = saturate(1.0 - abs(VC.a - 0.5) * 4.0);
+n.z *= lerp(1.0, Sign, fol);
+return n;
+"""
+
+GROUND_ROUGH = """
+return lerp(0.12, 0.92, saturate(VC.a * 2.0));
+"""
+
+ANIMAL_COLOR = NOISE_LIB + """
+float3 back = float3(C0, C1, C2);
+float3 belly = float3(C3, C4, C5);
+float t = smoothstep(0.0, 1.0, saturate(VC.r));
+float3 c = lerp(back, belly, t);
+float g = Nz.F(UV * float2(26.0, 14.0)) ;
+float s = Nz.F(UV * float2(3.0, 2.0));
+return c * (0.84 + 0.22 * g) * (0.92 + 0.14 * s);
+"""
+
+
+def vertex_color_rgba(mat, x, y):
+    vc = node(mat, unreal.MaterialExpressionVertexColor, x, y)
+    append = node(mat, unreal.MaterialExpressionAppendVector, x + 200, y)
+    LIB.connect_material_expressions(vc, "", append, "A")
+    LIB.connect_material_expressions(vc, "A", append, "B")
+    return append
+
+
+def build_nature_ground():
+    mat = new_material("M_NatureGround")
+    mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_DEFAULT_LIT)
+    mat.set_editor_property("two_sided", True)
+    F1 = unreal.CustomMaterialOutputType.CMOT_FLOAT1
+    F3 = unreal.CustomMaterialOutputType.CMOT_FLOAT3
+    vc = vertex_color_rgba(mat, -1200, 0)
+    uv = node(mat, unreal.MaterialExpressionTextureCoordinate, -1200, 200)
+    dist = node(mat, unreal.MaterialExpressionPixelDepth, -1200, 350)
+    color = custom(mat, "Ground colour", GROUND_COLOR, F3, {"VC": vc, "UV": uv}, -600, 0)
+    sign = node(mat, unreal.MaterialExpressionTwoSidedSign, -1200, 450)
+    normal = custom(mat, "Ground normal", GROUND_NORMAL, F3, {"VC": vc, "UV": uv, "Dist": dist, "Sign": sign}, -600, 300)
+    rough = custom(mat, "Ground roughness", GROUND_ROUGH, F1, {"VC": vc}, -600, 550)
+    spec = scalar(mat, "Specular", 0.35, -300, 650)
+    LIB.connect_material_property(color, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    LIB.connect_material_property(normal, "", unreal.MaterialProperty.MP_NORMAL)
+    LIB.connect_material_property(rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
+    LIB.connect_material_property(spec, "", unreal.MaterialProperty.MP_SPECULAR)
+    LIB.recompile_material(mat)
+    SUBSYS.save_loaded_asset(mat, False)
+
+
+def build_animal_skin():
+    # Instanced body parts. Per-instance data: back colour (0-2) and belly / lower colour (3-5).
+    # Vertex colour red says how far a point is toward the belly side of the part.
+    mat = new_material("M_AnimalSkin")
+    mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_DEFAULT_LIT)
+    mat.set_editor_property("two_sided", True)
+    mat.set_editor_property("used_with_instanced_static_meshes", True)
+    F3 = unreal.CustomMaterialOutputType.CMOT_FLOAT3
+    vc = vertex_color_rgba(mat, -1200, 0)
+    uv = node(mat, unreal.MaterialExpressionTextureCoordinate, -1200, 150)
+    inputs = {"VC": vc, "UV": uv}
+    for i in range(6):
+        cd = node(mat, unreal.MaterialExpressionPerInstanceCustomData, -1200, 300 + i * 120)
+        cd.set_editor_property("data_index", i)
+        inputs["C%d" % i] = cd
+    color = custom(mat, "Coat colour", ANIMAL_COLOR, F3, inputs, -600, 0)
+    LIB.connect_material_property(color, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    rough = scalar(mat, "Roughness", 0.78, -300, 300)
+    LIB.connect_material_property(rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
+    spec = scalar(mat, "Specular", 0.3, -300, 420)
+    LIB.connect_material_property(spec, "", unreal.MaterialProperty.MP_SPECULAR)
+    LIB.recompile_material(mat)
+    SUBSYS.save_loaded_asset(mat, False)
+
+
 build_terrain()
 build_clouds()
 build_stars()
+build_nature_ground()
+build_animal_skin()
 unreal.log("PLANET ASSETS BUILT")

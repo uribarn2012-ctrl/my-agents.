@@ -489,6 +489,10 @@ double APlanetWorld::GroundHeightM(const FVector3d& Dir) const
 
 bool APlanetWorld::IsSettled() const
 {
+	if (bSurfaceHidden)
+	{
+		return true;
+	}
 	const bool bSettled = Generator.IsValid() && Requests.Num() == 0 && InFlight == 0 && MaterialsReady();
 	static double LastReport = 0.0;
 	const double Now = FPlatformTime::Seconds();
@@ -500,6 +504,34 @@ bool APlanetWorld::IsSettled() const
 			FVector3d::DotProduct(CameraPos.GetSafeNormal(), SunDirection));
 	}
 	return bSettled;
+}
+
+void APlanetWorld::SetSurfaceVisible(bool bVisible)
+{
+	bSurfaceHidden = !bVisible;
+	for (UProceduralMeshComponent* Mesh : AllMeshes)
+	{
+		if (Mesh)
+		{
+			Mesh->SetHiddenInGame(!bVisible);
+		}
+	}
+	if (StarDome)
+	{
+		StarDome->SetHiddenInGame(false);
+	}
+	if (Sun)
+	{
+		// Down on the ground the sun casts real shadows (animals, trees); from orbit it does not need to.
+		Sun->SetDynamicShadowDistanceMovableLight(bVisible ? 0.0f : 25000.0f);
+		Sun->SetDynamicShadowCascades(bVisible ? 0 : 4);
+		Sun->MarkRenderStateDirty();
+	}
+	if (Atmosphere)
+	{
+		// Stronger distance haze on the ground so the far edge of the landscape melts into the sky.
+		Atmosphere->SetAerialPespectiveViewDistanceScale(bVisible ? 1.0f : 1.6f);
+	}
 }
 
 void APlanetWorld::SetSeed(int32 NewSeed)
@@ -835,6 +867,26 @@ void APlanetWorld::Tick(float DeltaSeconds)
 	if (!FMath::IsNearlyEqual(WantedSkyLight, SkyLight->Intensity, 0.01f))
 	{
 		SkyLight->SetIntensity(WantedSkyLight);
+	}
+
+	// Clouds thin out on the way down: up close the shell is a soft blur that hides the ground.
+	if (CloudMaterial)
+	{
+		const float CloudFade = (float)FMath::Pow(FMath::Clamp((AltitudeKm - 1450.0) / 3200.0, 0.0, 1.0), 0.8);
+		CloudMaterial->SetScalarParameterValue(TEXT("Fade"), CloudFade);
+		if (CloudShell)
+		{
+			CloudShell->SetHiddenInGame(bSurfaceHidden || CloudFade <= 0.001f);
+		}
+	}
+	if (bSurfaceHidden)
+	{
+		if (StarDome)
+		{
+			// Stars only at night down on the ground.
+			StarDome->SetHiddenInGame(FVector3d::DotProduct(CameraPos.GetSafeNormal(), SunDirection) > -0.12);
+		}
+		return;
 	}
 
 	DrainFinishedChunks();

@@ -50,6 +50,12 @@ public:
 	/** Picks a sunlit spot worth looking at: Kind 0 = coastline with land, 1 = mountains by the sea. */
 	FVector3d FindScenicSpot(int32 Kind) const;
 
+	const FPlanetGenerator* GetGenerator() const { return Generator.Get(); }
+
+	/** Hides the planet's own ground and clouds while the detailed nature view is shown. */
+	void SetSurfaceVisible(bool bVisible);
+	bool IsSurfaceVisible() const { return !bSurfaceHidden; }
+
 private:
 	void CreateSkyAndSun();
 	void BakeWeatherMap();
@@ -92,4 +98,5 @@ private:
 	int32 VisibleChunks = 0;
 	double LastCleanup = 0.0;
 	int32 InFlight = 0;
+	bool bSurfaceHidden = false;
 };

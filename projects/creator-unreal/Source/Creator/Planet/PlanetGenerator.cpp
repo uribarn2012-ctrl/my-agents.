@@ -223,6 +223,8 @@ FPlanetSample FPlanetGenerator::Sample(const FVector3d& Dir, int32 ExtraOctaves)
 		0.64 + 0.24 * FMath::Cos(LatRad * 7.2) + 0.55 * MNoise - 0.28 * Inland - 0.22 * Belt, 0.0, 1.0);
 
 	const double Tint = Fbm(Q * 34.0 + OffsetC, 6);
+	Out.TemperatureC = (float)Temperature;
+	Out.Moisture = (float)Moisture;
 
 	if (HeightM < 0.0)
 	{
