@@ -89,6 +89,23 @@ APlanetWorld* APlanetPawn::FindWorld()
 	return World.Get();
 }
 
+void APlanetPawn::JumpTo(const FVector3d& TargetDir, double AltKm)
+{
+	const double Alt = FMath::Clamp(AltKm * 1000.0, MinAltitudeM, MaxAltitudeM);
+	// The camera stands south of the target so its tilted view lands on it.
+	const FVector3d T = TargetDir.GetSafeNormal();
+	FVector3d North = (FVector3d::UpVector - T * T.Z).GetSafeNormal();
+	if (North.IsNearlyZero())
+	{
+		North = FVector3d::ForwardVector;
+	}
+	const double Reach = Alt * FMath::Tan(FMath::DegreesToRadians(TiltForAltitude(Alt))) / FPlanetGenerator::RadiusM;
+	const FVector3d Up = (T * FMath::Cos(Reach) - North * FMath::Sin(Reach)).GetSafeNormal();
+	const FVector3d CamNorth = (FVector3d::UpVector - Up * Up.Z).GetSafeNormal();
+	TargetOrientation = Orientation = FRotationMatrix::MakeFromXZ(CamNorth, Up).ToQuat();
+	TargetAltitudeM = AltitudeM = Alt;
+}
+
 void APlanetPawn::Drag(const FVector2D& ScreenDelta)
 {
 	// Movement slows as the camera nears the ground so the surface follows the hand.
@@ -261,6 +278,35 @@ void APlanetGameMode::StartPlay()
 	FParse::Value(FCommandLine::Get(), TEXT("CreatorSeed="), Seed);
 	PlanetWorld->SetSeed(Seed);
 
+	// -CreatorZoom=far|mid|near frames a whole globe, a continent, or mountains near the ground.
+	FString Zoom;
+	if (FParse::Value(FCommandLine::Get(), TEXT("CreatorZoom="), Zoom))
+	{
+		APlayerController* PC = GetWorld()->GetFirstPlayerController();
+		APlanetPawn* Pawn = PC ? Cast<APlanetPawn>(PC->GetPawn()) : nullptr;
+		UE_LOG(LogTemp, Display, TEXT("Planet: zoom preset '%s', pawn %s."), *Zoom, Pawn ? TEXT("found") : TEXT("missing"));
+		if (Pawn)
+		{
+			const FVector3d Sun = APlanetWorld::GetSunDirection();
+			if (Zoom == TEXT("far"))
+			{
+				// Mostly the day side, with the night edge just showing on one limb.
+				const FVector3d Side = FVector3d::CrossProduct(Sun, FVector3d::UpVector).GetSafeNormal();
+				Pawn->JumpTo((Sun + Side * 0.42 + FVector3d::UpVector * 0.1).GetSafeNormal(), 19000.0);
+			}
+			else if (Zoom == TEXT("mid"))
+			{
+				Pawn->JumpTo(PlanetWorld->FindScenicSpot(0), 2600.0);
+			}
+			else if (Zoom == TEXT("near"))
+			{
+				double AltKm = 5.0;
+				FParse::Value(FCommandLine::Get(), TEXT("CreatorAltKm="), AltKm);
+				Pawn->JumpTo(PlanetWorld->FindScenicSpot(1), AltKm);
+			}
+		}
+	}
+
 	FParse::Value(FCommandLine::Get(), TEXT("CreatorShot="), ShotPath);
 	FParse::Value(FCommandLine::Get(), TEXT("CreatorWait="), ShotWait);
 }
@@ -297,13 +343,17 @@ void APlanetGameMode::CaptureTick(float DeltaSeconds)
 	{
 		SettledTime = 0.0;
 	}
-	// A minimized window has a tiny back buffer, and copying a screenshot from it crashes the renderer.
-	const UGameViewportClient* ViewportClient = GetWorld()->GetGameViewport();
-	const bool bViewportUsable = ViewportClient && ViewportClient->Viewport
-		&& ViewportClient->Viewport->GetSizeXY().X >= 640 && ViewportClient->Viewport->GetSizeXY().Y >= 360;
-	if (SettledTime >= ShotWait && bViewportUsable)
+	// A high-resolution shot renders the view again into its own 1600x900 target, so it works the
+	// same in an offscreen or minimized window. (A plain screenshot copies the window's back buffer,
+	// which shrinks to 8x8 when the window is minimized and crashed the renderer.)
+	UGameViewportClient* ViewportClient = GetWorld()->GetGameViewport();
+	if (SettledTime >= ShotWait && ViewportClient && ViewportClient->Viewport)
 	{
-		FScreenshotRequest::RequestScreenshot(ShotPath, false, false);
+		FHighResScreenshotConfig& Config = GetHighResScreenshotConfig();
+		Config.SetResolution(1600, 900);
+		Config.SetFilename(ShotPath);
+		Config.SetHDRCapture(false);
+		ViewportClient->Viewport->TakeHighResScreenShot();
 		FramesAfterShot = 0;
 	}
 }

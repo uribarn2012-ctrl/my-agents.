@@ -163,7 +163,8 @@ double FPlanetGenerator::ContinentField(const FVector3d& Q, double& OutBoundary,
 
 	const double Blend = Sstep(0.0, 0.3, OutBoundary);
 	const double Bias = FMath::Lerp((Plates[I1].Bias + Plates[I2].Bias) * 0.5, Plates[I1].Bias, Blend);
-	return Fbm(Q * 1.15 + OffsetD, 10, 0.52) + Bias;
+	// A gain under 0.5 keeps coastlines detailed without a spray of one-pixel islands offshore.
+	return Fbm(Q * 1.15 + OffsetD, 10, 0.46) + Bias;
 }
 
 FPlanetSample FPlanetGenerator::Sample(const FVector3d& Dir, int32 ExtraOctaves) const
@@ -227,7 +228,8 @@ FPlanetSample FPlanetGenerator::Sample(const FVector3d& Dir, int32 ExtraOctaves)
 	{
 		const double Depth = Sstep(0.0, 900.0, -HeightM);
 		FVector3f Water = Mix(Shelf, DeepSea, FMath::Pow(Depth, 0.55));
-		const double Ice = Sstep(-9.0, -16.0, Temperature + Tint * 4.0);
+		// A smooth, large-scale wobble keeps the sea-ice edge clean instead of a spray of tiny floes.
+		const double Ice = Sstep(-9.0, -15.0, Temperature + Fbm(Q * 5.0 + OffsetB, 4) * 6.0);
 		Out.Albedo = Mix(Water, SeaIce, Ice);
 		Out.Ocean = (float)(1.0 - Ice);
 		Out.Roughness = (float)FMath::Lerp(0.42, 0.65, Ice);
@@ -264,14 +266,27 @@ FPlanetSample FPlanetGenerator::Sample(const FVector3d& Dir, int32 ExtraOctaves)
 float FPlanetGenerator::CloudCover(const FVector3d& Dir) const
 {
 	const FVector3d SwirlA(Fbm(Dir * 1.6 + OffsetB, 3), Fbm(Dir * 1.6 + OffsetE, 3), Fbm(Dir * 1.6 + OffsetF, 3));
-	const FVector3d Q = (Dir + SwirlA * 0.32).GetSafeNormal();
+	const FVector3d Q = (Dir + SwirlA * 0.25).GetSafeNormal();
 	const FVector3d SwirlB(Fbm(Q * 5.0 + OffsetC, 3), Fbm(Q * 5.0 + OffsetA, 3), Fbm(Q * 5.0 + OffsetD, 3));
 	const FVector3d P = Q + SwirlB * 0.08;
 
+	// Wet equator, clear subtropics (where the deserts are), stormy mid-latitudes.
 	const double Lat = FMath::Asin(FMath::Clamp(Dir.Z, -1.0, 1.0));
 	const double Bands = 0.5 + 0.5 * FMath::Cos(Lat * 7.2);
-	const double Large = Fbm(P * 2.1 + OffsetA, 4) * 0.8;
-	const double Fine = Fbm(P * 11.0 + OffsetB, 6, 0.55) * 0.34;
-	const double Field = Large + Fine + (Bands - 0.5) * 0.28;
-	return (float)Sstep(0.04, 0.36, Field);
+	// Only the big weather systems follow the full swirl; smaller detail is warped less, or it gets
+	// smeared into brush-stroke streaks.
+	const double Large = Fbm(P * 2.1 + OffsetA, 4) * 0.75;
+	const double Mid = Fbm(Q * 7.0 + OffsetE, 4, 0.5) * 0.38;
+	// Billowy clumps (sum of absolute noise) give puffy cloud fields instead of solid sheets.
+	double Puffs = 0.0, Amp = 0.5;
+	FVector3d B = Dir * 34.0 + OffsetB;
+	for (int32 i = 0; i < 4; ++i)
+	{
+		Puffs += FMath::Abs(Noise(B)) * Amp;
+		Amp *= 0.5;
+		B = B * 2.07 + FVector3d(2.3, 7.1, 5.9);
+	}
+	const double Fine = (Puffs - 0.2) * 0.9;
+	const double Field = Large + Mid + Fine + (Bands - 0.5) * 0.32;
+	return (float)Sstep(-0.02, 0.5, Field);
 }

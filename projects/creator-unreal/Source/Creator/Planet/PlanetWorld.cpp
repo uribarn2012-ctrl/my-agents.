@@ -7,7 +7,8 @@
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/VolumetricCloudComponent.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "Containers/Queue.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture2D.h"
@@ -21,6 +22,7 @@
 #include "RHIGlobals.h"
 #include "ProceduralMeshComponent.h"
 #include "RenderingThread.h"
+#include "ShaderCompiler.h"
 #include "Tasks/Task.h"
 #include "TextureResource.h"
 
@@ -30,10 +32,13 @@ namespace
 	constexpr int32 MaxLevel = 15;
 	constexpr int32 MaxBuildsInFlight = 48;
 	constexpr double SplitPixels = 3.0;
+	constexpr int32 MaxLiveChunks = 5000; // Memory guard: stop refining rather than run away.
 	constexpr double MeshUploadBudgetSeconds = 0.006;
 	constexpr double CleanupAfterSeconds = 4.0;
 	constexpr double MaxReliefCm = 9000.0 * 100.0 * FPlanetGenerator::VerticalScale;
 	constexpr double CameraNearPad = 5000000.0; // cm, keeps nearby chunks out of the culling tests.
+	constexpr double CloudAltitudeCm = 1200000.0; // 12 km, above nearly all of the exaggerated relief.
+	const FVector3d SunDirection = FVector3d(0.72, -0.62, 0.32).GetSafeNormal(); // Points toward the sun.
 
 	const FVector3d FaceNormals[6] = {
 		{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
@@ -249,20 +254,20 @@ void APlanetWorld::CreateSkyAndSun()
 	Atmosphere = NewObject<USkyAtmosphereComponent>(this, TEXT("Atmosphere"));
 	Atmosphere->TransformMode = ESkyAtmosphereTransformMode::PlanetCenterAtComponentTransform;
 	Atmosphere->SetupAttachment(Root);
-	Atmosphere->SetBottomRadius((float)(FPlanetGenerator::RadiusM / 1000.0));
-	Atmosphere->SetAtmosphereHeight(100.0f);
+	// The atmosphere's own ground sphere sits 2 km under sea level. At exactly sea level it
+	// z-fights with the ocean and the sky shows through the water as glitter and curved bands.
+	Atmosphere->SetBottomRadius((float)((FPlanetGenerator::RadiusM - 2000.0) / 1000.0));
+	Atmosphere->SetAtmosphereHeight(102.0f);
 	Atmosphere->RegisterComponent();
 
 	Sun = NewObject<UDirectionalLightComponent>(this, TEXT("Sun"));
 	Sun->SetMobility(EComponentMobility::Movable);
 	Sun->SetupAttachment(Root);
-	Sun->SetWorldRotation((-FVector(0.72, -0.62, 0.32).GetSafeNormal()).Rotation());
+	Sun->SetWorldRotation((-FVector(SunDirection)).Rotation());
 	Sun->SetIntensity(11.0f);
 	Sun->SetLightColor(FLinearColor(1.0f, 0.97f, 0.92f));
 	Sun->SetAtmosphereSunLight(true);
-	Sun->bCastCloudShadows = true;
-	Sun->CloudShadowExtent = 400.0f;
-	Sun->CloudShadowStrength = 1.0f;
+	Sun->bPerPixelAtmosphereTransmittance = true;
 	Sun->CastShadows = true;
 	Sun->DynamicShadowDistanceMovableLight = 0.0f;
 	Sun->RegisterComponent();
@@ -273,31 +278,29 @@ void APlanetWorld::CreateSkyAndSun()
 	SkyLight->bRealTimeCapture = true;
 	SkyLight->SourceType = SLS_CapturedScene;
 	SkyLight->SetIntensity(1.0f);
+	SkyLight->SetVisibility(!FParse::Param(FCommandLine::Get(), TEXT("CreatorNoSkyLight")));
 	SkyLight->RegisterComponent();
 
-	Clouds = NewObject<UVolumetricCloudComponent>(this, TEXT("Clouds"));
-	Clouds->SetupAttachment(Root);
-	Clouds->SetLayerBottomAltitude(4.0f);
-	Clouds->SetLayerHeight(9.0f);
-	Clouds->SetTracingStartMaxDistance(50000.0f);
-	Clouds->SetTracingMaxDistance(120.0f);
-	Clouds->SetPlanetRadius((float)(FPlanetGenerator::RadiusM / 1000.0));
-	Clouds->SetViewSampleCountScale(0.7f);
-	Clouds->SetShadowViewSampleCountScale(0.5f);
-	Clouds->SetShadowTracingDistance(12.0f);
+	// Clouds are a thin translucent shell around the planet. The volumetric cloud renderer was tried
+	// first, but seen from orbit its ray march is far too sparse: it covered the globe in speckles and
+	// dark arcs. The shell is drawn with its own lighting, so it is identical in every frame.
 	if (UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Planet/M_PlanetClouds.M_PlanetClouds")))
 	{
 		CloudMaterial = UMaterialInstanceDynamic::Create(Base, this);
+		CloudMaterial->SetVectorParameterValue(TEXT("SunDir"), FLinearColor(FVector(SunDirection)));
+		if (!FParse::Param(FCommandLine::Get(), TEXT("CreatorNoClouds")))
+		{
+			BuildCloudShell();
+		}
 	}
 	else
 	{
 		UE_LOG(LogTemp, Error, TEXT("Planet: cloud material missing. Run Scripts/build_planet_assets.py."));
 	}
-	Clouds->RegisterComponent();
 
 	UStaticMesh* Sphere = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	UMaterialInterface* StarMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Planet/M_PlanetStars.M_PlanetStars"));
-	if (Sphere && StarMaterial)
+	if (Sphere && StarMaterial && !FParse::Param(FCommandLine::Get(), TEXT("CreatorNoStars")))
 	{
 		StarDome = NewObject<UStaticMeshComponent>(this, TEXT("StarDome"));
 		StarDome->SetMobility(EComponentMobility::Movable);
@@ -307,16 +310,143 @@ void APlanetWorld::CreateSkyAndSun()
 		StarDome->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		StarDome->SetCastShadow(false);
 		StarDome->bAffectDistanceFieldLighting = false;
+		// Kept out of the sky light capture: otherwise the ocean mirrors thousands of stars as speckles.
+		StarDome->bVisibleInRealTimeSkyCaptures = false;
+		StarDome->bVisibleInReflectionCaptures = false;
 		StarDome->SetWorldScale3D(FVector(4.0e8)); // Radius 2e10 cm, well outside any camera position.
 		StarDome->SetBoundsScale(100.0f);
 		StarDome->RegisterComponent();
 	}
 
-	TerrainMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Planet/M_PlanetTerrain.M_PlanetTerrain"));
-	if (!TerrainMaterial)
+	if (UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Planet/M_PlanetTerrain.M_PlanetTerrain")))
+	{
+		TerrainMaterial = UMaterialInstanceDynamic::Create(Base, this);
+		TerrainMaterial->SetVectorParameterValue(TEXT("SunDir"), FLinearColor(FVector(SunDirection)));
+	}
+	else
 	{
 		UE_LOG(LogTemp, Error, TEXT("Planet: terrain material missing. Run Scripts/build_planet_assets.py."));
 	}
+}
+
+void APlanetWorld::BuildCloudShell()
+{
+	// A cube sphere: no pole pinching and an even triangle size everywhere. 96 quads per face keep
+	// the facets within about 120 m of the true sphere, invisible at any zoom.
+	constexpr int32 Quads = 96;
+	const double RadiusCm = FPlanetGenerator::RadiusCm + CloudAltitudeCm;
+	CloudShell = NewObject<UProceduralMeshComponent>(this, TEXT("CloudShell"));
+	CloudShell->SetMobility(EComponentMobility::Movable);
+	CloudShell->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	CloudShell->SetCastShadow(false);
+	CloudShell->SetupAttachment(Root);
+	CloudShell->RegisterComponent();
+
+	TArray<int32> Indices;
+	const int32 Row = Quads + 1;
+	Indices.Reserve(Quads * Quads * 6);
+	for (int32 Y = 0; Y < Quads; ++Y)
+	{
+		for (int32 X = 0; X < Quads; ++X)
+		{
+			const int32 I = Y * Row + X;
+			Indices.Append({ I, I + Row, I + 1, I + 1, I + Row, I + Row + 1 });
+		}
+	}
+	for (int32 Face = 0; Face < 6; ++Face)
+	{
+		TArray<FVector> Positions, Normals;
+		Positions.Reserve(Row * Row);
+		Normals.Reserve(Row * Row);
+		for (int32 Y = 0; Y <= Quads; ++Y)
+		{
+			for (int32 X = 0; X <= Quads; ++X)
+			{
+				const FVector3d D = CubeToDir(Face, -1.0 + 2.0 * X / Quads, -1.0 + 2.0 * Y / Quads);
+				Positions.Add(FVector(D * RadiusCm));
+				Normals.Add(FVector(D));
+			}
+		}
+		CloudShell->CreateMeshSection(Face, Positions, Indices, Normals, TArray<FVector2D>(), TArray<FColor>(), TArray<FProcMeshTangent>(), false);
+		CloudShell->SetMaterial(Face, CloudMaterial);
+	}
+}
+
+FVector3d APlanetWorld::GetSunDirection()
+{
+	return SunDirection;
+}
+
+FVector3d APlanetWorld::FindScenicSpot(int32 Kind) const
+{
+	if (!Generator.IsValid())
+	{
+		return SunDirection;
+	}
+	const FPlanetGenerator& Gen = *Generator;
+	FRandomStream R(Gen.GetSeed() ^ 0x3C1A);
+	// Neighbour distance in radians: about 400 km for coastlines, 60 km for mountains.
+	const double Reach = Kind == 0 ? 0.06 : 0.01;
+	FVector3d Best = SunDirection;
+	double BestScore = -1.0e9;
+	for (int32 i = 0; i < 3000; ++i)
+	{
+		const FVector3d D = R.GetUnitVector();
+		const double SunCos = FVector3d::DotProduct(D, SunDirection);
+		// Well lit, but with the sun low enough that relief casts readable shading.
+		if (SunCos < (Kind == 0 ? 0.7 : 0.45) || SunCos > (Kind == 0 ? 0.98 : 0.8) || FMath::Abs(D.Z) > 0.75)
+		{
+			continue;
+		}
+		// Clear skies only, so the view is of the ground and not the top of a cloud deck.
+		if (Gen.CloudCover(D) > (Kind == 0 ? 0.6 : 0.12))
+		{
+			continue;
+		}
+		const FPlanetSample S = Gen.Sample(D, 0);
+		const FVector3d T1 = FVector3d::CrossProduct(D, FVector3d::UpVector).GetSafeNormal();
+		const FVector3d T2 = FVector3d::CrossProduct(D, T1);
+		int32 Wet = 0;
+		double Highest = S.HeightM, Lowest = S.HeightM;
+		for (int32 k = 0; k < 8; ++k)
+		{
+			const double A = k * UE_DOUBLE_PI / 4.0;
+			const FPlanetSample N = Gen.Sample((D + (T1 * FMath::Cos(A) + T2 * FMath::Sin(A)) * Reach).GetSafeNormal(), 0);
+			Wet += N.HeightM < 0.0 ? 1 : 0;
+			Highest = FMath::Max(Highest, N.HeightM);
+			Lowest = FMath::Min(Lowest, N.HeightM);
+		}
+		double Score;
+		if (Kind == 0)
+		{
+			// Mostly land with some sea in view.
+			Score = (S.HeightM > 0.0 ? 2.0 : 0.0) - FMath::Abs(Wet - 3) * 0.5 + FMath::Min(Highest, 4000.0) / 4000.0;
+		}
+		else
+		{
+			// Steep relief (a big drop within ~60 km) on land, ideally running down to the sea.
+			Score = (S.HeightM > 200.0 ? 1.0 : -5.0) + FMath::Min(Highest - FMath::Max(Lowest, 0.0), 6000.0) / 1000.0 + (Wet > 0 && Wet < 5 ? 2.0 : 0.0);
+		}
+		if (Score > BestScore)
+		{
+			BestScore = Score;
+			Best = D;
+		}
+	}
+	return Best;
+}
+
+bool APlanetWorld::MaterialsReady() const
+{
+	// Uncooked runs compile shaders on demand; a capture waits until nothing is compiling, so
+	// no chunk is drawn with the grey placeholder material. Cooked builds have nothing to wait for.
+#if WITH_EDITOR
+	if (GShaderCompilingManager && GShaderCompilingManager->IsCompiling())
+	{
+		return false;
+	}
+#endif
+	return TerrainMaterial != nullptr;
 }
 
 void APlanetWorld::BeginPlay()
@@ -348,7 +478,17 @@ double APlanetWorld::GroundHeightM(const FVector3d& Dir) const
 
 bool APlanetWorld::IsSettled() const
 {
-	return Generator.IsValid() && Requests.Num() == 0 && InFlight == 0 && (!CloudMaterial || Clouds->GetMaterial() == CloudMaterial);
+	const bool bSettled = Generator.IsValid() && Requests.Num() == 0 && InFlight == 0 && MaterialsReady();
+	static double LastReport = 0.0;
+	const double Now = FPlatformTime::Seconds();
+	if (!bSettled && Now - LastReport > 3.0)
+	{
+		LastReport = Now;
+		UE_LOG(LogTemp, Display, TEXT("Planet: waiting. Requests %d, in flight %d, materials ready %d, chunks %d, camera %.1f km up, sun-facing %.2f."),
+			Requests.Num(), InFlight, MaterialsReady() ? 1 : 0, VisibleChunks, (CameraPos.Size() - FPlanetGenerator::RadiusCm) / 100000.0,
+			FVector3d::DotProduct(CameraPos.GetSafeNormal(), SunDirection));
+	}
+	return bSettled;
 }
 
 void APlanetWorld::SetSeed(int32 NewSeed)
@@ -413,6 +553,10 @@ void APlanetWorld::BakeWeatherMap()
 	Mip.BulkData.Unlock();
 	WeatherMap->UpdateResource();
 	CloudMaterial->SetTextureParameterValue(TEXT("CloudWeather"), WeatherMap);
+	if (TerrainMaterial)
+	{
+		TerrainMaterial->SetTextureParameterValue(TEXT("CloudWeather"), WeatherMap);
+	}
 }
 
 UProceduralMeshComponent* APlanetWorld::AcquireMesh()
@@ -574,7 +718,8 @@ void APlanetWorld::Visit(FPlanetNode& Node)
 	}
 
 	const double PixelSpacing = Node.SpacingCm / Dist * PixelsPerRadian;
-	const bool bWantSplit = Node.Level < MaxLevel && PixelSpacing > SplitPixels && Node.State == FPlanetNode::EState::Ready;
+	const bool bWantSplit = Node.Level < MaxLevel && PixelSpacing > SplitPixels && Node.State == FPlanetNode::EState::Ready
+		&& AllMeshes.Num() - FreeMeshes.Num() < MaxLiveChunks;
 	if (bWantSplit)
 	{
 		if (!Node.HasChildren())
@@ -671,19 +816,6 @@ void APlanetWorld::Tick(float DeltaSeconds)
 	if (StarDome)
 	{
 		StarDome->SetWorldLocation(CameraPos);
-	}
-
-	// The cloud renderer requires a volume material. A material still compiling shows as a surface
-	// placeholder and would crash it, so it is only attached once its shaders are ready.
-	if (CloudMaterial && Clouds->GetMaterial() != CloudMaterial)
-	{
-		UMaterial* CloudBase = CloudMaterial->GetMaterial();
-		FMaterialResource* Resource = CloudBase ? CloudBase->GetMaterialResource(GMaxRHIShaderPlatform) : nullptr;
-		if (Resource && Resource->IsGameThreadShaderMapComplete())
-		{
-			Clouds->SetMaterial(CloudMaterial);
-			UE_LOG(LogTemp, Display, TEXT("Planet: cloud material attached at %.2f s."), GetWorld()->GetTimeSeconds());
-		}
 	}
 
 	// Ambient sky light is only right down in the air; from orbit it would light the night side.

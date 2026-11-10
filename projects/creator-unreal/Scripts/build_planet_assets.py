@@ -11,86 +11,120 @@ LIB = unreal.MaterialEditingLibrary
 ASSETS = unreal.AssetToolsHelpers.get_asset_tools()
 SUBSYS = unreal.get_editor_subsystem(unreal.EditorAssetSubsystem)
 
+# Value noise with an integer hash (no float-precision patterns at large coordinates) and a
+# band-limited fBm: each octave fades to its average once its cells shrink below ~4 pixels, so
+# distant surfaces never sparkle. CellPx is the size of the first octave's cell in pixels.
 NOISE = """
 struct FN
 {
-    float H(float3 P) { P = frac(P * 0.3183099 + 0.1); P *= 17.0; return frac(P.x * P.y * P.z * (P.x + P.y + P.z)); }
+    float H(float3 P)
+    {
+        uint3 Q = uint3(int3(P) + 1048576);
+        uint K = Q.x * 73856093u ^ Q.y * 19349663u ^ Q.z * 83492791u;
+        K = (K ^ (K >> 13)) * 1274126177u;
+        K ^= K >> 16;
+        return float(K) * (1.0 / 4294967296.0);
+    }
     float V(float3 X)
     {
-        float3 I = floor(X); float3 F = frac(X); F = F * F * (3.0 - 2.0 * F);
+        float3 I = floor(X); float3 F = X - I; F = F * F * (3.0 - 2.0 * F);
         return lerp(lerp(lerp(H(I), H(I + float3(1,0,0)), F.x), lerp(H(I + float3(0,1,0)), H(I + float3(1,1,0)), F.x), F.y),
                     lerp(lerp(H(I + float3(0,0,1)), H(I + float3(1,0,1)), F.x), lerp(H(I + float3(0,1,1)), H(I + float3(1,1,1)), F.x), F.y), F.z);
     }
-    float Fbm(float3 P, int O)
+    float Fbm(float3 P, int O, float CellPx)
     {
         float S = 0.0, A = 0.5;
-        for (int i = 0; i < O; i++) { S += V(P) * A; A *= 0.5; P = P * 2.02 + float3(3.1, 1.7, 5.3); }
-        return S;
+        for (int i = 0; i < O; i++)
+        {
+            float W = saturate(CellPx * 0.5 - 1.0);
+            S += lerp(0.5, V(P), W) * A;
+            A *= 0.5; CellPx *= 0.495; P = P * 2.02 + float3(3.1, 1.7, 5.3);
+        }
+        return S / (1.0 - A * 2.0 + 1e-6) * 1.0;
     }
 };
 FN N;
 """
 
+# Land detail finer than the mesh: brightness and dryness variation at 60 km down to 150 m.
 COLOR_CODE = NOISE + """
 float3 Base = VC.rgb * VC.rgb;
 float Land = 1.0 - VC.a;
-float Near = 1.0 - smoothstep(1.2e7, 1.2e8, Dist);
-if (Near > 0.0 && Land > 0.01)
+float3 Dir = normalize(Pos);
+// Cloud shadows: the cloud that shades this point sits 12 km up, toward the sun.
+float3 Sd = normalize(Dir + SunDir * (0.00189 / max(dot(Dir, SunDir), 0.2)));
+float2 SUV = float2(atan2(Sd.y, Sd.x) / 6.2831853 + 0.5, acos(clamp(Sd.z, -1.0, 1.0)) / 3.1415927);
+float Shadow = smoothstep(0.15, 0.85, Texture2DSampleLevel(Weather, WeatherSampler, SUV, 0.0).r);
+Base *= 1.0 - 0.5 * Shadow;
+if (Land > 0.01)
 {
-    float3 P = Pos * 3.0e-5;
-    float A = N.Fbm(P, 5);
-    float B = N.Fbm(P * 0.09 + 11.0, 4);
-    float Detail = (A - 0.48) * 1.1 + (B - 0.48) * 0.9;
-    Base *= 1.0 + Land * Near * Detail;
+    float Px = max(length(fwidth(Pos)), 1.0);
+    float A = N.Fbm(Dir * 110.0, 6, 5.8e6 / Px);
+    float B = N.Fbm(Dir * 3500.0 + 7.0, 6, 1.8e5 / Px);
+    float Dry = (A - 0.5) * 1.3;
+    float3 DryTint = float3(1.25, 1.05, 0.8);
+    Base *= lerp(float3(1, 1, 1), DryTint, saturate(Dry) * Land) * lerp(float3(1, 1, 1), float3(0.85, 1.0, 0.9), saturate(-Dry) * Land);
+    Base *= 1.0 + Land * ((B - 0.5) * 0.7 + (A - 0.5) * 0.4);
 }
 return max(Base, 0.0);
 """
 
-ROUGH_CODE = NOISE + """
+ROUGH_CODE = """
 return saturate(R);
 """
 
+# Per-pixel relief: a band-limited height field turned into a normal with screen-space derivatives
+# (surface gradient bump mapping). Land gets ridges and gullies; the sea gets gentle swell.
 NORMAL_CODE = NOISE + """
-float3 Up = normalize(Pos);
-float3 Out = Vn;
-float Near = 1.0 - smoothstep(4.0e6, 6.0e7, Dist);
-if (Near > 0.0)
+float3 Dir = normalize(Pos);
+float Px = max(length(fwidth(Pos)), 1.0);
+float Hgt;
+if (Ocean > 0.5)
 {
-    float E = 12000.0;
-    float Scale = Ocean > 0.5 ? 2.2e-5 : 4.0e-5;
-    float3 Drift = Ocean > 0.5 ? float3(Time * 0.05, Time * 0.03, 0.0) : float3(0, 0, 0);
-    float3 P = Pos * Scale + Drift;
-    float S = E * Scale;
-    float C = N.Fbm(P, 4);
-    float3 G = float3(N.Fbm(P + float3(S,0,0), 4) - C, N.Fbm(P + float3(0,S,0), 4) - C, N.Fbm(P + float3(0,0,S), 4) - C);
-    G -= Up * dot(G, Up);
-    float Strength = (Ocean > 0.5 ? 2.0 : 3.5) * Near;
-    Out = normalize(Vn - G / max(S, 1e-6) * Strength * 0.04);
+    float3 P = Dir * 60000.0 + float3(Time * 0.15, Time * 0.1, 0.0);
+    Hgt = (N.Fbm(P, 4, 1.06e4 / Px) - 0.5) * 300.0;
 }
-return Out;
+else
+{
+    float Ridge = 1.0 - abs(N.Fbm(Dir * 2400.0, 6, 2.65e5 / Px) * 2.0 - 1.0);
+    Hgt = (Ridge * Ridge - 0.45) * 22000.0 + (N.Fbm(Dir * 30000.0 + 3.0, 5, 2.1e4 / Px) - 0.5) * 3500.0;
+}
+// The sea is a perfect sphere: its exact normal avoids the banding and glitter that 8-bit
+// vertex normals cause in the sun glint.
+float3 Nb = Ocean > 0.5 ? Dir : Vn;
+float3 Dpx = ddx(Pos), Dpy = ddy(Pos);
+float3 R1 = cross(Dpy, Nb), R2 = cross(Nb, Dpx);
+float Det = dot(Dpx, R1);
+float3 Grad = sign(Det) * (ddx(Hgt) * R1 + ddy(Hgt) * R2);
+float3 Out = normalize(abs(Det) * Nb - Grad);
+return (abs(Det) > 1e-12 && all(Out == Out)) ? Out : Nb;
 """
 
+# Opacity of the cloud shell. The baked weather map gives the large weather systems; band-limited
+# 3D noise (no seams, no pole pinch) adds detail down to the pixel at every zoom level.
 CLOUD_CODE = NOISE + """
-float R = length(Pos);
-float3 Dir = Pos / R;
+float3 Dir = normalize(Pos);
 float U = atan2(Dir.y, Dir.x) / 6.2831853 + 0.5;
 float V = acos(clamp(Dir.z, -1.0, 1.0)) / 3.1415927;
 float Cover = Texture2DSampleLevel(Weather, WeatherSampler, float2(U, V), 0.0).r;
-float H = saturate((R - BottomCm) / HeightCm);
-float Fill = Cover * 1.15;
-float Shape = smoothstep(0.0, 0.14, H) * (1.0 - smoothstep(0.35 + 0.6 * Cover, 1.0, H));
-float D = saturate(Fill - 0.05) * Shape;
-float Near = 1.0 - smoothstep(1.5e8, 9.0e8, length(Pos - Cam));
-if (D > 0.01 && Near > 0.0)
-{
-    float3 P = Pos * 2.0e-6 + float3(Time * 0.004, 0.0, 0.0);
-    float Billow = N.Fbm(P, 3);
-    float Eroded = saturate((D + Billow - 0.72) * 3.0) * saturate(D * 3.0);
-    D = lerp(D, Eroded, Near);
-}
-return D;
+float Px = max(length(fwidth(Pos)), 1.0);
+float C = Cover;
+C += (N.Fbm(Dir * 90.0 + float3(Time * 0.0003, 0, 0), 5, 7.1e6 / Px) - 0.5) * 0.55 * saturate(Cover * 3.0);
+// Rotated so the fine noise lattice does not line up with the coarse one (no blocky grid).
+float3 Rd = float3(dot(Dir, float3(0.48, 0.6, 0.64)), dot(Dir, float3(-0.8, 0.36, 0.48)), dot(Dir, float3(0.0, -0.71, 0.6)));
+C += (N.Fbm(Rd * 2500.0, 5, 2.55e5 / Px) - 0.5) * 0.25 * saturate(C * 2.0);
+return smoothstep(0.08, 0.9, C) * 0.93;
 """
-
+# Cloud colour, lit here rather than by the engine so it is the same in every frame: sunlit tops,
+# reddened light along the day-night line, near black on the night side.
+CLOUD_LIGHT_CODE = """
+float3 Dir = normalize(Pos);
+float L = dot(Dir, SunDir);
+float Light = saturate(L * 0.7 + 0.3) * smoothstep(-0.12, 0.1, L);
+float3 Tint = lerp(float3(1.0, 0.55, 0.32), float3(1.0, 0.98, 0.95), smoothstep(0.0, 0.3, L));
+float Thick = lerp(0.72, 1.0, saturate(Op * 1.2));
+return Albedo * Sun / 3.1415927 * Light * Tint * Thick + 0.0015;
+"""
 STAR_CODE = """
 struct FS
 {
@@ -150,6 +184,17 @@ def scalar(mat, name, value, x, y):
     return expr
 
 
+def vector3(mat, name, value, x, y):
+    expr = node(mat, unreal.MaterialExpressionVectorParameter, x, y)
+    expr.set_editor_property("parameter_name", name)
+    expr.set_editor_property("default_value", unreal.LinearColor(value[0], value[1], value[2], 0.0))
+    mask = node(mat, unreal.MaterialExpressionComponentMask, x + 200, y)
+    for ch, on in (("r", True), ("g", True), ("b", True), ("a", False)):
+        mask.set_editor_property(ch, on)
+    LIB.connect_material_expressions(expr, "", mask, "")
+    return mask
+
+
 def build_terrain():
     mat = new_material("M_PlanetTerrain")
     mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_DEFAULT_LIT)
@@ -174,8 +219,12 @@ def build_terrain():
     F1 = unreal.CustomMaterialOutputType.CMOT_FLOAT1
     F3 = unreal.CustomMaterialOutputType.CMOT_FLOAT3
 
+    weather = node(mat, unreal.MaterialExpressionTextureObjectParameter, -1200, 950)
+    weather.set_editor_property("parameter_name", "CloudWeather")
+    weather.set_editor_property("texture", unreal.load_asset("/Engine/EngineResources/Black"))
+    sun = vector3(mat, "SunDir", (0.72, -0.62, 0.32), -1200, 1100)
     color = custom(mat, "Surface colour", COLOR_CODE, F3,
-                   {"VC": append, "Pos": pos, "Dist": dist}, -600, 0)
+                   {"VC": append, "Pos": pos, "Dist": dist, "Weather": weather, "SunDir": sun}, -600, 0)
     rough = custom(mat, "Surface roughness", ROUGH_CODE, F1, {"R": mask}, -600, 250)
     normal = custom(mat, "Surface normal", NORMAL_CODE, F3,
                     {"Vn": vn, "Pos": pos, "Dist": dist, "Ocean": (vc, "A"), "Time": time}, -600, 500)
@@ -191,40 +240,40 @@ def build_terrain():
 
 def build_clouds():
     mat = new_material("M_PlanetClouds")
-    mat.set_editor_property("material_domain", unreal.MaterialDomain.MD_VOLUME)
-    mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_ADDITIVE)
-    mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_DEFAULT_LIT)
+    mat.set_editor_property("material_domain", unreal.MaterialDomain.MD_SURFACE)
+    mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+    mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    mat.set_editor_property("two_sided", True)
 
     pos = node(mat, unreal.MaterialExpressionWorldPosition, -1200, 0)
     tex = node(mat, unreal.MaterialExpressionTextureObjectParameter, -1200, 200)
     tex.set_editor_property("parameter_name", "CloudWeather")
-    tex.set_editor_property("texture", unreal.load_asset("/Engine/EngineResources/DefaultTexture"))
-    bottom = scalar(mat, "BottomCm", 6360.0e5 + 4.0e5, -1200, 400)
-    height = scalar(mat, "HeightCm", 9.0e5, -1200, 500)
-    time = node(mat, unreal.MaterialExpressionTime, -1200, 600)
-    density = custom(mat, "Cloud density", CLOUD_CODE, unreal.CustomMaterialOutputType.CMOT_FLOAT1,
-                     {"Pos": pos, "Weather": tex, "BottomCm": bottom, "HeightCm": height, "Time": time,
-                      "Cam": node(mat, unreal.MaterialExpressionCameraPositionWS, -1200, 700)}, -700, 200)
+    tex.set_editor_property("texture", unreal.load_asset("/Engine/EngineResources/Black"))
+    dist = node(mat, unreal.MaterialExpressionPixelDepth, -1200, 400)
+    time = node(mat, unreal.MaterialExpressionTime, -1200, 500)
+    sun = vector3(mat, "SunDir", (0.72, -0.62, 0.32), -1200, 600)
+    illum = scalar(mat, "SunIlluminance", 11.0, -1200, 750)
+    albedo = scalar(mat, "Albedo", 0.88, -1200, 850)
 
-    ext = scalar(mat, "Extinction", 0.11, -700, 500)
-    mul = node(mat, unreal.MaterialExpressionMultiply, -350, 400)
-    LIB.connect_material_expressions(density, "", mul, "A")
-    LIB.connect_material_expressions(ext, "", mul, "B")
+    F1 = unreal.CustomMaterialOutputType.CMOT_FLOAT1
+    F3 = unreal.CustomMaterialOutputType.CMOT_FLOAT3
+    opacity = custom(mat, "Cloud opacity", CLOUD_CODE, F1,
+                     {"Pos": pos, "Weather": tex, "Dist": dist, "Time": time}, -700, 200)
+    light = custom(mat, "Cloud light", CLOUD_LIGHT_CODE, F3,
+                   {"Pos": pos, "SunDir": sun, "Sun": illum, "Albedo": albedo, "Op": opacity}, -400, 0)
 
-    albedo = node(mat, unreal.MaterialExpressionConstant3Vector, -350, 100)
-    albedo.set_editor_property("constant", unreal.LinearColor(0.97, 0.97, 0.98, 1.0))
-
-    LIB.connect_material_property(albedo, "", unreal.MaterialProperty.MP_BASE_COLOR)
-    LIB.connect_material_property(mul, "", unreal.MaterialProperty.MP_SUBSURFACE_COLOR)
+    LIB.connect_material_property(light, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    LIB.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
     LIB.recompile_material(mat)
     SUBSYS.save_loaded_asset(mat, False)
-
 
 def build_stars():
     mat = new_material("M_PlanetStars")
     mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
     mat.set_editor_property("two_sided", True)
-    mat.set_editor_property("is_sky", True)
+    # Not a sky mesh: sky meshes are always drawn into the sky light capture, and the ocean then
+    # mirrored the star field as glitter.
+    mat.set_editor_property("is_sky", False)
     cam = node(mat, unreal.MaterialExpressionCameraVectorWS, -800, 0)
     intensity = scalar(mat, "Intensity", 1.2, -800, 200)
     stars = custom(mat, "Stars", STAR_CODE, unreal.CustomMaterialOutputType.CMOT_FLOAT3,

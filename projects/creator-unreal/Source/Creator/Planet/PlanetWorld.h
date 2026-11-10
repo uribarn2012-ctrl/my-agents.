@@ -10,7 +10,6 @@ class UProceduralMeshComponent;
 class UDirectionalLightComponent;
 class USkyAtmosphereComponent;
 class USkyLightComponent;
-class UVolumetricCloudComponent;
 class UStaticMeshComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
@@ -45,9 +44,17 @@ public:
 
 	int32 GetVisibleChunkCount() const { return VisibleChunks; }
 
+	/** Unit vector pointing from the planet toward the sun. */
+	static FVector3d GetSunDirection();
+
+	/** Picks a sunlit spot worth looking at: Kind 0 = coastline with land, 1 = mountains by the sea. */
+	FVector3d FindScenicSpot(int32 Kind) const;
+
 private:
 	void CreateSkyAndSun();
 	void BakeWeatherMap();
+	void BuildCloudShell();
+	bool MaterialsReady() const;
 	void DrainFinishedChunks();
 	void Visit(FPlanetNode& Node);
 	void RequestBuild(FPlanetNode& Node);
@@ -63,9 +70,9 @@ private:
 	UPROPERTY() TObjectPtr<UDirectionalLightComponent> Sun;
 	UPROPERTY() TObjectPtr<USkyAtmosphereComponent> Atmosphere;
 	UPROPERTY() TObjectPtr<USkyLightComponent> SkyLight;
-	UPROPERTY() TObjectPtr<UVolumetricCloudComponent> Clouds;
+	UPROPERTY() TObjectPtr<UProceduralMeshComponent> CloudShell;
 	UPROPERTY() TObjectPtr<UStaticMeshComponent> StarDome;
-	UPROPERTY() TObjectPtr<UMaterialInterface> TerrainMaterial;
+	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> TerrainMaterial;
 	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> CloudMaterial;
 	UPROPERTY() TObjectPtr<UTexture2D> WeatherMap;
 	UPROPERTY() TArray<TObjectPtr<UProceduralMeshComponent>> FreeMeshes;

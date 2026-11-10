@@ -27,6 +27,9 @@ public:
 
 	double GetAltitudeKm() const { return AltitudeM / 1000.0; }
 
+	/** Jumps the camera so it looks at a ground direction from the given altitude. */
+	void JumpTo(const FVector3d& TargetDir, double AltKm);
+
 private:
 	void UpdateCamera(double GroundM);
 	APlanetWorld* FindWorld();

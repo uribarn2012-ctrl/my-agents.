@@ -17,7 +17,7 @@ public:
 	static constexpr double RadiusM = 6360000.0;
 	static constexpr double RadiusCm = RadiusM * 100.0;
 	/** Relief is exaggerated so mountains stay readable at planetary scale. */
-	static constexpr double VerticalScale = 2.5;
+	static constexpr double VerticalScale = 1.6;
 
 	explicit FPlanetGenerator(int32 InSeed);
 
