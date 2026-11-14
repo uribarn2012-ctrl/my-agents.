@@ -127,7 +127,7 @@ S(7, 8, (g, u, L) => {
 // ===== 9-10: merit, not names =====
 S(9, 10, (g, u, L) => {
   const sc = scenery(g, { sky: 'warm', sun: [300, 170], clouds: 3 }), tem = P(g, C.temY), nob = P(g, C.chief), com = P(g, C.stg);
-  const nt = tagG(g, 'SON OF A CHIEF', 40, { fill: '#7d3c98' }), x = mk(g, '<path d="M-180 -40 L180 40 M-180 40 L180 -40" stroke="#e2362b" stroke-width="16" stroke-linecap="round"/>', { opacity: 0 }), ct = tagG(g, 'COMMANDER', 44, OR), st = mk(g, '<path d="M0 -40 L12 -12 L42 -12 L18 6 L28 36 L0 18 L-28 36 L-18 6 L-42 -12 L-12 -12 Z" fill="#ffd84a" stroke="#1a1a1a" stroke-width="5"/>', { opacity: 0 }), tg = tagG(u, 'LOYAL + GOOD AT THE JOB', 56, OR);
+  const nt = tagG(g, 'SON OF A CHIEF', 40, { fill: '#7d3c98' }), x = mk(g, '<path d="M-180 -40 L180 40 M-180 40 L180 -40" stroke="#e2362b" stroke-width="8" stroke-linecap="round"/>', { opacity: 0 }), ct = tagG(g, 'COMMANDER', 44, OR), st = mk(g, '<path d="M0 -40 L12 -12 L42 -12 L18 6 L28 36 L0 18 L-28 36 L-18 6 L-42 -12 L-12 -12 Z" fill="#ffd84a" stroke="#1a1a1a" stroke-width="5"/>', { opacity: 0 }), tg = tagG(u, 'LOYAL + GOOD AT THE JOB', 56, OR);
   return lt => {
     sc(lt); const t = L(10) - .1;
     stand(tem, 960, 930, 1.1, lt < t + 1 ? -1 : 1, lt < t ? 'n' : lt < t + 2 ? 'd' : 'h'); if (lt > t + 2.2) tem.arm('R', -110); else tem.free('R');
@@ -311,7 +311,7 @@ S(39, 41, (g, u, L) => {
   const sc = scenery(g, { sky: 'day', sun: [1650, 150], clouds: 4, h: 600 }), rv = mk(g, '<path d="M-100 640 Q500 610 960 650 T2100 630 L2100 700 Q1500 720 960 705 T-100 700 Z" fill="#2f63c9" stroke="#1a1a1a" stroke-width="5"/>');
   const ban = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => mk(g, '<rect x="-5" y="-210" width="10" height="210" fill="#6b4423" stroke="#1a1a1a" stroke-width="3"/><path d="M0 -210 Q-26 -150 0 -110 Q26 -150 0 -210 Z" fill="#f4f1ea" stroke="#1a1a1a" stroke-width="4"/>'));
   const crowd = Array.from({ length: 10 }, (_, i) => P(g, Object.assign({}, [C.nomM, C.tat, C.fst, C.eld, C.war, C.stg, C.tat2, C.nomW, C.eld2, C.srch][i], { deel: TC[i % 6] })));
-  const tem = P(g, C.temY), gen = P(g, C.gen), pf = poof(g), y = yearG(u), on = tagG(u, 'ONON RIVER', 56, { fill: '#1f618d' }), big = bigG(u, '1206. GENGHIS KHAN', 150, { fill: '#ffd84a' }), mean = tagG(u, '"UNIVERSAL RULER" (MOST LIKELY)', 56, OR);
+  const tem = P(g, C.temY), gen = P(g, C.gen), pf = poof(g), y = yearG(u), on = tagG(u, 'ONON RIVER', 56, { fill: '#1f618d' }), big = bigG(u, '1206. GENGHIS KHAN', 118, { fill: '#ffd84a' }), mean = tagG(u, '"UNIVERSAL RULER" (MOST LIKELY)', 56, OR);
   return lt => {
     sc(lt); const t40 = L(40) - .1, t41 = L(41) - .1, sw = 1.4;
     ban.forEach((b, i) => setT(b, 620 + i * 85, 820, 2 * Math.sin(lt * 2 + i)));
