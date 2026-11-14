@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000" viewBox="0 0 1000 1000">
+  <defs>
+    <radialGradient id="bg" cx="40%" cy="35%" r="75%">
+      <stop offset="0" stop-color="#ffb04d"/>
+      <stop offset="1" stop-color="#ff7300"/>
+    </radialGradient>
+    <radialGradient id="glow"><stop offset="0" stop-color="#ffe0a8" stop-opacity="0.6"/><stop offset="1" stop-color="#ffe0a8" stop-opacity="0"/></radialGradient>
+    <clipPath id="c"><circle cx="500" cy="500" r="462"/></clipPath>
+  </defs>
+  <circle cx="500" cy="500" r="462" fill="url(#bg)"/>
+  <g clip-path="url(#c)">
+    <!-- soft glow behind Tick -->
+    <circle cx="600" cy="520" r="340" fill="url(#glow)"/>
+    <!-- ground shadow -->
+    <g transform="translate(595,505) rotate(-6) scale(0.95)" stroke-linejoin="round" stroke-linecap="round">
+      <!-- waving arm (behind body) -->
+      <path d="M115 175 L250 -45" stroke="#1a1a1a" stroke-width="88" fill="none"/>
+      <path d="M115 175 L250 -45" stroke="#5e3820" stroke-width="64" fill="none"/>
+      <circle cx="262" cy="-70" r="44" fill="#f2c9a0" stroke="#1a1a1a" stroke-width="12"/>
+      <!-- body -->
+      <path d="M-135 150 L135 150 L215 720 L-215 720 Z" fill="#7a4a2a" stroke="#1a1a1a" stroke-width="12"/>
+      <path d="M45 150 L135 150 L215 720 L95 720 Z" fill="#000" opacity="0.14"/>
+      <path d="M-58 150 L58 150 L0 265 Z" fill="#efe8d6" stroke="#1a1a1a" stroke-width="10"/>
+      <path d="M0 265 L0 720" stroke="#1a1a1a" stroke-width="10"/>
+      <!-- left arm -->
+      <path d="M-122 175 L-185 420" stroke="#1a1a1a" stroke-width="88" fill="none"/>
+      <path d="M-122 175 L-185 420" stroke="#5e3820" stroke-width="64" fill="none"/>
+      <circle cx="-190" cy="440" r="40" fill="#f2c9a0" stroke="#1a1a1a" stroke-width="12"/>
+      <!-- pocket watch + chain -->
+      <path d="M0 330 Q-30 360 -62 340" stroke="#c9a227" stroke-width="7" fill="none"/>
+      <circle cx="-72" cy="395" r="54" fill="#ffd84a" stroke="#1a1a1a" stroke-width="10"/>
+      <circle cx="-72" cy="395" r="38" fill="#fffbe8" stroke="#1a1a1a" stroke-width="5"/>
+      <path d="M-72 395 L-72 368 M-72 395 L-52 405" stroke="#1a1a1a" stroke-width="7"/>
+      <rect x="-82" y="333" width="20" height="14" rx="3" fill="#ffd84a" stroke="#1a1a1a" stroke-width="6"/>
+      <!-- head -->
+      <circle cx="0" cy="0" r="150" fill="#f2c9a0" stroke="#1a1a1a" stroke-width="12"/>
+      <path d="M95 -110 A150 150 0 0 1 60 137 A160 160 0 0 0 95 -110 Z" fill="#000" opacity="0.08"/>
+      <!-- hair -->
+      <path d="M-145 -35 Q-150 -120 -60 -150 Q30 -175 110 -130 Q150 -100 148 -40 Q120 -85 40 -95 Q-60 -100 -145 -35 Z" fill="#3b2a1e" stroke="#1a1a1a" stroke-width="10"/>
+      <!-- goggles -->
+      <rect x="-156" y="-68" width="312" height="30" rx="8" fill="#6b4a2b" stroke="#1a1a1a" stroke-width="9"/>
+      <circle cx="-55" cy="-55" r="46" fill="#c9a227" stroke="#1a1a1a" stroke-width="9"/>
+      <circle cx="55" cy="-55" r="46" fill="#c9a227" stroke="#1a1a1a" stroke-width="9"/>
+      <circle cx="-55" cy="-55" r="29" fill="#7fd3e6" stroke="#1a1a1a" stroke-width="6"/>
+      <circle cx="55" cy="-55" r="29" fill="#7fd3e6" stroke="#1a1a1a" stroke-width="6"/>
+      <circle cx="-64" cy="-65" r="8" fill="#fff"/>
+      <circle cx="46" cy="-65" r="8" fill="#fff"/>
+      <!-- happy eyes -->
+      <path d="M-80 22 Q-55 -4 -30 22" stroke="#1a1a1a" stroke-width="11" fill="none"/>
+      <path d="M30 22 Q55 -4 80 22" stroke="#1a1a1a" stroke-width="11" fill="none"/>
+      <!-- cheeks -->
+      <ellipse cx="-95" cy="58" rx="24" ry="13" fill="#f09a8a" opacity="0.8"/>
+      <ellipse cx="95" cy="58" rx="24" ry="13" fill="#f09a8a" opacity="0.8"/>
+      <!-- smile -->
+      <path d="M-62 55 Q0 70 62 55 Q50 128 0 128 Q-50 128 -62 55 Z" fill="#7d2525" stroke="#1a1a1a" stroke-width="10"/>
+      <path d="M-30 110 Q0 92 30 110 Q20 126 0 126 Q-20 126 -30 110 Z" fill="#e0676b"/>
+      <path d="M-52 60 Q0 74 52 60 L48 72 Q0 84 -48 72 Z" fill="#fff"/>
+    </g>
+  </g>
+  <circle cx="500" cy="500" r="462" fill="none" stroke="#fff" stroke-width="22"/>
+  <circle cx="500" cy="500" r="476" fill="none" stroke="#1a1a1a" stroke-width="10"/>
+</svg>

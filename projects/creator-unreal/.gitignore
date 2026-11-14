@@ -1,0 +1,17 @@
+# Unreal generated folders
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+.vs/
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+
+# Generated project files
+*.sln
+*.slnx
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb

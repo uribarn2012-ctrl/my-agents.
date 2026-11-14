@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<title>בורא</title>
+<link rel="stylesheet" href="style.css">
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="flash"></div>
+
+<!-- main menu -->
+<section id="menu" class="screen">
+  <div class="menu-box">
+    <h1 class="title">בורא</h1>
+    <p class="subtitle">ברא עולם. צפה בחיים מתפתחים.</p>
+    <button class="big" id="btnContinue" hidden>המשך עולם שמור<small id="saveInfo"></small></button>
+    <button class="big primary" id="btnFree">עולם חופשי</button>
+    <button class="big" disabled>המפץ הגדול<span class="soon">בקרוב</span></button>
+    <button class="big" disabled>מלחמת אלים<span class="soon">בקרוב</span></button>
+  </div>
+</section>
+
+<!-- new free world -->
+<section id="newWorld" class="screen" hidden>
+  <div class="menu-box">
+    <h2>עולם חופשי חדש</h2>
+    <label>שם העולם<input id="worldName" maxlength="30" autocomplete="off"></label>
+    <label>זרע (מספר שקובע את צורת הכוכב)
+      <div class="row"><input id="worldSeed" inputmode="numeric" dir="ltr"><button id="btnRoll" class="icon-btn" aria-label="הגרל">🎲</button></div>
+    </label>
+    <p class="hint">כל זרע יוצר כוכב אחר. הכוכב שמאחור הוא התצוגה המקדימה.</p>
+    <button class="big primary" id="btnStart">צור עולם</button>
+    <button class="big" id="btnBack">חזרה</button>
+  </div>
+</section>
+
+<!-- in-game HUD -->
+<section id="hud" hidden>
+  <header id="topbar">
+    <div class="tb-name" id="hudName"></div>
+    <div class="tb-stats">
+      <span id="hudDate"></span>
+      <span><b id="hudPop">0</b> יצורים</span>
+      <span>דור <b id="hudGen">0</b></span>
+      <span><b id="hudSpecies">0</b> מינים</span>
+      <span>🛖 <b id="hudNests">0</b> קנים</span>
+    </div>
+    <button id="btnLog" class="icon-btn" aria-label="ידע">📜</button>
+    <button id="btnMenu" class="icon-btn" aria-label="תפריט">☰</button>
+  </header>
+  <div id="speed">
+    <button data-speed="0" aria-label="עצור">⏸</button>
+    <button data-speed="1" class="on">×1</button>
+    <button data-speed="2">×2</button>
+    <button data-speed="4">×4</button>
+    <button data-speed="8">×8</button>
+    <button data-speed="16">×16</button>
+    <button data-speed="32">×32</button>
+    <button data-speed="64">×64</button>
+    <button id="btnSkip" aria-label="דלג קדימה">⏩</button>
+  </div>
+  <div id="speedReal" hidden></div>
+  <div id="toast"></div>
+  <div id="panel" hidden>
+    <div class="p-head">
+      <span class="p-dot" id="pDot"></span>
+      <div><div class="p-name" id="pName"></div><div class="p-sub" id="pSub"></div></div>
+      <button id="btnFollow" class="chip">עקוב</button>
+      <button id="btnClose" class="icon-btn" aria-label="סגור">✕</button>
+    </div>
+    <div class="p-body" id="pBody"></div>
+    <div class="p-stats" id="pStats"></div>
+    <div class="p-brain-title">המוח (חי): כחול = חיובי, כתום = שלילי</div>
+    <div class="p-brain" id="pBrain"></div>
+  </div>
+  <nav id="toolbar">
+    <button data-tool="look" class="on"><svg viewBox="0 0 24 24"><path d="M12 5C6 5 2 12 2 12s4 7 10 7 10-7 10-7-4-7-10-7zm0 11a4 4 0 110-8 4 4 0 010 8z"/></svg><span>הסתכל</span></button>
+    <button data-tool="food"><svg viewBox="0 0 24 24"><path d="M12 7c-1-3-4-4-6-3 2 0 4 1 5 3-4-2-9 1-8 7 1 5 5 8 9 6 4 2 8-1 9-6 1-6-5-9-9-7z"/></svg><span>אוכל</span></button>
+    <button data-tool="bolt"><svg viewBox="0 0 24 24"><path d="M13 2L4 14h6l-1 8 9-12h-6z"/></svg><span>ברק</span></button>
+    <button data-tool="spawn"><svg viewBox="0 0 24 24"><path d="M12 3a3 3 0 110 6 3 3 0 010-6zm-6 8h12l-2 10H8zM3 6l3 3M21 6l-3 3"/></svg><span>צור חיים</span></button>
+  </nav>
+  <div id="logBox" class="screen" hidden>
+    <div class="menu-box log-box">
+      <h2>📜 ידע</h2>
+      <p class="hint">אבני דרך ואירועים בעולם — הזרע של ספר ההיסטוריה.</p>
+      <ul id="logList"></ul>
+      <button class="big primary" id="btnLogClose">סגור</button>
+    </div>
+  </div>
+  <div id="skip" class="screen" hidden>
+    <div class="menu-box">
+      <h2>⏩ מדלג קדימה…</h2>
+      <div class="skip-track"><i id="skipBar"></i></div>
+      <p class="hint" id="skipText"></p>
+      <button class="big" id="btnSkipCancel">עצור כאן</button>
+    </div>
+  </div>
+  <div id="pause" class="screen" hidden>
+    <div class="menu-box">
+      <h2>תפריט</h2>
+      <button class="big primary" id="btnResume">חזרה למשחק</button>
+      <button class="big" id="btnSkip2">⏩ דלג קדימה (10 דורות)</button>
+      <button class="big" id="btnLog2">📜 ידע — מה קרה בעולם</button>
+      <button class="big" id="btnSave">שמור עכשיו</button>
+      <button class="big" id="btnQuit">לתפריט הראשי</button>
+    </div>
+  </div>
+</section>
+
+<div id="loading" class="screen"><div class="spinner"></div><div id="loadingText">יוצר עולם…</div></div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

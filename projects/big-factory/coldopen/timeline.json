@@ -1,0 +1,206 @@
+{
+ "times": {
+  "hookIn": 8.8,
+  "hookOut": 15.8,
+  "jumpStart": 22.8,
+  "flash": 24.5,
+  "land": 24.95,
+  "mapStart": 26.4,
+  "birthStart": 34.4,
+  "stamp": 38.0,
+  "stampOut": 40.8,
+  "nameStart": 41.9,
+  "zoomStart": 45.4,
+  "empireIn": 47.8,
+  "empireOut": 51.0,
+  "endStart": 51.6,
+  "end": 55.3
+ },
+ "caps": [
+  {
+   "a": 1.5,
+   "b": 2.95,
+   "text": "Somewhere in Mongolia,"
+  },
+  {
+   "a": 2.95,
+   "b": 4.39,
+   "text": "under a hill like this"
+  },
+  {
+   "a": 4.39,
+   "b": 5.78,
+   "text": "one, lies the man who"
+  },
+  {
+   "a": 5.78,
+   "b": 7.82,
+   "text": "conquered more land than anyone"
+  },
+  {
+   "a": 7.82,
+   "b": 8.54,
+   "text": "in history."
+  },
+  {
+   "a": 8.9,
+   "b": 10.12,
+   "text": "Nobody knows where."
+  },
+  {
+   "a": 10.5,
+   "b": 11.47,
+   "text": "Not his family."
+  },
+  {
+   "a": 11.47,
+   "b": 12.44,
+   "text": "Not historians."
+  },
+  {
+   "a": 12.44,
+   "b": 14.24,
+   "text": "Not the satellite teams that"
+  },
+  {
+   "a": 14.24,
+   "b": 15.66,
+   "text": "have searched for him."
+  },
+  {
+   "a": 16.0,
+   "b": 17.38,
+   "text": "For nearly 800 years,"
+  },
+  {
+   "a": 17.38,
+   "b": 19.21,
+   "text": "his grave has stayed hidden."
+  },
+  {
+   "a": 19.21,
+   "b": 20.65,
+   "text": "And by the end of this"
+  },
+  {
+   "a": 20.65,
+   "b": 22.55,
+   "text": "video, you'll understand why."
+  },
+  {
+   "a": 26.6,
+   "b": 27.87,
+   "text": "This is the steppe."
+  },
+  {
+   "a": 27.87,
+   "b": 28.81,
+   "text": "Endless grass,"
+  },
+  {
+   "a": 28.81,
+   "b": 29.81,
+   "text": "brutal winters,"
+  },
+  {
+   "a": 29.81,
+   "b": 31.69,
+   "text": "and dozens of tribes raiding"
+  },
+  {
+   "a": 31.69,
+   "b": 33.16,
+   "text": "each other for horses,"
+  },
+  {
+   "a": 33.16,
+   "b": 34.3,
+   "text": "cattle and wives."
+  },
+  {
+   "a": 34.6,
+   "b": 35.24,
+   "text": "In 1162,"
+  },
+  {
+   "a": 35.24,
+   "b": 36.74,
+   "text": "a boy is born here,"
+  },
+  {
+   "a": 36.74,
+   "b": 39.52,
+   "text": "clutching a blood clot in his fist."
+  },
+  {
+   "a": 39.52,
+   "b": 41.19,
+   "text": "His people take it as"
+  },
+  {
+   "a": 41.19,
+   "b": 41.75,
+   "text": "a sign."
+  },
+  {
+   "a": 42.1,
+   "b": 43.6,
+   "text": "His name is Tem\u00fcjin."
+  },
+  {
+   "a": 43.6,
+   "b": 44.51,
+   "text": "In 44 years,"
+  },
+  {
+   "a": 44.51,
+   "b": 46.39,
+   "text": "he will rule all of them."
+  },
+  {
+   "a": 46.39,
+   "b": 47.59,
+   "text": "Within 80 years,"
+  },
+  {
+   "a": 47.59,
+   "b": 49.84,
+   "text": "his family's armies will reach"
+  },
+  {
+   "a": 49.84,
+   "b": 51.42,
+   "text": "from Korea to Poland."
+  },
+  {
+   "a": 51.8,
+   "b": 52.4,
+   "text": "But first,"
+  },
+  {
+   "a": 52.4,
+   "b": 54.32,
+   "text": "he has to survive his childhood."
+  }
+ ],
+ "starts": [
+  1.5,
+  8.9,
+  10.5,
+  16.0,
+  26.6,
+  34.6,
+  42.1,
+  51.8
+ ],
+ "dur": [
+  7.04,
+  1.216,
+  5.1626666666666665,
+  6.549333333333333,
+  7.701333333333333,
+  7.1466666666666665,
+  9.322666666666667,
+  2.517333333333333
+ ]
+}
