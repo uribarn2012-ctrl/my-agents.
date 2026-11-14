@@ -66,16 +66,20 @@ function personSVG(o) {
   s += `<g class="legR"><rect x="3" y="-100" width="20" height="92" fill="${pn}"/><rect x="-3" y="-14" width="32" height="14" rx="6" fill="${bt}"/></g>`;
   s += `<rect class="skin" x="-11" y="-192" width="22" height="24" fill="${sk}"/>`;
   s += `<path d="M-40 -172 L40 -172 L${hw} ${hem} L${-hw} ${hem} Z" fill="${dl}"/><path d="M-14 -172 L22 ${hem + 10}" fill="none" stroke-width="4"/>`;
+  const lg = (dx, far) => `<path d="M${dx} -100 L${dx + 46} -56 L${dx + 22} 8" fill="none" stroke="#1a1a1a" stroke-width="28"/><path d="M${dx} -100 L${dx + 46} -56 L${dx + 22} 8" fill="none" stroke="${pn}" stroke-width="19"/>${far ? `<path d="M${dx} -100 L${dx + 46} -56 L${dx + 22} 8" fill="none" stroke="#000" stroke-opacity=".28" stroke-width="19"/>` : ''}<rect x="${dx + 8}" y="0" width="34" height="15" rx="7" fill="${bt}"/>`;
   const sw = wAt(-116) - 2; s += `<rect x="${-sw}" y="-124" width="${2 * sw}" height="16" fill="${sh}" stroke-width="4"/><rect x="-16" y="-178" width="32" height="12" rx="4" fill="${trm}" stroke-width="4"/>`;
+  s += `<g class="rl" display="none">${lg(-12, 1)}${lg(4, 0)}</g>`;
   s += `<g class="armL"><rect x="-50" y="-172" width="22" height="80" rx="10" fill="${dl}"/><circle class="skin" cx="-39" cy="-90" r="12" fill="${sk}"/><g transform="translate(-39 -90)">${o.holdL || ''}</g></g>`;
   s += `<g class="armR"><rect x="28" y="-172" width="22" height="80" rx="10" fill="${dl}"/><circle class="skin" cx="39" cy="-90" r="12" fill="${sk}"/><g transform="translate(39 -90)">${o.holdR || ''}</g></g>`;
   if (o.cangue) s += `<g class="cg"><rect x="-84" y="-190" width="168" height="38" rx="8" fill="#a0703c"/><path d="M-70 -178 H70 M-70 -165 H70" stroke="#7a5128" stroke-width="3" fill="none"/><circle cx="0" cy="-186" r="14" fill="${sk}" class="skin"/><circle cx="-64" cy="-171" r="13" fill="#4a2f15"/><circle cx="-64" cy="-171" r="9" fill="${sk}" class="skin"/><circle cx="64" cy="-171" r="13" fill="#4a2f15"/><circle cx="64" cy="-171" r="9" fill="${sk}" class="skin"/></g>`;
   s += `<g class="head" transform="translate(0 -214) scale(${k})"><circle class="skin" r="34" fill="${sk}"/>`;
   if (o.beard) s += `<path d="M-31 6 Q-36 52 0 58 Q36 52 31 6 Q16 30 0 28 Q-16 30 -31 6 Z" fill="${hr}"/>`;
   s += `<ellipse cx="-24" cy="14" rx="8" ry="5" fill="#e89a86" stroke="none"/><ellipse cx="24" cy="14" rx="8" ry="5" fill="#e89a86" stroke="none"/>`;
-  s += `<g class="eN"><ellipse cx="-12" cy="2" rx="5" ry="7.5" fill="#1a1a1a" stroke="none"/><ellipse cx="12" cy="2" rx="5" ry="7.5" fill="#1a1a1a" stroke="none"/></g><g class="eX" display="none"><path d="M-18 -4 l12 12 M-6 -4 l-12 12 M6 -4 l12 12 M18 -4 l-12 12" stroke-width="4" fill="none"/></g>`;
-  s += `<g class="bN"><path d="M-20 -12 L-6 -14 M6 -14 L20 -12" stroke-width="4" fill="none"/></g><g class="bA" display="none"><path d="M-22 -16 L-5 -8 M22 -16 L5 -8" stroke-width="5" fill="none"/></g>`;
-  s += `<path class="mS" d="${o.flat ? 'M-9 19 L9 19' : 'M-10 16 Q0 25 10 16'}" fill="none" stroke-width="4"/><ellipse class="mO" display="none" cx="0" cy="19" rx="8" ry="9" fill="#7a1f1f" stroke-width="4"/>`;
+  s += `<g class="eN"><ellipse cx="-12" cy="2" rx="5" ry="7.5" fill="#1a1a1a" stroke="none"/><ellipse cx="12" cy="2" rx="5" ry="7.5" fill="#1a1a1a" stroke="none"/></g><g class="eW" display="none"><ellipse cx="-12" cy="2" rx="8" ry="10" fill="#fff" stroke-width="3"/><ellipse cx="12" cy="2" rx="8" ry="10" fill="#fff" stroke-width="3"/><circle cx="-12" cy="3" r="3.2" fill="#1a1a1a" stroke="none"/><circle cx="12" cy="3" r="3.2" fill="#1a1a1a" stroke="none"/></g><g class="eH" display="none"><path d="M-18 5 Q-12 -4 -6 5 M6 5 Q12 -4 18 5" stroke-width="4" fill="none"/></g><g class="eX" display="none"><path d="M-18 -4 l12 12 M-6 -4 l-12 12 M6 -4 l12 12 M18 -4 l-12 12" stroke-width="4" fill="none"/></g>`;
+  const brow = (d, w) => `<path d="${d}" stroke="#efe3c8" stroke-width="${w + 5}" fill="none"/><path d="${d}" stroke-width="${w}" fill="none"/>`;
+  const BR = `<g class="bN">${brow('M-20 -12 L-6 -14 M6 -14 L20 -12', 4)}</g><g class="bA" display="none">${brow('M-22 -17 L-5 -8 M22 -17 L5 -8', 5)}</g><g class="bS" display="none">${brow('M-22 -8 L-6 -17 M22 -8 L6 -17', 4)}</g><g class="bF" display="none">${brow('M-22 -18 L-6 -25 M22 -18 L6 -25', 4)}</g><g class="bD" display="none">${brow('M-21 -16 L-6 -9 M21 -16 L6 -9', 6)}</g>`;
+  s += `<path class="mS" d="${o.flat ? 'M-9 19 L9 19' : 'M-10 16 Q0 25 10 16'}" fill="none" stroke-width="4"/><path class="mF" display="none" d="M-9 20 L9 20" fill="none" stroke-width="4"/><path class="mD" display="none" d="M-10 24 Q0 13 10 24" fill="none" stroke-width="4"/><ellipse class="mO" display="none" cx="0" cy="19" rx="8" ry="9" fill="#7a1f1f" stroke-width="4"/><g class="mT" display="none"><path d="M-14 26 Q0 6 14 26 Q0 21 -14 26 Z" fill="#fff" stroke-width="3"/><path d="M-5 17 V21 M0 14 V19 M5 17 V21" stroke-width="2"/></g><path class="mC" display="none" d="M-11 19 l4 -4 l4 8 l4 -8 l4 8 l4 -4" fill="none" stroke-width="3.5"/>`;
+  s += `<g class="fC" display="none"><ellipse cx="-24" cy="14" rx="9" ry="6" fill="#6aa9ff" opacity=".8" stroke="none"/><ellipse cx="24" cy="14" rx="9" ry="6" fill="#6aa9ff" opacity=".8" stroke="none"/><g class="pf" stroke="none"></g></g>`;
   if (o.must) s += `<path d="M-24 13 Q-12 4 0 12 Q12 4 24 13 Q12 21 0 15 Q-12 21 -24 13 Z" fill="${hr}" stroke-width="3"/>`;
   const H = o.hat || 'hair';
   if (H === 'temu') s += `<path d="M-36 -10 Q-38 -56 0 -58 Q38 -56 36 -10 Z" fill="#7a4a2a"/><rect x="-42" y="-26" width="84" height="18" rx="9" fill="#eadcbc"/><path d="M-5 -58 L8 -82 L18 -56" fill="#c0392b" stroke-width="4"/>`;
@@ -86,24 +90,32 @@ function personSVG(o) {
   else if (H === 'helmet') s += `<path d="M-38 -6 Q-40 -58 0 -60 Q40 -58 38 -6 Z" fill="#8e9aa6"/><rect x="-42" y="-16" width="84" height="12" rx="6" fill="#5d6b78"/><path d="M-5 -60 L0 -82 L5 -60 Z" fill="#c9d1d8" stroke-width="3"/>`;
   else if (H === 'wool') s += `<path d="M-36 -8 Q-38 -54 0 -56 Q38 -54 36 -8 Z" fill="#f3e3c3"/><rect x="-40" y="-22" width="80" height="16" rx="8" fill="#e6cfa0"/><circle cx="0" cy="-60" r="10" fill="#f3e3c3"/>`;
   else s += `<path d="M-36 -6 Q-40 -52 0 -52 Q40 -52 36 -6 Q20 -26 0 -24 Q-20 -26 -36 -6 Z" fill="${hr}"/>`;
-  return s + '</g></g>';
+  return s + BR + '</g></g>';
 }
 const MARKS = `<g class="m_q" display="none"><circle r="34" fill="#fff" stroke="#1a1a1a" stroke-width="5"/><text class="t" y="18" text-anchor="middle" font-size="52" fill="#1a1a1a">?</text></g>
 <g class="m_e" display="none"><circle r="34" fill="#ffd84a" stroke="#1a1a1a" stroke-width="5"/><text class="t" y="18" text-anchor="middle" font-size="52" fill="#d62d20">!</text></g>
 <g class="m_s" display="none"><path d="M0 -38 Q32 8 0 34 Q-32 8 0 -38 Z" fill="#6ec6ff" stroke="#1a1a1a" stroke-width="5"/><path d="M-8 4 Q-8 16 2 20" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/></g>
 <g class="m_a" display="none"><path d="M-28 -10 Q-10 -10 -10 -28 M28 -10 Q10 -10 10 -28 M-28 10 Q-10 10 -10 28 M28 10 Q10 10 10 28" stroke="#e2362b" stroke-width="10" fill="none" stroke-linecap="round"/></g>`;
 const MK = { '?': 'm_q', '!': 'm_e', s: 'm_s', a: 'm_a' };
+let CURB = -1, PID = 0; const REG = [];
+const CKF = ['deel', 'sash', 's', 'hat', 'must', 'hair', 'beard', 'kid', 'long'];
+function CK(o) { let best = '?', bs = -1; for (const k in C) { let n = 0; CKF.forEach(f => { if ((C[k][f] || 0) === (o[f] || 0)) n++; }); if (n > bs) { bs = n; best = k; } } return best; }
+const FS = { n: ['eN', 'bN', 'mF'], h: ['eN', 'bN', 'mS'], s: ['eN', 'bS', 'mD'], f: ['eW', 'bF', 'mO'], a: ['eN', 'bA', 'mT'], d: ['eN', 'bD', 'mF'], o: ['eN', 'bF', 'mO'], x: ['eX', 'bN', 'mF'], c: ['eN', 'bS', 'mC'], r: ['eH', 'bN', 'mS'] };
+const FALL = ['eN', 'eW', 'eH', 'eX', 'bN', 'bA', 'bS', 'bF', 'bD', 'mS', 'mF', 'mD', 'mO', 'mT', 'mC'];
 function P(parent, o = {}) {
   const g = el('g', {}, parent), b = el('g', {}, g); b.innerHTML = personSVG(o);
   const mg = el('g', {}, g); mg.innerHTML = MARKS;
   const q = s => b.querySelector(s), qa = s => [...b.querySelectorAll(s)];
-  const p = { g, b, o, fix: { L: false, R: false }, st: { x: 0, y: 0, S: 1, flip: 1, sx: 1, rot: 0, bob: 0 }, ms: 0, mk: null };
-  const legL = q('.legL'), legR = q('.legR'), armL = q('.armL'), armR = q('.armR'), head = q('.head'), cg = q('.cg');
+  const p = { g, b, o, fix: { L: false, R: false }, st: { x: 0, y: 0, S: 1, flip: 1, sx: 1, rot: 0, bob: 0 }, ms: 0, mk: null, ad: { L: 0, R: 0 }, id: (PID++) * 1.7, shv: 0, riding: false, swing: 0 };
+  if (CURB >= 0) { p.key = CK(o); (REG[CURB] = REG[CURB] || []).push(p); }
+  const legL = q('.legL'), legR = q('.legR'), armL = q('.armL'), armR = q('.armR'), head = q('.head'), cg = q('.cg'), rl = q('.rl'), fC = q('.fC'), pf = q('.pf');
   p.mg = mg; p.head = head; p.armL = armL; p.armR = armR; p.cg = cg;
   const refresh = () => {
     const s = p.st, S = (o.s || 1) * (o.noGS ? 1 : 1.2) * s.S, fx = s.flip * S * s.sx;
     g.setAttribute('transform', `translate(${s.x.toFixed(1)} ${s.y.toFixed(1)}) scale(${fx.toFixed(3)} ${S.toFixed(3)})`);
-    b.setAttribute('transform', `translate(0 ${(-s.bob).toFixed(1)}) rotate(${s.rot.toFixed(2)})`);
+    const T = window.__T || 0, shx = p.shv ? Math.sin(T * 47 + p.id) * 1.8 : 0, shy = p.shv ? Math.cos(T * 53 + p.id) : 0;
+    b.setAttribute('transform', `translate(${shx.toFixed(1)} ${(shy - s.bob).toFixed(1)}) rotate(${s.rot.toFixed(2)} 0 ${p.riding ? -100 : 0})`);
+    if (p.riding) rl.setAttribute('transform', `rotate(${(-s.rot + p.swing).toFixed(2)} 0 -100)`);
     mg.setAttribute('transform', `translate(${o.mx || 46} ${-(o.mh || 310)}) scale(${(.9 * p.ms * s.flip / (S * s.sx)).toFixed(3)} ${(.9 * p.ms / S).toFixed(3)})`);
   };
   p.place = (x, y, s = 1, flip = 1, rot = 0, bob = 0, sx = 1) => { Object.assign(p.st, { x, y, S: s, flip, rot, bob, sx }); refresh(); return p; };
@@ -114,10 +126,19 @@ function P(parent, o = {}) {
     if (!p.fix.R) armR.setAttribute('transform', `rotate(${s * amp * .9} 38 -165)`);
     return Math.abs(s) * 5;
   };
-  p.arm = (side, deg) => { p.fix[side] = true; (side === 'L' ? armL : armR).setAttribute('transform', `rotate(${deg} ${side === 'L' ? -38 : 38} -165)`); };
+  p.arm = (side, deg) => { p.ad[side] = deg; p.fix[side] = true; (side === 'L' ? armL : armR).setAttribute('transform', `rotate(${deg} ${side === 'L' ? -38 : 38} -165)`); };
   p.free = side => { p.fix[side] = false; };
   p.skin = c => qa('.skin').forEach(e => e.setAttribute('fill', c));
-  p.face = st => { vis(q('.eN'), st !== 'x'); vis(q('.eX'), st === 'x'); vis(q('.bN'), st !== 'a'); vis(q('.bA'), st === 'a'); vis(q('.mS'), st !== 'o'); vis(q('.mO'), st === 'o'); };
+  p.face = (st, cold) => {
+    const f = FS[st] || FS.n; cold = cold || st === 'c';
+    FALL.forEach(c => { const e = q('.' + c); if (e) vis(e, f.includes(c)); });
+    vis(fC, !!cold); p.shv = cold ? 1 : 0;
+    if (cold) { const T = window.__T || 0; let h = ''; for (let i = 0; i < 3; i++) { const k = (T * .9 + i / 3) % 1; h += `<circle cx="${(30 + k * 26).toFixed(1)}" cy="${(24 - k * 18).toFixed(1)}" r="${(4 + k * 7).toFixed(1)}" fill="#fff" opacity="${((1 - k) * .9).toFixed(2)}"/>`; } pf.innerHTML = h; }
+    refresh();
+  };
+  p.setRide = () => { p.riding = true; legL.setAttribute('display', 'none'); legR.setAttribute('display', 'none'); rl.setAttribute('display', 'inline'); refresh(); };
+  p.hand = side => { const d = (p.ad[side] || 0) * Math.PI / 180, u = side === 'L' ? -1 : 1; return [u * 38 + u * Math.cos(d) - 75 * Math.sin(d), -165 + u * Math.sin(d) + 75 * Math.cos(d)]; };
+  p.toParent = (x, y) => { const s = p.st, S = (o.s || 1) * (o.noGS ? 1 : 1.2) * s.S, r = (p.riding ? s.rot : 0) * Math.PI / 180, c0 = p.riding ? -100 : 0, dy = y - c0, rx = x * Math.cos(r) - dy * Math.sin(r), ry = x * Math.sin(r) + dy * Math.cos(r) + c0; return [s.x + s.flip * S * s.sx * rx, s.y + S * (ry - s.bob)]; };
   p.tilt = d => head.setAttribute('transform', `translate(0 -214) rotate(${d}) scale(${o.k || (o.kid ? 1.3 : 1)})`);
   p.mark = (type, lt, a, bb) => {
     const on = lt >= a && lt <= bb; p.ms = on ? pop(lt, a, .3) * (1 - lin(lt, bb - .15, bb)) : 0;
@@ -134,19 +155,31 @@ function H(parent, o = {}) {
   const g = el('g', {}, parent), b = el('g', {}, g);
   const leg = (cls, x) => `<g class="${cls}"><rect x="${x - 9}" y="-100" width="18" height="86" rx="6" fill="${coat}"/><rect x="${x - 11}" y="-18" width="22" height="18" rx="6" fill="#2b1b10"/></g>`;
   mk(b, `<g ${dk}><g class="tail"><path d="M-90 -160 Q-140 -140 -130 -60 Q-110 -110 -86 -130 Z" fill="${mane}"/></g>${leg('h1', -66)}${leg('h3', 54)}</g>`);
-  const rg = el('g', {}, b);
   mk(b, `<g ${dk}>${leg('h0', -84)}${leg('h2', 74)}<ellipse cx="0" cy="-132" rx="98" ry="50" fill="${coat}"/><path d="M52 -160 L100 -258 L146 -242 L100 -118 Z" fill="${coat}"/><path d="M62 -168 Q66 -240 96 -262 L108 -250 Q92 -216 88 -150 Z" fill="${mane}"/><ellipse cx="146" cy="-236" rx="46" ry="23" transform="rotate(28 146 -236)" fill="${coat}"/><path d="M96 -256 L100 -288 L118 -258 Z" fill="${coat}"/><circle cx="140" cy="-246" r="5" fill="#1a1a1a" stroke="none"/><ellipse cx="176" cy="-222" rx="6" ry="4" fill="#2b1b10" stroke="none"/>${o.blanket ? `<rect x="-34" y="-180" width="70" height="26" rx="8" fill="${o.blanket}"/>` : ''}</g>`);
+  const rg = el('g', {}, b);
   const q = s => g.querySelector(s);
   const p = { g, b, rg, st: { x: 0, y: 0, S: 1, flip: 1 } };
   p.place = (x, y, s = 1, flip = 1, rot = 0, bob = 0) => { g.setAttribute('transform', `translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(${(flip * s).toFixed(3)} ${s})`); b.setAttribute('transform', `translate(0 ${-bob}) rotate(${rot})`); };
   p.gallop = (t, sp = 10, amp = 34, moving = true) => {
-    const s = moving ? Math.sin(t * sp) : 0, c = moving ? Math.cos(t * sp) : 0;
+    const s = moving ? Math.sin(t * sp) : 0, c = moving ? Math.cos(t * sp) : 0; p.ph = t * sp; p.mv = moving; p.rk = Math.min(1.4, amp / 22);
     q('.h0').setAttribute('transform', `rotate(${s * amp} -84 -100)`); q('.h2').setAttribute('transform', `rotate(${-s * amp} 74 -100)`);
     q('.h1').setAttribute('transform', `rotate(${-s * amp} -66 -100)`); q('.h3').setAttribute('transform', `rotate(${s * amp} 54 -100)`);
     q('.tail').setAttribute('transform', `rotate(${c * 10} -90 -150)`);
     return Math.abs(c) * 7;
   };
-  if (o.rider) { const sr = o.rider.s || 1; p.rider = P(rg, Object.assign({}, o.rider, { s: sr, noGS: 1 })); p.rider.place(-8, -182 + 100 * sr, 1, 1); p.rider.arm('R', -50); p.rider.arm('L', -35); }
+  if (o.rider) {
+    const sr = o.rider.s || 1, r = P(rg, Object.assign({}, o.rider, { s: sr, noGS: 1 })); p.rider = r; r.setRide();
+    const rein = el('path', { fill: 'none', stroke: '#5a3a1a', 'stroke-width': 4, 'stroke-linecap': 'round' }, rg), pl = r.place;
+    r.place = (x, y, s = 1, flip = 1, rot = 0, bob = 0, sx = 1) => {
+      const ph = p.ph || 0, mv = p.mv, k = p.rk || 0;
+      r.swing = mv ? Math.sin(2 * ph - .6) * 4 * k : 0;
+      pl(x, y + 7 * sr, s, flip, rot + 9 + (mv ? Math.sin(2 * ph - 1) * 2.5 * k : 0), bob + (mv ? Math.sin(2 * ph - .9) * 3.5 * k : 0), sx);
+      const hd = r.ad.R > -100 && r.ad.R < 10 ? r.toParent(...r.hand('R')) : null;
+      rein.setAttribute('d', hd ? `M${hd[0].toFixed(1)} ${hd[1].toFixed(1)} Q${((hd[0] + 168) / 2).toFixed(1)} ${((hd[1] - 228) / 2 + 18).toFixed(1)} 168 -228` : '');
+      return r;
+    };
+    r.place(-8, -182 + 100 * sr, 1, 1); r.arm('R', -50); r.arm('L', -35);
+  }
   return p;
 }
 // ---------- props ----------
@@ -222,7 +255,7 @@ const C = {
 // sound/visual vars
 const BEAT = [], BS = [], BE = [], N = TL.starts.length;
 const STAGE = $('stage');
-function B(i, build) { const g = el('g', {display: 'none'}, STAGE), cam = el('g', {}, g), ui = el('g', {}, g); BEAT[i] = { g, cam, ui, upd: build(cam, ui), focus: [960, 640] }; }
+function B(i, build) { CURB = i; const g = el('g', {display: 'none'}, STAGE), cam = el('g', {}, g), ui = el('g', {}, g); BEAT[i] = { g, cam, ui, upd: build(cam, ui), focus: [960, 640] }; CURB = -1; }
 for (let i = 0; i < N; i++) { BS[i] = i === 0 ? 0 : TL.starts[i] - .1; BE[i] = i === N - 1 ? TL.end : TL.starts[i + 1] - .1; }
 const side = (u, lt) => { /* "side quest" ribbon */ if (!side.g) {} };
 function ribbon(u) { const g = tagG(u, 'SIDE QUEST', 40, { fill: '#ff6a00', stroke: '#1a1a1a', tc: '#fff4e6' }); return lt => show(g, lt, .2, 190, 70, -3); }
@@ -670,8 +703,41 @@ B(28, (g, u) => {
   };
 });
 
+
+// ---------- facial expressions per beat (applied after each beat's update) ----------
+// n neutral, h happy, s sad, f scared, a angry, d determined, o shocked, r relieved, c cold, x dead
+const EX = {
+  0: (lt, e) => { e('yes', 'h'); e('tem', 'h'); },
+  1: (lt, e) => { e('bor', 'h'); e('tem', 'h'); e('yes', 'h'); },
+  2: (lt, e) => { e('yes', 'n'); e('tem', 'n'); e('tat', 'h'); },
+  3: (lt, e) => { e('yes', lt > .8 ? 'h' : 'n'); },
+  4: (lt, e) => { if (lt < 1) e('yes', 's'); e('tem', lt < 1.5 ? 'n' : lt < 2.8 ? 'f' : 's'); },
+  5: (lt, e) => { e('hoe', 's'); e('tem', 's'); e('kha', 'f'); e('tmn', 's'); e('eld', 'n'); e('eld2', 'n'); e('chief', 'n'); },
+  6: (lt, e) => { e('hoe', 's'); e('tem', 's', true); e('kha', 'f', true); e('tmn', 's', true); e('kch', 's', true); },
+  7: (lt, e) => { e('hoe', 's'); e('tem', 'c'); e('kha', 'c'); e('tmn', 'f', true); e('kch', 'f', true); },
+  8: (lt, e) => { e('hoe', 'd'); e('tem', 'd'); e('kha', 'd'); e('tmn', lt < 3 ? 's' : 'n'); e('kch', lt < 3 ? 's' : 'n'); },
+  10: (lt, e) => { e('nomM', 'n'); e('nomW', 's'); },
+  11: (lt, e) => { e('nomM', 'h'); e('fst', 'h'); e('nomW', 'h'); },
+  12: (lt, e) => { e('kidA', 'h'); e('kidB', 'h'); },
+  13: (lt, e) => { e('war', 'h'); e('nomM', 'h'); e('fst', 'h'); },
+  14: (lt, e) => { e('war', lt > 3.4 && lt < 5.2 ? 'n' : 'd'); },
+  15: (lt, e) => { e('hoe', 'd'); const k = lt < 2.2 ? 's' : 'd'; e('tem', k); e('kha', k); e('tmn', k); e('kch', k); },
+  16: (lt, e) => { e('temA', 'd'); e('hoe', 'd'); },
+  17: (lt, e) => { e('tem', 's'); },
+  18: (lt, e) => { e('tem', 'a'); e('kha', 'a'); e('beg', lt > 1.5 ? 'h' : 'a'); },
+  19: (lt, e) => { e('beg', 'f'); e('tem', 'a'); e('kha', 'a'); },
+  20: (lt, e) => { e('hoe', 'a'); e('tem', lt < 3.2 ? 'f' : 'd'); e('kha', 'f'); e('tmn', 'f'); e('kch', 'f'); },
+  21: (lt, e) => { e('eld', 'n'); e('eld2', 'n'); e('srch', 'n'); e('temT', 'd'); },
+  22: (lt, e) => { e('temT', lt < 3.4 ? 'f' : 'a'); e('guard', 'd'); },
+  23: (lt, e) => { e('temT', lt < 2.1 ? 'd' : 'f'); if (lt < 2.3) { e('nomM', 'h'); e('fst', 'h'); e('nomW', 'h'); e('tat', 'h'); e('eld', 'h'); } if (lt < 2.1) e('guard', 'h'); },
+  24: (lt, e) => { e('temT', 'f', true); e('srch', 'd'); },
+  25: (lt, e) => { e('temT', 'f'); e('stg', lt < 1.3 ? 'n' : 'd'); },
+  26: (lt, e) => { e('stg', 'f'); e('srch', 'd'); },
+  28: (lt, e) => { e('stg', 'd', false, 0); e('temT', lt < 2.4 ? 'r' : 'd'); e('chief', 'a'); e('stg', 'h', false, 1); },
+};
 // ---------- per-frame ----------
 window.render = function (t) {
+  window.__T = t;
   for (let i = 0; i < N; i++) {
     const b = BEAT[i], on = t >= BS[i] && t < BE[i] + .25;
     if (!on) { if (b.on !== false) { b.g.setAttribute('display', 'none'); b.on = false; } continue; }
@@ -679,6 +745,7 @@ window.render = function (t) {
     const lt = t - BS[i], d = BE[i] - BS[i], p = clamp(lt / d), s = 1 + .05 * p;
     b.cam.setAttribute('transform', `translate(${b.focus[0]} ${b.focus[1]}) scale(${s}) translate(${-b.focus[0]} ${-b.focus[1]})`);
     b.upd(lt, p, d);
+    if (EX[i]) { if (!b.W) { b.W = {}; (REG[i] || []).forEach(q => (b.W[q.key] = b.W[q.key] || []).push(q)); } EX[i](lt, (k, st, cold, idx) => (b.W[k] || []).forEach((q, j) => { if (idx === undefined || idx === j) q.face(st, cold); })); }
   }
   $('black').setAttribute('opacity', Math.max(1 - lin(t, 0, .5), lin(t, TL.end - 1.0, TL.end)).toFixed(3));
 };
