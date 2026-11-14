@@ -1,0 +1,9 @@
+﻿node_modules/
+models/
+**/out/wide_video.mp4
+**/out/tall_video.mp4
+**/out/audio.wav
+**/frames/
+**/test_frames/
+**/page_*.html
+
