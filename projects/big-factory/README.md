@@ -22,6 +22,8 @@ Everything needed to continue making The Big FACTory videos in Claude Code on yo
 - Never leave the screen "dead": during slow narration, show things happening (example: people walking over Genghis Khan's hidden grave, seen in cross-section).
 - Voice: Kokoro `am_michael`, speed 1.08, quick and not sleepy.
 - **Fixed rule — narration voice:** all narration for every video must use the same voice as the cold open: Kokoro TTS (`kokoro-onnx`), voice `am_michael`, speed 1.08, lang `en-us`. Download the model with `tools/get_models.py` (onnx-community/Kokoro-82M-v1.0-ONNX: `onnx/model.onnx` and `voices/am_michael.bin`) and generate lines with `tools/tts.py`, which trims silence at the start and end of each line. Never use any other TTS engine or voice. If narration changes, re-sync the timeline to the new durations.
+- **Pacing:** pauses between narration lines are 0.85 s (`GAP, LEAD, TAIL = 0.85, 0.9, 2.0` in every chapter's `build_timeline.py`). The owner found 0.35 s too fast.
+- **Length:** the full video should land near 30 minutes. Chapters 6-8 get extra side quests (the channel's signature) to get there.
 - Sound effects must be soft (the user listens with headphones): effects about 8 dB below the voice, gentle wind.
 - Thumbnails can be more detailed than the videos (Ethos style: big title box, date range, map, portrait).
 

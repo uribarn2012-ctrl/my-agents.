@@ -2,7 +2,7 @@
 import json, os
 B = os.path.dirname(os.path.abspath(__file__))
 durs = json.load(open(f'{B}/durs.json'))
-GAP, LEAD, TAIL = 0.35, 0.7, 1.6
+GAP, LEAD, TAIL = 0.85, 0.9, 2.0
 starts, t = [], LEAD
 for d in durs:
     starts.append(round(t, 3)); t += d + GAP
